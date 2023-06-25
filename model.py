@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
@@ -13,7 +13,30 @@ import math
 class GPTNeoConfig:
     hidden_size: int = 768
     embed_dropout: int = 0
-
+    attention_dropout: int = 0
+    resid_dropout: int = 0
+    max_position_embeddings: int = 2048
+    num_heads: int = 12
+    num_layers: int = 12
+    attention_layers: List[str] = (
+        [
+            "global",
+            "local",
+            "global",
+            "local",
+            "global",
+            "local",
+            "global",
+            "local",
+            "global",
+            "local",
+            "global",
+            "local",
+        ],
+    )
+    window_size: int = 256
+    layer_norm_epsilon: float = 1e-5
+    vocab_size: int = 50257
 
 @dataclass
 class CausalLMOutputWithPast:
@@ -22,6 +45,7 @@ class CausalLMOutputWithPast:
     past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
+
 
 class GPTNeoSelfAttention(nn.Module):
     def __init__(self, config: GPTNeoConfig, attention_type) -> None:
@@ -32,7 +56,7 @@ class GPTNeoSelfAttention(nn.Module):
         bias = torch.tril(torch.ones((max_positions, max_positions), dtype=bool)).view(
             1, 1, max_positions, max_positions
         )
-        
+
         # local causal self attention is a sliding window where each token can only attend to the previous
         # window_size tokens. This is implemented by updating the causal mask such that for each token
         # all other tokens are masked except the previous window_size tokens.
@@ -76,18 +100,21 @@ class GPTNeoSelfAttention(nn.Module):
         return tensor.view(new_shape)
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
-
         query = query.to(torch.float32)
         key = key.to(torch.float32)
-        
+
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         query_length, key_length = query.size(-2), key.size(-2)
         # mask to a specific bias within the key value tensor
-        causal_mask = self.bias[:, :, key_length - query_length : key_length, :key_length]
+        causal_mask = self.bias[
+            :, :, key_length - query_length : key_length, :key_length
+        ]
         mask_value = torch.finfo(attn_weights.dtype).min
 
-        mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to(attn_weights.device)
+        mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to(
+            attn_weights.device
+        )
         attn_weights = torch.where(causal_mask, attn_weights, mask_value)
 
         if attention_mask is not None:
@@ -134,7 +161,9 @@ class GPTNeoSelfAttention(nn.Module):
         else:
             present = None
 
-        attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
+        attn_output, attn_weights = self._attn(
+            query, key, value, attention_mask, head_mask
+        )
 
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
         attn_output = self.out_proj(attn_output)
@@ -240,7 +269,7 @@ class GPTNeoForCausalLM:
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def __init__(self, config):
+    def __init__(self, config: GPTNeoConfig):
         super().__init__(config)
         self.transformer = GPTNeoModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
