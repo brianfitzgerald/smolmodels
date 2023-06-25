@@ -152,3 +152,4 @@ cython_debug/
 #.idea/
 
 roleplay_dataset.json
+outputs

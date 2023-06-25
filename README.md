@@ -4,6 +4,12 @@ Minimal reproduction of GPT-NeoX, based on the [Transformers implementation](htt
 
 Used with the existing [TinyStories dataset](https://huggingface.co/datasets/roneneldan/TinyStories/viewer/roneneldan--TinyStories/validation) to train a model that can generate short stories, along with interperetation utilities.
 
+Might need to run
+```
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/
+```
+before starting.
+
 ### Next steps
 
 - [] Fine tune on fantasy dataset

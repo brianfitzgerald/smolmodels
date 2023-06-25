@@ -3,6 +3,7 @@ import evaluate
 import torch
 from peft import LoraConfig, get_peft_model
 from tqdm.auto import tqdm
+import torch.nn as nn
 
 from transformers import (
     DataCollatorWithPadding,
@@ -16,9 +17,9 @@ from transformers import (
     BitsAndBytesConfig,
 )
 from datasets import load_dataset
+
 from utils import get_available_device, download_if_not_present
 from peft import prepare_model_for_kbit_training
-
 
 
 def print_trainable_parameters(model):
@@ -44,24 +45,25 @@ download_if_not_present(
 )
 
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
-tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+tokenizer.pad_token = tokenizer.eos_token
 
-data_collator = DataCollatorWithPadding(tokenizer=tokenizer, return_tensors="pt")
-
-dataset = load_dataset("json", data_files=ds_location)
-print(dataset)
+dataset = load_dataset("json", data_files=ds_location, split="train")
+dataset = dataset.train_test_split(test_size=0.1)
 
 
-def tokenize_step(batch):
-    batch = tokenizer(batch["instruction"], batch["response"])
-    return batch
+def merge_strings(x):
+    merged = x["instruction"] + x["input"] + x["response"]
+    return {"text": merged}
 
 
-tokenized_dataset = dataset.map(
-    tokenize_step,
+dataset = dataset.map(merge_strings)
+dataset = dataset.map(
+    lambda x: tokenizer(x['text'], padding=True),
     batched=True,
+    batch_size=64
 )
-tokenized_dataset.set_format("torch")
+
+dataset = dataset.remove_columns(["instruction", "input", "response", "text"])
 
 config = LoraConfig(
     r=8,
@@ -81,12 +83,13 @@ bnb_config = BitsAndBytesConfig(
 device = get_available_device()
 
 model = GPTNeoForCausalLM.from_pretrained(
-    "roneneldan/TinyStories-Instruct-33M", quantization_config=bnb_config, device_map={"":0}
+    "roneneldan/TinyStories-Instruct-33M",
+    quantization_config=bnb_config,
+    device_map={"": 0},
 )
 
 model.gradient_checkpointing_enable()
 model = prepare_model_for_kbit_training(model)
-print(model)
 model = get_peft_model(model, config)
 num_epochs = 3
 optimizer = AdamW(model.parameters(), lr=5e-5)
@@ -95,24 +98,51 @@ print_trainable_parameters(model)
 
 metric = evaluate.load("glue", "mrpc")
 
-model.train()
-tokenizer.pad_token = tokenizer.eos_token
 
-trainer = Trainer(
-    model=model,
-    train_dataset=tokenized_dataset["train"],
-    args=TrainingArguments(
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=2,
-        max_steps=10,
-        learning_rate=2e-4,
-        fp16=True,
-        logging_steps=1,
-        output_dir="outputs",
-        optim="paged_adamw_8bit",
-    ),
-    data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+collator = DataCollatorWithPadding(tokenizer=tokenizer)
+
+batch_size = 4
+
+train_dataloader = DataLoader(dataset["train"], batch_size=batch_size, collate_fn=collator)
+eval_dataloader = DataLoader(dataset["test"], batch_size=batch_size, collate_fn=collator)
+num_training_steps = num_epochs * len(train_dataloader)
+lr_scheduler = get_scheduler(
+    "linear",
+    optimizer=optimizer,
+    num_warmup_steps=0,
+    num_training_steps=num_training_steps,
 )
-model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
-trainer.train()
+
+loss_fn = nn.CrossEntropyLoss()
+
+progress_bar = tqdm(range(num_training_steps))
+metric = evaluate.load("glue", "mrpc")
+
+model.train()
+
+
+for epoch in range(num_epochs):
+    for batch in train_dataloader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        outputs = model(**batch)
+
+        logits = outputs.loss['logits'].view(-1, 50257)
+        input_ids = batch['input_ids'].view(-1)
+        loss = loss_fn(logits, input_ids)
+        
+        loss.backward()
+
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+        progress_bar.update(1)
+
+    model.eval()
+    for batch in eval_dataloader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = model(**batch)
+
+        logits = outputs.logits
+        predictions = torch.argmax(logits, dim=-1)
+        metric.add_batch(predictions=predictions, references=batch["labels"])
