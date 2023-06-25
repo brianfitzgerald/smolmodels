@@ -1,46 +1,54 @@
-from tokenizers import AutoTokenizer
 from torch.utils.data import DataLoader
 import evaluate
 import torch
 
 from transformers import (
-    GenerationMixin,
-    DataCollatorForLanguageModeling,
+    DataCollatorWithPadding,
+    GPTNeoConfig,
     get_scheduler,
+    AutoTokenizer,
     AdamW,
     GPTNeoForCausalLM,
 )
 from datasets import load_dataset
 from utils import get_available_device
 
+# Script for training the base model
 
 dataset = load_dataset("roneneldan/TinyStories")
 
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
+tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer, mlm=True, mlm_probability=0.15
-)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer, return_tensors="pt")
 
 tokenized_datasets = dataset.map(
-    lambda x: tokenizer(
-        x["text"],
-        truncation=True,
-        return_tensors="pt",
-    ),
+    lambda x: tokenizer(x["text"]),
     batched=True,
 )
-tokenized_datasets = dataset.remove_columns(["text"])
+tokenized_datasets.set_format("torch")
 
 train_dataloader = DataLoader(
-    tokenized_datasets["train"], shuffle=True, batch_size=8, collate_fn=data_collator
+    tokenized_datasets["train"], batch_size=8, collate_fn=data_collator
 )
 eval_dataloader = DataLoader(
     tokenized_datasets["validation"], batch_size=8, collate_fn=data_collator
 )
 
+config = GPTNeoConfig(
+    hidden_size=768,
+    embed_dropout=0,
+    attention_dropout=0,
+    resid_dropout=0,
+    max_position_embeddings=2048,
+    num_heads=12,
+    num_layers=12,
+    attention_types=[[["global", "local"], 6]],
+    window_size=256,
+    layer_norm_epsilon=1e-5,
+)
 
-model = GPTNeoForCausalLM()
+model = GPTNeoForCausalLM(config)
 num_epochs = 3
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
@@ -60,13 +68,13 @@ from tqdm.auto import tqdm
 progress_bar = tqdm(range(num_training_steps))
 metric = evaluate.load("glue", "mrpc")
 
-
 model.train()
 
 for epoch in range(num_epochs):
-    model.train()
+    print("epoch", epoch, train_dataloader)
     for batch in train_dataloader:
         batch = {k: v.to(device) for k, v in batch.items()}
+        print("batch", batch)
         outputs = model(**batch)
         loss = outputs.loss
         loss.backward()

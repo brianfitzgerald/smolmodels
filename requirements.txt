@@ -1,4 +1,6 @@
 torch
-transformers
+git+https://github.com/huggingface/transformers.git
 datasets
 evaluate
+git+https://github.com/huggingface/peft.git
+bitsandbytes
