@@ -75,7 +75,7 @@ class GPTNeoSelfAttention(nn.Module):
         new_shape = tensor.size()[:-2] + (num_heads * attn_head_size,)
         return tensor.view(new_shape)
 
-    def __attn(self, query, key, value, attention_mask=None, head_mask=None):
+    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
 
         query = query.to(torch.float32)
         key = key.to(torch.float32)
