@@ -1,3 +1,4 @@
+from enum import Enum, IntEnum
 from torch.utils.data import DataLoader
 import evaluate
 import torch
@@ -39,31 +40,45 @@ def print_trainable_parameters(model):
 
 ds_location = "./roleplay_dataset.json"
 
-download_if_not_present(
-    ds_location,
-    "https://raw.githubusercontent.com/teknium1/GPTeacher/main/Roleplay/roleplay-simple-deduped-roleplay-instruct.json",
-)
+
+class DatasetChoice(IntEnum):
+    CRD = 1
+    ROLEPLAY = 2
+
+
+ds_choice = DatasetChoice.CRD
 
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
 tokenizer.pad_token = tokenizer.eos_token
 
-dataset = load_dataset("json", data_files=ds_location, split="train")
-dataset = dataset.train_test_split(test_size=0.1)
+if ds_choice == DatasetChoice.ROLEPLAY:
+    download_if_not_present(
+        ds_location,
+        "https://raw.githubusercontent.com/teknium1/GPTeacher/main/Roleplay/roleplay-simple-deduped-roleplay-instruct.json",
+    )
+    dataset = load_dataset("json", data_files=ds_location, split="train")
+    dataset = dataset.train_test_split(test_size=0.1)
+
+    def merge_strings(x):
+        merged = x["instruction"] + x["input"] + x["response"]
+        return {"text": merged}
+
+    dataset = dataset.map(merge_strings)
+    dataset = dataset.map(
+        lambda x: tokenizer(x["text"], padding=True), batched=True, batch_size=64
+    )
+
+    dataset = dataset.remove_columns(["instruction", "input", "response", "text"])
+elif ds_choice == DatasetChoice.CRD:
+    dataset = load_dataset("roborovski/crd-preproc", split="train")
+    dataset = dataset.train_test_split(test_size=0.1)
+    dataset = dataset.map(
+        lambda x: tokenizer(x["text"], truncation=True), batched=True, batch_size=64
+    )
+
+    dataset = dataset.remove_columns(["turn_start", "turn_end", "chunk_id", "chunk", "turns", "text", "alignment_score"])
 
 
-def merge_strings(x):
-    merged = x["instruction"] + x["input"] + x["response"]
-    return {"text": merged}
-
-
-dataset = dataset.map(merge_strings)
-dataset = dataset.map(
-    lambda x: tokenizer(x['text'], padding=True),
-    batched=True,
-    batch_size=64
-)
-
-dataset = dataset.remove_columns(["instruction", "input", "response", "text"])
 
 config = LoraConfig(
     r=8,
@@ -103,8 +118,12 @@ collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
 batch_size = 4
 
-train_dataloader = DataLoader(dataset["train"], batch_size=batch_size, collate_fn=collator)
-eval_dataloader = DataLoader(dataset["test"], batch_size=batch_size, collate_fn=collator)
+train_dataloader = DataLoader(
+    dataset["train"], batch_size=batch_size, collate_fn=collator
+)
+eval_dataloader = DataLoader(
+    dataset["test"], batch_size=batch_size, collate_fn=collator
+)
 num_training_steps = num_epochs * len(train_dataloader)
 lr_scheduler = get_scheduler(
     "linear",
@@ -126,10 +145,10 @@ for epoch in range(num_epochs):
         batch = {k: v.to(device) for k, v in batch.items()}
         outputs = model(**batch)
 
-        logits = outputs.loss['logits'].view(-1, 50257)
-        input_ids = batch['input_ids'].view(-1)
+        logits = outputs.loss["logits"].view(-1, tokenizer.vocab_size)
+        input_ids = batch["input_ids"].view(-1)
         loss = loss_fn(logits, input_ids)
-        
+
         loss.backward()
 
         optimizer.step()
@@ -145,4 +164,3 @@ for epoch in range(num_epochs):
 
         logits = outputs.logits
         predictions = torch.argmax(logits, dim=-1)
-        metric.add_batch(predictions=predictions, references=batch["labels"])
