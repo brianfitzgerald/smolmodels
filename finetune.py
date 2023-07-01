@@ -34,12 +34,12 @@ class DatasetChoice(IntEnum):
 class TrainingArgs:
     ds_choice = DatasetChoice.CRD
     num_epochs = 24
-    batch_size = 16
+    batch_size = 8
     save_interval = 2
     eval_interval = 1
     use_wandb = True
     push_model = False
-    model_name = "smolmodels-finetune-33m-crd-instruct"
+    model_name = "smolmodels-finetune-33m-dialogue"
     use_peft = False
 
 
