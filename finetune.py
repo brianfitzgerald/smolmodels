@@ -8,6 +8,9 @@ from tqdm.auto import tqdm
 import torch.nn as nn
 import wandb
 import os
+import torch.nn.functional as F
+from pprint import pprint
+
 
 from transformers import (
     DataCollatorWithPadding,
@@ -27,6 +30,7 @@ from peft import prepare_model_for_kbit_training
 
 wandb.login()
 wandb_run = wandb.init(project="smolmodels-finetune-mpt")
+
 
 def print_trainable_parameters(model):
     """
@@ -48,15 +52,15 @@ ds_location = "./roleplay_dataset.json"
 
 class DatasetChoice(IntEnum):
     CRD = 1
-    ROLEPLAY = 2
+    ROLEPLAY_INSTRUCT = 2
 
 
 @dataclass
 class TrainingArgs:
-    ds_choice = DatasetChoice.CRD
+    ds_choice = DatasetChoice.ROLEPLAY_INSTRUCT
     num_epochs = 6
-    save_interval = 1
-    eval_interval = 1
+    save_interval = 16
+    eval_interval = 16
 
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -65,7 +69,7 @@ os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
 tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
 tokenizer.pad_token = tokenizer.eos_token
 
-if TrainingArgs.ds_choice == DatasetChoice.ROLEPLAY:
+if TrainingArgs.ds_choice == DatasetChoice.ROLEPLAY_INSTRUCT:
     download_if_not_present(
         ds_location,
         "https://raw.githubusercontent.com/teknium1/GPTeacher/main/Roleplay/roleplay-simple-deduped-roleplay-instruct.json",
@@ -104,7 +108,7 @@ elif TrainingArgs.ds_choice == DatasetChoice.CRD:
 
 
 config = LoraConfig(
-    r=8,
+    r=16,
     lora_alpha=32,
     target_modules=["k_proj", "v_proj", "q_proj"],
     lora_dropout=0.05,
@@ -121,7 +125,7 @@ bnb_config = BitsAndBytesConfig(
 device = get_available_device()
 
 model = GPTNeoForCausalLM.from_pretrained(
-    "roneneldan/TinyStories-33M",
+    "roneneldan/TinyStories-Instruct-33M",
     quantization_config=bnb_config,
     device_map={"": 0},
 )
@@ -135,12 +139,10 @@ wandb.watch(model)
 
 print_trainable_parameters(model)
 
-metric = evaluate.load("glue", "mrpc")
-
 
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-batch_size = 4
+batch_size = 16
 
 train_dataloader = DataLoader(
     dataset["train"], batch_size=batch_size, collate_fn=collator
@@ -163,10 +165,26 @@ loss_fn = nn.CrossEntropyLoss()
 progress_bar = tqdm(range(num_training_steps))
 metric = evaluate.load("glue", "mrpc")
 
+
+def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
+    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), input_ids.view(-1))
+    perp = torch.exp(loss)
+    return perp.item()
+
+
+def get_text_sample(
+    logits: torch.Tensor, input_ids: torch.Tensor, tokenizer: AutoTokenizer
+):
+    decoded_input = tokenizer.decode(input_ids[0])
+    next_token_id = torch.argmax(logits, dim=1).item()
+    decoded_next_token = tokenizer.decode(next_token_id)
+    return decoded_input, decoded_next_token
+
+
 model.train()
 
 for epoch in range(TrainingArgs.num_epochs):
-    for batch in train_dataloader:
+    for j, batch in enumerate(train_dataloader):
         batch = {k: v.to(device) for k, v in batch.items()}
         outputs = model(**batch)
 
@@ -185,11 +203,28 @@ for epoch in range(TrainingArgs.num_epochs):
         optimizer.zero_grad()
         progress_bar.update(1)
 
-    model.eval()
-    for batch in eval_dataloader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-            outputs = model(**batch)
+        if j % TrainingArgs.eval_interval:
+            model.eval()
+            for batch in eval_dataloader:
+                batch = {k: v.to(device) for k, v in batch.items()}
+                with torch.no_grad():
+                    outputs = model(**batch)
+                logits = outputs.loss["logits"].view(-1, tokenizer.vocab_size)
+                input_ids = batch["input_ids"].view(-1)
 
-        logits = outputs.logits
-        predictions = torch.argmax(logits, dim=-1)
+                prompt, generated_text = get_text_sample(logits, input_ids)
+                perplexity_score = get_perplexity(logits, input_ids)
+                log_dict = {
+                    "prompt": prompt,
+                    "generated_text": generated_text,
+                    "perplexity_score": perplexity_score,
+                }
+                pprint(log_dict, index=2)
+                wandb.log(log_dict)
+            model.train()
+
+        if j % TrainingArgs.save_interval:
+            save_file_path = os.path.join(
+                "checkpoints", f"model_epoch_{epoch}_batch_{j}.pt"
+            )
+            model.save(save_file_path)
