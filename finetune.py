@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from enum import Enum, IntEnum
+from enum import IntEnum
 from torch.utils.data import DataLoader
 import evaluate
 import torch
@@ -11,25 +11,41 @@ import os
 import torch.nn.functional as F
 from pprint import pprint
 
+from datasets import load_dataset
+from utils import get_available_device, download_if_not_present
+from peft import prepare_model_for_kbit_training
 
 from transformers import (
     DataCollatorWithPadding,
-    Trainer,
     get_scheduler,
     AutoTokenizer,
     AdamW,
     GPTNeoForCausalLM,
-    DataCollatorForLanguageModeling,
-    TrainingArguments,
     BitsAndBytesConfig,
 )
-from datasets import load_dataset
 
-from utils import get_available_device, download_if_not_present
-from peft import prepare_model_for_kbit_training
 
-wandb.login()
-wandb_run = wandb.init(project="smolmodels-finetune-mpt")
+class DatasetChoice(IntEnum):
+    CRD = 1
+    ROLEPLAY_INSTRUCT = 2
+
+
+@dataclass
+class TrainingArgs:
+    ds_choice = DatasetChoice.CRD
+    num_epochs = 24
+    batch_size = 16
+    save_interval = 2
+    eval_interval = 1
+    use_wandb = True
+    push_model = False
+    model_name = "smolmodels-finetune-33m-crd-instruct"
+    use_peft = False
+
+
+if TrainingArgs.use_wandb:
+    wandb.login()
+    wandb_run = wandb.init(project=TrainingArgs.model_name)
 
 
 def print_trainable_parameters(model):
@@ -48,19 +64,6 @@ def print_trainable_parameters(model):
 
 
 ds_location = "./roleplay_dataset.json"
-
-
-class DatasetChoice(IntEnum):
-    CRD = 1
-    ROLEPLAY_INSTRUCT = 2
-
-
-@dataclass
-class TrainingArgs:
-    ds_choice = DatasetChoice.ROLEPLAY_INSTRUCT
-    num_epochs = 6
-    save_interval = 16
-    eval_interval = 16
 
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -108,9 +111,9 @@ elif TrainingArgs.ds_choice == DatasetChoice.CRD:
 
 
 config = LoraConfig(
-    r=16,
+    r=32,
     lora_alpha=32,
-    target_modules=["k_proj", "v_proj", "q_proj"],
+    target_modules=["k_proj", "v_proj", "q_proj", "xxx"],
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
@@ -124,7 +127,7 @@ bnb_config = BitsAndBytesConfig(
 
 device = get_available_device()
 
-model = GPTNeoForCausalLM.from_pretrained(
+model: GPTNeoForCausalLM = GPTNeoForCausalLM.from_pretrained(
     "roneneldan/TinyStories-Instruct-33M",
     quantization_config=bnb_config,
     device_map={"": 0},
@@ -132,26 +135,28 @@ model = GPTNeoForCausalLM.from_pretrained(
 
 model.gradient_checkpointing_enable()
 model = prepare_model_for_kbit_training(model)
-model = get_peft_model(model, config)
+if TrainingArgs.use_peft:
+    model = get_peft_model(model, config)
+    print_trainable_parameters(model)
+
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
-wandb.watch(model)
+if TrainingArgs.use_wandb:
+    wandb.watch(model)
 
-print_trainable_parameters(model)
 
 
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-batch_size = 16
 
 train_dataloader = DataLoader(
-    dataset["train"], batch_size=batch_size, collate_fn=collator
+    dataset["train"], batch_size=TrainingArgs.batch_size, collate_fn=collator
 )
 eval_dataloader = DataLoader(
-    dataset["test"], batch_size=batch_size, collate_fn=collator
+    dataset["test"], batch_size=TrainingArgs.batch_size, collate_fn=collator
 )
 
-num_training_steps = TrainingArgs.num_epochs * len(train_dataloader)
+num_training_steps = len(train_dataloader) * TrainingArgs.num_epochs
 
 lr_scheduler = get_scheduler(
     "linear",
@@ -162,7 +167,6 @@ lr_scheduler = get_scheduler(
 
 loss_fn = nn.CrossEntropyLoss()
 
-progress_bar = tqdm(range(num_training_steps))
 metric = evaluate.load("glue", "mrpc")
 
 
@@ -175,15 +179,27 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
 def get_text_sample(
     logits: torch.Tensor, input_ids: torch.Tensor, tokenizer: AutoTokenizer
 ):
-    decoded_input = tokenizer.decode(input_ids[0])
-    next_token_id = torch.argmax(logits, dim=1).item()
-    decoded_next_token = tokenizer.decode(next_token_id)
-    return decoded_input, decoded_next_token
+    decoded_input = tokenizer.batch_decode(input_ids)
+    sample_batchsize, seq_length, _ = logits.size()
+    decoded_texts = []
+
+    for i in range(sample_batchsize):
+        decoded_tokens = []
+        for j in range(seq_length):
+            token_id = torch.argmax(logits[i, j]).item()
+            token = tokenizer.decode([token_id])
+            decoded_tokens.append(token)
+
+        decoded_text = tokenizer.convert_tokens_to_string(decoded_tokens)
+        decoded_texts.append(decoded_text)
+
+    return decoded_input, decoded_texts
 
 
 model.train()
 
 for epoch in range(TrainingArgs.num_epochs):
+    progress_bar = tqdm(range(len(train_dataloader)))
     for j, batch in enumerate(train_dataloader):
         batch = {k: v.to(device) for k, v in batch.items()}
         outputs = model(**batch)
@@ -196,35 +212,40 @@ for epoch in range(TrainingArgs.num_epochs):
 
         loss_val = loss.item()
 
-        wandb.log({"loss": loss})
+        if TrainingArgs.use_wandb:
+            wandb.log({"loss": loss})
 
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
         progress_bar.update(1)
 
-        if j % TrainingArgs.eval_interval:
-            model.eval()
-            for batch in eval_dataloader:
-                batch = {k: v.to(device) for k, v in batch.items()}
-                with torch.no_grad():
-                    outputs = model(**batch)
-                logits = outputs.loss["logits"].view(-1, tokenizer.vocab_size)
-                input_ids = batch["input_ids"].view(-1)
+    if j % TrainingArgs.eval_interval == 0:
+        model.eval()
+        for batch in eval_dataloader:
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with torch.no_grad():
+                outputs = model(**batch)
+            logits = outputs.loss["logits"]
+            input_ids = batch["input_ids"]
 
-                prompt, generated_text = get_text_sample(logits, input_ids)
-                perplexity_score = get_perplexity(logits, input_ids)
-                log_dict = {
-                    "prompt": prompt,
-                    "generated_text": generated_text,
-                    "perplexity_score": perplexity_score,
-                }
-                pprint(log_dict, index=2)
+            prompt, generated_text = get_text_sample(logits, input_ids, tokenizer)
+            perplexity_score = get_perplexity(logits, input_ids)
+            log_dict = {
+                "prompt": prompt,
+                "generated_text": generated_text,
+                "perplexity_score": perplexity_score,
+            }
+            pprint(log_dict, indent=2)
+            if TrainingArgs.use_wandb:
                 wandb.log(log_dict)
-            model.train()
+        model.train()
 
-        if j % TrainingArgs.save_interval:
-            save_file_path = os.path.join(
-                "checkpoints", f"model_epoch_{epoch}_batch_{j}.pt"
-            )
-            model.save(save_file_path)
+    if j % TrainingArgs.save_interval == 0:
+        save_file_path = os.path.join(
+            "checkpoints", f"model_epoch_{epoch}_batch_{j}"
+        )
+        if TrainingArgs.use_peft:
+            model.save_pretrained(save_file_path, safe_serialization=True)
+        if TrainingArgs.push_model:
+            model.push_to_hub(TrainingArgs.model_name)
