@@ -1,0 +1,38 @@
+{
+    "os": "Linux-5.15.0-67-generic-x86_64-with-glibc2.29",
+    "python": "3.8.10",
+    "heartbeatAt": "2023-07-01T18:59:43.658548",
+    "startedAt": "2023-07-01T18:59:43.206106",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "finetune.py",
+    "codePath": "finetune.py",
+    "git": {
+        "remote": "git@github.com:brianfitzgerald/smolmodels.git",
+        "commit": "688b482e0675f2ffaa4aff8b7c830aa0b2d4a41c"
+    },
+    "email": "cooldude242@gmail.com",
+    "root": "/home/ubuntu/smolmodels",
+    "host": "152-70-137-12",
+    "username": "ubuntu",
+    "executable": "/usr/bin/python",
+    "cpu_count": 30,
+    "cpu_count_logical": 30,
+    "disk": {
+        "total": 496.0301856994629,
+        "used": 70.00052261352539
+    },
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA A100-SXM4-40GB",
+            "memory_total": 42949672960
+        }
+    ],
+    "memory": {
+        "total": 196.58135223388672
+    }
+}
