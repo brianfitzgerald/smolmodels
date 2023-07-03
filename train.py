@@ -1,5 +1,7 @@
+import copy
 from enum import IntEnum
 from pprint import pprint
+from typing import Dict, Sequence
 from torch.utils.data import DataLoader
 import evaluate
 import torch
@@ -9,8 +11,12 @@ import torch.nn.functional as F
 import os
 import torch.nn as nn
 
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
+
 from transformers import (
     GPTNeoConfig,
+    PreTrainedTokenizer,
     get_scheduler,
     AutoTokenizer,
     AdamW,
@@ -21,9 +27,12 @@ from utils import *
 from tqdm.auto import tqdm
 import wandb
 
+IGNORE_INDEX = -100
 
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
+PROMPT_DICT = {
+    "prompt_input": ("### Input:\n{start}\n\n### Code:\n{code}\n\n### Output:"),
+    "prompt_no_input": ("### Input:\n{start}\n\n### Output:"),
+}
 
 
 @dataclass
@@ -38,6 +47,8 @@ class TrainingArgs:
     push_model = False
     model_name = "smolmodels-finetune-33m-state-changes"
     use_peft = False
+    seq_max_length = 80
+    max_eval_batches = 5
 
 
 if TrainingArgs.use_wandb:
@@ -79,53 +90,61 @@ if TrainingArgs.task == Task.TINY_STORIES:
     tokenize_fn = lambda x: tokenizer(x["text"])
 
 elif TrainingArgs.task == Task.STATE_CHANGES:
-    dataset = load_dataset("Fraser/python-state-changes", split="train", streaming=True)
+    dataset = load_dataset(
+        "Fraser/python-state-changes", split="train", data_dir="mini", streaming=True
+    )
     tokenizer = AutoTokenizer.from_pretrained("Salesforce/codet5-base")
 
-    def tokenize_state_changes(batch: dict):
-        concatted_batch = []
-        for i in range(len(batch["start"])):
-            concatted = (
-                batch["start"][i]
-                + tokenizer.sep_token
-                + batch["code"][i]
-                + tokenizer.sep_token
-                + batch["end"][i]
-                + tokenizer.sep_token
-            )
-            concatted_batch.append(concatted)
+    def format_state_changes(input_dict: dict):
+        template = (
+            PROMPT_DICT["prompt_input"]
+            if input_dict.get("code", "") != ""
+            else PROMPT_DICT["prompt_no_input"]
+        )
+        formatted_prompt = template.format_map(input_dict)
+        output = f"{input_dict['end']}{tokenizer.eos_token}"
+        composite = f"{formatted_prompt}{output}"
+        return {"prompt": composite}
 
+    def tokenize_state_changes(batch: dict) -> Dict:
         tokenized = tokenizer(
-            concatted_batch,
-            padding="max_length",
-            max_length=80,
-            truncation=True,
+            batch["prompt"],
             return_tensors="pt",
+            padding="longest",
+            max_length=TrainingArgs.seq_max_length,
+            truncation=True,
         )
         return tokenized
 
     tokenize_fn = tokenize_state_changes
+    dataset = dataset.map(format_state_changes, remove_columns=["start", "code", "end"])
 
 
-seed, buffer_size = 42, 10_000
+seed, buffer_size = 42, 100_000
 dataset = dataset.shuffle(seed, buffer_size=buffer_size)
-
-# print(next(iter(dataset)))
 
 dataset = dataset.with_format("torch")
 dataset = dataset.map(
-    tokenize_fn, batched=True, remove_columns=["start", "code", "end"]
+    tokenize_fn,
+    batched=True,
+    batch_size=TrainingArgs.batch_size,
+    remove_columns=["prompt"]
 )
 
-train_dataloader = DataLoader(dataset, batch_size=TrainingArgs.batch_size)
-eval_dataloader = DataLoader(dataset, batch_size=TrainingArgs.batch_size)
+split_idx = int(buffer_size * 0.99)
+train_dataset = dataset.take(split_idx)
+eval_dataset = dataset.skip(split_idx)
+
+train_dataloader = DataLoader(train_dataset, batch_size=TrainingArgs.batch_size)
+eval_dataloader = DataLoader(eval_dataset, batch_size=TrainingArgs.batch_size)
+
 
 config = GPTNeoConfig(
     hidden_size=768,
     embed_dropout=0,
     attention_dropout=0,
     resid_dropout=0,
-    max_position_embeddings=2048,
+    max_position_embeddings=1024,
     num_heads=12,
     num_layers=6,
     attention_types=[[["global", "local"], 3]],
@@ -134,7 +153,7 @@ config = GPTNeoConfig(
 )
 
 model = GPTNeoForCausalLM(config)
-model.generation_config.max_new_tokens = 80
+model.generation_config.max_new_tokens = TrainingArgs.seq_max_length
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
 if TrainingArgs.use_wandb:
@@ -187,19 +206,19 @@ for epoch in range(TrainingArgs.num_epochs):
             if TrainingArgs.push_model:
                 model.push_to_hub(TrainingArgs.model_name)
 
-    model.eval()
-    print("Running eval..")
-    for batch in eval_dataloader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-            outputs = model(**batch)
+    # model.eval()
+    # print("Running eval..")
+    # for i, batch in enumerate(eval_dataloader):
+    #     batch = {k: v.to(device) for k, v in batch.items()}
+    #     with torch.no_grad():
+    #         outputs = model(**batch)
 
-        logits, input_ids = get_model_output(outputs, batch)
-        perplexity_score = get_perplexity(logits, input_ids)
-        log_dict = {
-            "perplexity": perplexity_score,
-        }
-        pprint(log_dict, indent=2)
-        if TrainingArgs.use_wandb:
-            wandb.log(log_dict)
-    model.train()
+    #     logits, input_ids = get_model_output(outputs, batch)
+    #     perplexity_score = get_perplexity(logits, input_ids)
+    #     log_dict = {
+    #         "perplexity": perplexity_score,
+    #     }
+    #     pprint(log_dict, indent=2)
+    #     if TrainingArgs.use_wandb:
+    #         wandb.log(log_dict)
+    # model.train()
