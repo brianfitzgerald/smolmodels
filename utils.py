@@ -51,20 +51,6 @@ class Task(IntEnum):
     ROLEPLAY_INSTRUCT = 4
 
 
-@dataclass
-class TrainingArgs:
-    task = Task.STATE_CHANGES
-    num_epochs = 6
-    batch_size = 32
-    eval_interval_epoch = 1
-    save_interval = 100
-    eval_interval_batch = 50
-    use_wandb = True
-    push_model = False
-    model_name = "smolmodels-finetune-33m-state-changes"
-    use_peft = False
-
-
 def get_model_output(outputs, batch):
     logits = outputs["logits"]
     batch_size, seq_length, num_classes = logits.shape
@@ -82,13 +68,10 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
 def get_text_sample(
     logits: torch.Tensor, input_ids: torch.Tensor, tokenizer: AutoTokenizer
 ):
-    print(input_ids.shape, logits.shape)
     # get first batch item
     prompts = tokenizer.decode(input_ids)
-    pred = torch.argmax(logits, dim=0)
-    completions = tokenizer.decode(pred, skip_special_tokens=True)
-    print(prompts)
-    print(completions)
+    pred = torch.argmax(logits, dim=1)
+    completions = tokenizer.decode(pred)
 
     log_dict = {"prompts": prompts, "completions": completions}
     return log_dict

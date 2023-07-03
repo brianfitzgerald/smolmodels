@@ -10,7 +10,6 @@ import os
 import torch.nn as nn
 
 from transformers import (
-    DataCollatorForLanguageModeling,
     GPTNeoConfig,
     get_scheduler,
     AutoTokenizer,
@@ -25,6 +24,20 @@ import wandb
 
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
+
+
+@dataclass
+class TrainingArgs:
+    task = Task.STATE_CHANGES
+    num_epochs = 6
+    batch_size = 48
+    eval_interval_epoch = 1
+    save_interval = 1000
+    eval_interval_batch = 500
+    use_wandb = False
+    push_model = False
+    model_name = "smolmodels-finetune-33m-state-changes"
+    use_peft = False
 
 
 if TrainingArgs.use_wandb:
@@ -66,7 +79,7 @@ if TrainingArgs.task == Task.TINY_STORIES:
     tokenize_fn = lambda x: tokenizer(x["text"])
 
 elif TrainingArgs.task == Task.STATE_CHANGES:
-    dataset = load_dataset("Fraser/python-state-changes")
+    dataset = load_dataset("Fraser/python-state-changes", split="train", streaming=True)
     tokenizer = AutoTokenizer.from_pretrained("Salesforce/codet5-base")
 
     def tokenize_state_changes(batch: dict):
@@ -83,26 +96,29 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
             concatted_batch.append(concatted)
 
         tokenized = tokenizer(
-            concatted_batch, padding="max_length", max_length=280, truncation=True, return_tensors="pt"
+            concatted_batch,
+            padding="max_length",
+            max_length=80,
+            truncation=True,
+            return_tensors="pt",
         )
         return tokenized
 
     tokenize_fn = tokenize_state_changes
 
-tokenized_dataset = dataset.map(
-    tokenize_fn,
-    batched=True,
-)
-tokenized_dataset = tokenized_dataset.remove_columns(["start", "code", "end"])
-tokenized_dataset.set_format("torch")
-tokenized_dataset = tokenized_dataset["train"].train_test_split(test_size=0.1)
 
-train_dataloader = DataLoader(
-    tokenized_dataset["train"], batch_size=TrainingArgs.batch_size
+seed, buffer_size = 42, 10_000
+dataset = dataset.shuffle(seed, buffer_size=buffer_size)
+
+# print(next(iter(dataset)))
+
+dataset = dataset.with_format("torch")
+dataset = dataset.map(
+    tokenize_fn, batched=True, remove_columns=["start", "code", "end"]
 )
-eval_dataloader = DataLoader(
-    tokenized_dataset["test"], batch_size=TrainingArgs.batch_size
-)
+
+train_dataloader = DataLoader(dataset, batch_size=TrainingArgs.batch_size)
+eval_dataloader = DataLoader(dataset, batch_size=TrainingArgs.batch_size)
 
 config = GPTNeoConfig(
     hidden_size=768,
@@ -111,19 +127,20 @@ config = GPTNeoConfig(
     resid_dropout=0,
     max_position_embeddings=2048,
     num_heads=12,
-    num_layers=12,
-    attention_types=[[["global", "local"], 6]],
+    num_layers=6,
+    attention_types=[[["global", "local"], 3]],
     window_size=256,
     layer_norm_epsilon=1e-5,
 )
 
 model = GPTNeoForCausalLM(config)
+model.generation_config.max_new_tokens = 80
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
 if TrainingArgs.use_wandb:
     wandb.watch(model)
 
-num_training_steps = TrainingArgs.num_epochs * len(train_dataloader)
+num_training_steps = TrainingArgs.num_epochs * buffer_size
 lr_scheduler = get_scheduler(
     "linear",
     optimizer=optimizer,
@@ -157,15 +174,16 @@ for epoch in range(TrainingArgs.num_epochs):
         progress_bar.update(1)
 
         if j % TrainingArgs.eval_interval_batch == 0:
-            print("get sample")
             log_dict = get_text_sample(logits, input_ids, tokenizer)
-            # pprint(log_dict, indent=2)
+            pprint(log_dict, indent=2)
             if TrainingArgs.use_wandb:
                 wandb.log(log_dict)
 
         if j % TrainingArgs.save_interval == 0:
-            save_file_path = os.path.join("checkpoints", f"model_epoch_{epoch}_batch_{j}")
-            model.save(save_file_path, safe_serialization=True)
+            save_file_path = os.path.join(
+                "checkpoints", f"model_epoch_{epoch}_batch_{j}"
+            )
+            model.save_pretrained(save_file_path, safe_serialization=True)
             if TrainingArgs.push_model:
                 model.push_to_hub(TrainingArgs.model_name)
 
