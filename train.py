@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from evaluate import load
 import torch.nn.functional as F
 import os
+import torch.nn as nn
 
 from transformers import (
     DataCollatorForLanguageModeling,
@@ -22,20 +23,8 @@ from tqdm.auto import tqdm
 import wandb
 
 
-class Task(IntEnum):
-    TINY_STORIES = 1
-    STATE_CHANGES = 2
-
-
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
-
-
-@dataclass
-class TrainingArgs:
-    task = Task.STATE_CHANGES
-    use_wandb = False
-    model_name = "smolmodels-finetune-33m-crd-instruct"
 
 
 if TrainingArgs.use_wandb:
@@ -93,9 +82,7 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
             )
             concatted_batch.append(concatted)
 
-        tokenized = tokenizer(
-            concatted_batch, padding="max_length", truncation=True, return_tensors="pt"
-        )
+        tokenized = tokenizer(concatted_batch, padding=True, return_tensors="pt")
         return tokenized
 
     tokenize_fn = tokenize_state_changes
@@ -108,8 +95,12 @@ tokenized_dataset = tokenized_dataset.remove_columns(["start", "code", "end"])
 tokenized_dataset.set_format("torch")
 tokenized_dataset = tokenized_dataset["train"].train_test_split(test_size=0.1)
 
-train_dataloader = DataLoader(tokenized_dataset["train"], batch_size=8)
-eval_dataloader = DataLoader(tokenized_dataset["test"], batch_size=8)
+train_dataloader = DataLoader(
+    tokenized_dataset["train"], batch_size=TrainingArgs.batch_size
+)
+eval_dataloader = DataLoader(
+    tokenized_dataset["test"], batch_size=TrainingArgs.batch_size
+)
 
 config = GPTNeoConfig(
     hidden_size=768,
@@ -130,8 +121,7 @@ optimizer = AdamW(model.parameters(), lr=5e-5)
 if TrainingArgs.use_wandb:
     wandb.watch(model)
 
-num_epochs = 3
-num_training_steps = num_epochs * len(train_dataloader)
+num_training_steps = TrainingArgs.num_epochs * len(train_dataloader)
 lr_scheduler = get_scheduler(
     "linear",
     optimizer=optimizer,
@@ -142,50 +132,34 @@ lr_scheduler = get_scheduler(
 device = get_available_device()
 model.to(device)
 
+loss_fn = nn.CrossEntropyLoss()
 
 progress_bar = tqdm(range(num_training_steps))
 
 model.train()
 
-for epoch in range(num_epochs):
-    print("epoch", epoch, train_dataloader)
+for epoch in range(TrainingArgs.num_epochs):
     for j, batch in enumerate(train_dataloader):
-        print(batch)
         batch = {k: v.to(device) for k, v in batch.items()}
         outputs = model(**batch)
-        loss = outputs.loss
+        logits, input_ids = get_model_output(outputs, batch)
+        loss = loss_fn(logits, input_ids)
         loss.backward()
 
-        wandb.log({"loss": loss.item()})
+        if TrainingArgs.use_wandb:
+            wandb.log({"loss": loss.item()})
 
         optimizer.step()
         lr_scheduler.step()
         optimizer.zero_grad()
         progress_bar.update(1)
 
-    model.eval()
-    for batch in eval_dataloader:
-        print(batch)
-        batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.no_grad():
-            outputs = model(**batch)
-
-        logits = outputs.logits
-        input_ids = batch["input_ids"]
-        predictions = torch.argmax(logits, dim=-1)
-
-        wandb.log({"loss": loss.item()})
-
-        prompt, generated_text = get_text_sample(logits, input_ids, tokenizer)
-        perplexity_score = get_perplexity(logits, input_ids)
-        log_dict = {
-            "prompt": prompt,
-            "generated_text": generated_text,
-            "perplexity_score": perplexity_score,
-        }
-        pprint(log_dict, indent=2)
-        if TrainingArgs.use_wandb:
-            wandb.log(log_dict)
+        if j % TrainingArgs.eval_interval_batch == 0:
+            print("get sample")
+            log_dict = get_text_sample(logits, input_ids, tokenizer)
+            # pprint(log_dict, indent=2)
+            if TrainingArgs.use_wandb:
+                wandb.log(log_dict)
 
     if j % TrainingArgs.save_interval == 0:
         save_file_path = os.path.join("checkpoints", f"model_epoch_{epoch}_batch_{j}")
@@ -193,3 +167,20 @@ for epoch in range(num_epochs):
             model.save_pretrained(save_file_path, safe_serialization=True)
         if TrainingArgs.push_model:
             model.push_to_hub(TrainingArgs.model_name)
+
+    model.eval()
+    print("Running eval..")
+    for batch in eval_dataloader:
+        batch = {k: v.to(device) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = model(**batch)
+
+        logits, input_ids = get_model_output(outputs, batch)
+        perplexity_score = get_perplexity(logits, input_ids)
+        log_dict = {
+            "perplexity": perplexity_score,
+        }
+        pprint(log_dict, indent=2)
+        if TrainingArgs.use_wandb:
+            wandb.log(log_dict)
+    model.train()

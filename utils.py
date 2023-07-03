@@ -6,6 +6,7 @@ import platform
 import requests
 import torch.nn.functional as F
 from transformers import AutoTokenizer
+from pprint import pprint
 
 
 def get_available_device():
@@ -43,22 +44,33 @@ def download_if_not_present(file_path: str, url: str):
             print("Failed to download the file.")
 
 
-class DatasetChoice(IntEnum):
-    CRD = 1
-    ROLEPLAY_INSTRUCT = 2
+class Task(IntEnum):
+    TINY_STORIES = 1
+    STATE_CHANGES = 2
+    CRD = 3
+    ROLEPLAY_INSTRUCT = 4
 
 
 @dataclass
 class TrainingArgs:
-    ds_choice = DatasetChoice.CRD
-    num_epochs = 24
-    batch_size = 8
+    task = Task.STATE_CHANGES
+    num_epochs = 6
+    batch_size = 32
     save_interval = 2
-    eval_interval = 1
-    use_wandb = True
+    eval_interval_epoch = 1
+    eval_interval_batch = 50
+    use_wandb = False
     push_model = False
-    model_name = "smolmodels-finetune-33m-dialogue"
+    model_name = "smolmodels-finetune-33m-state-changes"
     use_peft = False
+
+
+def get_model_output(outputs, batch):
+    logits = outputs["logits"]
+    batch_size, seq_length, num_classes = logits.shape
+    logits = logits.view(batch_size * seq_length, num_classes)
+    input_ids = batch["input_ids"].view(-1)
+    return logits, input_ids
 
 
 def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
@@ -70,21 +82,16 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
 def get_text_sample(
     logits: torch.Tensor, input_ids: torch.Tensor, tokenizer: AutoTokenizer
 ):
-    decoded_input = tokenizer.batch_decode(input_ids)
-    sample_batchsize, seq_length, _ = logits.size()
-    decoded_texts = []
+    print(input_ids.shape, logits.shape)
+    # get first batch item
+    prompts = tokenizer.decode(input_ids)
+    pred = torch.argmax(logits, dim=0)
+    completions = tokenizer.decode(pred, skip_special_tokens=True)
+    print(prompts)
+    print(completions)
 
-    for i in range(sample_batchsize):
-        decoded_tokens = []
-        for j in range(seq_length):
-            token_id = torch.argmax(logits[i, j]).item()
-            token = tokenizer.decode([token_id])
-            decoded_tokens.append(token)
-
-        decoded_text = tokenizer.convert_tokens_to_string(decoded_tokens)
-        decoded_texts.append(decoded_text)
-
-    return decoded_input, decoded_texts
+    log_dict = {"prompts": prompts, "completions": completions}
+    return log_dict
 
 
 def print_trainable_parameters(model):
