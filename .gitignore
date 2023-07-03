@@ -153,5 +153,5 @@ cython_debug/
 
 roleplay_dataset.json
 outputs/
-wandb/**/*
+wandb/
 checkpoints/
