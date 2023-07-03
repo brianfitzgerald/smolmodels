@@ -82,7 +82,9 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
             )
             concatted_batch.append(concatted)
 
-        tokenized = tokenizer(concatted_batch, padding=True, return_tensors="pt")
+        tokenized = tokenizer(
+            concatted_batch, padding="max_length", max_length=280, truncation=True, return_tensors="pt"
+        )
         return tokenized
 
     tokenize_fn = tokenize_state_changes
@@ -161,12 +163,11 @@ for epoch in range(TrainingArgs.num_epochs):
             if TrainingArgs.use_wandb:
                 wandb.log(log_dict)
 
-    if j % TrainingArgs.save_interval == 0:
-        save_file_path = os.path.join("checkpoints", f"model_epoch_{epoch}_batch_{j}")
-        if TrainingArgs.use_peft:
-            model.save_pretrained(save_file_path, safe_serialization=True)
-        if TrainingArgs.push_model:
-            model.push_to_hub(TrainingArgs.model_name)
+        if j % TrainingArgs.save_interval == 0:
+            save_file_path = os.path.join("checkpoints", f"model_epoch_{epoch}_batch_{j}")
+            model.save(save_file_path, safe_serialization=True)
+            if TrainingArgs.push_model:
+                model.push_to_hub(TrainingArgs.model_name)
 
     model.eval()
     print("Running eval..")

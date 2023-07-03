@@ -56,10 +56,10 @@ class TrainingArgs:
     task = Task.STATE_CHANGES
     num_epochs = 6
     batch_size = 32
-    save_interval = 2
     eval_interval_epoch = 1
+    save_interval = 100
     eval_interval_batch = 50
-    use_wandb = False
+    use_wandb = True
     push_model = False
     model_name = "smolmodels-finetune-33m-state-changes"
     use_peft = False
