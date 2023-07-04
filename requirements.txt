@@ -7,3 +7,4 @@ git+https://github.com/huggingface/peft.git
 bitsandbytes
 wandb
 protobuf
+icecream

@@ -12,6 +12,9 @@ os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
 
 from transformers import (
     GPTNeoConfig,
+    DataCollatorForLanguageModeling,
+    TrainingArguments,
+    Trainer,
     get_scheduler,
     AutoTokenizer,
     AdamW,
@@ -120,6 +123,7 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
             max_length=TrainingArgs.seq_max_length,
             truncation=True,
         )
+        tokenized["labels"] = tokenized["input_ids"]
         return tokenized
 
     train_dataset = train_dataset.map(
@@ -184,7 +188,6 @@ lr_scheduler = get_scheduler(
 )
 
 device = get_available_device()
-print(device)
 model = model.to(device)
 
 loss_fn = nn.CrossEntropyLoss()
@@ -204,10 +207,8 @@ def run_eval():
 
         logits, input_ids = get_model_output(outputs, batch, device)
         log_dict = get_text_sample(logits, tokenizer, input_ids)
-        print(logits.device, input_ids.device)
         perplexity_score = get_perplexity(logits, input_ids)
         log_dict["perplexity"] = perplexity_score
-        print(log_dict)
         if TrainingArgs.use_wandb:
             wandb.log(log_dict)
     model.train()
@@ -216,15 +217,13 @@ for epoch in range(TrainingArgs.num_epochs):
     for j, batch in enumerate(train_dataloader):
         attention_mask = batch["attention_mask"].to(device)
         input_ids = batch["input_ids"].to(device)
-        outputs = model(attention_mask=attention_mask, input_ids=input_ids)
-        logits, input_ids = get_model_output(outputs, batch, device)
-        input_ids = input_ids.to(device)
-        loss = loss_fn(logits, input_ids)
+        outputs = model(attention_mask=attention_mask, input_ids=input_ids, labels=input_ids)
+        loss = outputs.loss
         loss.backward()
 
         progress_bar.set_postfix_str(round(loss.item(), 3))
         if TrainingArgs.use_wandb:
-            wandb.log({"loss": loss.item()})
+            wandb.log({"loss": outputs.loss.item()})
 
         optimizer.step()
         lr_scheduler.step()

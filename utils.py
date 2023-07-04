@@ -7,6 +7,7 @@ import requests
 import torch.nn.functional as F
 from transformers import AutoTokenizer
 from pprint import pprint
+from icecream import ic
 
 
 def get_available_device():
@@ -71,8 +72,11 @@ def get_text_sample(
     input_ids: torch.Tensor = None,
 ):
     print("eval shapes", logits.shape, input_ids.shape)
-    probs = torch.softmax(logits, dim=-1)
+    print('logits\n', logits)
+    probs = F.softmax(logits, dim=1)
+    print('probs\n', probs)
     token_index = torch.argmax(probs, dim=1)
+    print('token idx\n', token_index, 'end tok')
     completions = tokenizer.decode(token_index)
 
     log_dict = {"completions": completions}
