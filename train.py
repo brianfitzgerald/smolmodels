@@ -1,12 +1,8 @@
-import copy
-from enum import IntEnum
 from pprint import pprint
-from typing import Dict, Sequence
+from typing import Dict
 from torch.utils.data import DataLoader
-import evaluate
 import torch
 from dataclasses import dataclass
-from evaluate import load
 import torch.nn.functional as F
 import os
 import torch.nn as nn
@@ -16,7 +12,6 @@ os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
 
 from transformers import (
     GPTNeoConfig,
-    PreTrainedTokenizer,
     get_scheduler,
     AutoTokenizer,
     AdamW,
@@ -104,7 +99,7 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
         formatted_prompt = template.format_map(input_dict)
         output = f"{input_dict['end']}{tokenizer.eos_token}"
         composite = f"{formatted_prompt}{output}"
-        return {"prompt": composite}
+        return {"prompt": composite, "input_length": len(formatted_prompt)}
 
     def tokenize_state_changes(batch: dict) -> Dict:
         tokenized = tokenizer(
@@ -128,7 +123,7 @@ dataset = dataset.map(
     tokenize_fn,
     batched=True,
     batch_size=TrainingArgs.batch_size,
-    remove_columns=["prompt"]
+    remove_columns=["prompt"],
 )
 
 split_idx = int(buffer_size * 0.99)
@@ -168,7 +163,8 @@ lr_scheduler = get_scheduler(
 )
 
 device = get_available_device()
-model.to(device)
+print(device)
+model = model.to(device)
 
 loss_fn = nn.CrossEntropyLoss()
 
@@ -178,12 +174,15 @@ model.train()
 
 for epoch in range(TrainingArgs.num_epochs):
     for j, batch in enumerate(train_dataloader):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        outputs = model(**batch)
+        attention_mask = batch["attention_mask"].to(device)
+        input_ids = batch["input_ids"].to(device)
+        outputs = model(attention_mask=attention_mask, input_ids=input_ids)
         logits, input_ids = get_model_output(outputs, batch)
+        input_ids = input_ids.to(device)
         loss = loss_fn(logits, input_ids)
         loss.backward()
 
+        progress_bar.set_postfix_str(round(loss.item(), 3))
         if TrainingArgs.use_wandb:
             wandb.log({"loss": loss.item()})
 
@@ -193,8 +192,7 @@ for epoch in range(TrainingArgs.num_epochs):
         progress_bar.update(1)
 
         if j % TrainingArgs.eval_interval_batch == 0:
-            log_dict = get_text_sample(logits, input_ids, tokenizer)
-            pprint(log_dict, indent=2)
+            log_dict = get_text_sample(logits, tokenizer, input_ids)
             if TrainingArgs.use_wandb:
                 wandb.log(log_dict)
 

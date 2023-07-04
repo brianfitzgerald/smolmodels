@@ -66,14 +66,19 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
 
 
 def get_text_sample(
-    logits: torch.Tensor, input_ids: torch.Tensor, tokenizer: AutoTokenizer
+    logits: torch.Tensor,
+    tokenizer: AutoTokenizer,
+    input_ids: torch.Tensor = None,
 ):
     # get first batch item
-    prompts = tokenizer.decode(input_ids)
-    pred = torch.argmax(logits, dim=1)
-    completions = tokenizer.decode(pred)
+    probs = torch.softmax(logits, dim=-1)
+    token_index = torch.argmax(probs, dim=1)
+    completions = tokenizer.decode(token_index)
 
-    log_dict = {"prompts": prompts, "completions": completions}
+    log_dict = {"completions": completions}
+    if input_ids is not None:
+        prompts = tokenizer.decode(input_ids)
+        log_dict["prompts"] = prompts
     return log_dict
 
 
