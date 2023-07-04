@@ -51,11 +51,11 @@ class Task(IntEnum):
     ROLEPLAY_INSTRUCT = 4
 
 
-def get_model_output(outputs, batch):
+def get_model_output(outputs, batch, device):
     logits = outputs["logits"]
     batch_size, seq_length, num_classes = logits.shape
     logits = logits.view(batch_size * seq_length, num_classes)
-    input_ids = batch["input_ids"].view(-1)
+    input_ids = batch["input_ids"].view(-1).to(device)
     return logits, input_ids
 
 
@@ -70,7 +70,7 @@ def get_text_sample(
     tokenizer: AutoTokenizer,
     input_ids: torch.Tensor = None,
 ):
-    # get first batch item
+    print("eval shapes", logits.shape, input_ids.shape)
     probs = torch.softmax(logits, dim=-1)
     token_index = torch.argmax(probs, dim=1)
     completions = tokenizer.decode(token_index)
