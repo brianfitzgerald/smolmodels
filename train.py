@@ -37,7 +37,7 @@ PROMPT_DICT = {
 class TrainingArgs:
     task = Task.STATE_CHANGES
     num_epochs = 6
-    batch_size = 48
+    batch_size = 256
     eval_interval_epoch = 1
     save_interval = 1000
     eval_interval_batch = 500

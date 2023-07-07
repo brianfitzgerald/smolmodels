@@ -78,7 +78,6 @@ def get_completion_samples(
     # iterate over batch
     completions = []
     for i in range(token_index.shape[0]):
-        breakpoint()
         sample_completion = tokenizer.decode(token_index[i])
         sample_prompt = tokenizer.decode(input_ids[i])
         print('prompt:\n', sample_prompt, '\ncompletion:\n', sample_completion)
