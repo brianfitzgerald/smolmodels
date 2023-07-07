@@ -28,8 +28,8 @@ import wandb
 IGNORE_INDEX = -100
 
 PROMPT_DICT = {
-    "prompt_input": ("### Input:\n{start}\n\n### Code:\n{code}\n\n### Output:"),
-    "prompt_no_input": ("### Input:\n{start}\n\n### Output:"),
+    "prompt_input": ("### Input:{start}### Code:{code}### Output:"),
+    "prompt_no_input": ("### Input:{start}### Output:"),
 }
 
 
@@ -115,7 +115,7 @@ elif TrainingArgs.task == Task.STATE_CHANGES:
             output = f"{formatted_prompt}{output}"
         return {"prompt": output, "input_length": len(formatted_prompt)}
 
-    def tokenize_state_changes(batch: dict) -> Dict:
+    def tokenize_state_changes(batch: dict) -> dict:
         tokenized = tokenizer(
             batch["prompt"],
             return_tensors="pt",
@@ -196,28 +196,36 @@ progress_bar = tqdm(range(num_training_steps))
 
 model.train()
 
+
 def run_eval():
     model.eval()
     print("Running eval..")
-    for i, batch in enumerate(eval_dataloader):
-        attention_mask = batch["attention_mask"].to(device)
-        input_ids = batch["input_ids"].to(device)
+    # eval is not batched, dataloader loads one sample at a time.
+    for i, sample in enumerate(eval_dataloader):
+        attention_mask = sample["attention_mask"].to(device)
+        input_ids = sample["input_ids"].to(device)
         with torch.no_grad():
             outputs = model(attention_mask=attention_mask, input_ids=input_ids)
-
-        logits, input_ids = get_model_output(outputs, batch, device)
-        log_dict = get_text_sample(logits, tokenizer, input_ids)
+        
+        logits = outputs.logits
+        completion_samples = get_completion_samples(logits, tokenizer, input_ids)
         perplexity_score = get_perplexity(logits, input_ids)
-        log_dict["perplexity"] = perplexity_score
+        log_dict = {
+            "completion_samples": completion_samples,
+            "perplexity": perplexity_score
+        }
         if TrainingArgs.use_wandb:
             wandb.log(log_dict)
     model.train()
+
 
 for epoch in range(TrainingArgs.num_epochs):
     for j, batch in enumerate(train_dataloader):
         attention_mask = batch["attention_mask"].to(device)
         input_ids = batch["input_ids"].to(device)
-        outputs = model(attention_mask=attention_mask, input_ids=input_ids, labels=input_ids)
+        outputs = model(
+            attention_mask=attention_mask, input_ids=input_ids, labels=input_ids
+        )
         loss = outputs.loss
         loss.backward()
 

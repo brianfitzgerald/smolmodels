@@ -52,7 +52,8 @@ class Task(IntEnum):
     ROLEPLAY_INSTRUCT = 4
 
 
-def get_model_output(outputs, batch, device):
+def get_model_output_for_loss(outputs, batch, device):
+    breakpoint()
     logits = outputs["logits"]
     batch_size, seq_length, num_classes = logits.shape
     logits = logits.view(batch_size * seq_length, num_classes)
@@ -66,23 +67,24 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
     return perp.item()
 
 
-def get_text_sample(
+def get_completion_samples(
     logits: torch.Tensor,
     tokenizer: AutoTokenizer,
     input_ids: torch.Tensor = None,
 ):
-    print("eval shapes", logits.shape, input_ids.shape)
-    print('logits\n', logits)
+
     probs = F.softmax(logits, dim=1)
-    print('probs\n', probs)
-    token_index = torch.argmax(probs, dim=1)
-    print('token idx\n', token_index, 'end tok')
-    completions = tokenizer.decode(token_index)
+    token_index = torch.argmax(probs, dim=2)
+    # iterate over batch
+    completions = []
+    for i in range(token_index.shape[0]):
+        breakpoint()
+        sample_completion = tokenizer.decode(token_index[i])
+        sample_prompt = tokenizer.decode(input_ids[i])
+        print('prompt:\n', sample_prompt, '\ncompletion:\n', sample_completion)
+        completions.append((sample_prompt, sample_completion))
 
     log_dict = {"completions": completions}
-    if input_ids is not None:
-        prompts = tokenizer.decode(input_ids)
-        log_dict["prompts"] = prompts
     return log_dict
 
 
