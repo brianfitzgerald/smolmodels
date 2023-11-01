@@ -1,371 +1,271 @@
-from dataclasses import dataclass
-import os
-from typing import List, Optional, Tuple, Union
-
-import torch
-import torch.utils.checkpoint
-from torch import Tensor, nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 import math
+from typing import Any, Optional, Tuple
+from dataclasses import dataclass, field
+import torch
+import torch.nn as nn
+from typing_extensions import Self
+from torch import Tensor
 
 
 @dataclass
-class GPTNeoConfig:
-    hidden_size: int = 768
-    embed_dropout: int = 0
-    attention_dropout: int = 0
-    resid_dropout: int = 0
-    max_position_embeddings: int = 2048
-    num_heads: int = 12
-    num_layers: int = 12
-    attention_layers: List[str] = (
-        [
-            "global",
-            "local",
-            "global",
-            "local",
-            "global",
-            "local",
-            "global",
-            "local",
-            "global",
-            "local",
-            "global",
-            "local",
-        ],
-    )
-    window_size: int = 256
-    layer_norm_epsilon: float = 1e-5
-    vocab_size: int = 50257
+class Config:
+    name: str = ""
+    block_size: int = 4096
+    vocab_size: int = 50254
+    padding_multiple: int = 512
+    padded_vocab_size: Optional[int] = None
+    n_layer: int = 16
+    n_head: int = 32
+    n_embd: int = 4096
+    rotary_percentage: float = 0.25
+    parallel_residual: bool = True
+    bias: bool = True
+    lm_head_bias: bool = False
+    norm_eps: float = 1e-6
+    # determines whether to share the attention norm per block
+    # only used for phi-1.5
+    shared_attention_norm: bool = False
+    _n_query_groups: Optional[int] = None
 
-@dataclass
-class CausalLMOutputWithPast:
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    @property
+    def n_query_groups(self) -> int:
+        if self.n_query_groups is None:
+            return self.n_head
+        return self.n_query_groups
+
+    # no. of embeddings per head
+    @property
+    def head_size(self) -> int:
+        return self.n_embd // self.n_head
+
+    @property
+    def rope_n_elem(self) -> int:
+        return int(self.rotary_percentage * self.head_size)
 
 
-class GPTNeoSelfAttention(nn.Module):
-    def __init__(self, config: GPTNeoConfig, attention_type) -> None:
+# https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py
+# norm without centering mean - learnable weight parameter
+class RMSNorm(nn.Module):
+    def __init__(self, size: int, dim: int = -1, eps: float = 1e-5) -> None:
         super().__init__()
+        self.weight = nn.Parameter(torch.ones(size))
+        self.eps = eps
+        self.dim = dim
 
-        max_positions = config.max_position_embeddings
-        # lower triangular matrix with 1 in the lower triangle and 0 in the upper triangle
-        bias = torch.tril(torch.ones((max_positions, max_positions), dtype=bool)).view(
-            1, 1, max_positions, max_positions
+    def forward(self, x: Tensor):
+        dtype = x.dtype
+        x = x.float()
+        norm_x = torch.mean(x * x, self.dim, keepdim=True)
+        x_normed = x * torch.rsqrt(norm_x + self.eps)
+        return (self.weight * x_normed).to(dtype)
+
+    def reset_parameters(self):
+        nn.init.ones_(self.weight)
+
+
+class GPT(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        assert config.padded_vocab_size is not None
+        self.config = config
+
+        self.lm_head = nn.Linear(
+            config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias
         )
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
+                h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
+                ln_f=RMSNorm(config.n_embd, eps=config.norm_eps),
+            )
+        )
+        self.max_seq_length = self.config.block_size
+        self.mask_cache: Optional[torch.Tensor] = None
 
-        # local causal self attention is a sliding window where each token can only attend to the previous
-        # window_size tokens. This is implemented by updating the causal mask such that for each token
-        # all other tokens are masked except the previous window_size tokens.
-        if attention_type == "local":
-            bias = torch.bitwise_xor(bias, torch.tril(bias, -config.window_size))
 
-        self.register_buffer("bias", bias)
-        self.register_buffer("masked_bias", torch.tensor(-1e9))
+    def set_kv_cache(
+        self,
+        batch_size: int,
+        rope_cache_length: Optional[int] = None,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        if rope_cache_length is None:
+            rope_cache_length = self.cos.shape[-1] # type: ignore
+        max_seq_length = self.max_seq_length
 
-        self.attn_dropout = nn.Dropout(float(config.attention_dropout))
-        self.resid_dropout = nn.Dropout(float(config.resid_dropout))
-
-        self.embed_dim = config.hidden_size
-        self.num_heads = config.num_heads
-        self.head_dim = self.embed_dim // self.num_heads
-        if self.head_dim * self.num_heads != self.embed_dim:
-            raise ValueError(
-                f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
-                f" {self.num_heads})."
+        # initialize the kv cache for all blocks
+        for block in self.transformer.h: # type: ignore
+            block.attn.kv_cache = block.attn.build_kv_cache(
+                batch_size, max_seq_length, rope_cache_length, device, dtype
             )
 
-        self.k_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
-        self.v_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
-        self.q_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=False)
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
+        if self.mask_cache is None or self.mask_cache.size(3) != max_seq_length:
+            # https://github.com/pytorch/pytorch/issues/96099
+            ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
+            self.mask_cache = torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
-    def _split_heads(self, tensor, num_heads, attn_head_size):
-        """
-        Splits hidden_size dim into attn_head_size and num_heads
-        """
-        new_shape = tensor.size()[:-1] + (num_heads, attn_head_size)
-        tensor = tensor.view(new_shape)
-        return tensor.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
+    def clear_kv_cache(self) -> None:
+        self.mask_cache = None
+        for block in self.transformer.h: # type: ignore
+            block.attn.kv_cache = None
 
-    def _merge_heads(self, tensor, num_heads, attn_head_size):
-        """
-        Merges attn_head_size dim and num_attn_heads dim into hidden_size
-        """
-        tensor = tensor.permute(0, 2, 1, 3).contiguous()
-        new_shape = tensor.size()[:-2] + (num_heads * attn_head_size,)
-        return tensor.view(new_shape)
-
-    def _attn(self, query, key, value, attention_mask=None, head_mask=None):
-        query = query.to(torch.float32)
-        key = key.to(torch.float32)
-
-        attn_weights = torch.matmul(query, key.transpose(-1, -2))
-
-        query_length, key_length = query.size(-2), key.size(-2)
-        # mask to a specific bias within the key value tensor
-        causal_mask = self.bias[
-            :, :, key_length - query_length : key_length, :key_length
-        ]
-        mask_value = torch.finfo(attn_weights.dtype).min
-
-        mask_value = torch.tensor(mask_value, dtype=attn_weights.dtype).to(
-            attn_weights.device
+class Block(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
+        self.attn = CausalSelfAttention(config)
+        self.norm_2 = (
+            None
+            if config.shared_attention_norm
+            else RMSNorm(config.n_embd, eps=config.norm_eps)
         )
-        attn_weights = torch.where(causal_mask, attn_weights, mask_value)
 
-        if attention_mask is not None:
-            # Apply the attention mask
-            attn_weights = attn_weights + attention_mask
 
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1)
-        attn_weights = attn_weights.to(value.dtype)
-        attn_weights = self.attn_dropout(attn_weights)
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    head_size = x.size(-1)
+    x1 = x[..., : head_size // 2]  # (B, nh, T, hs/2)
+    x2 = x[..., head_size // 2 :]  # (B, nh, T, hs/2)
+    rotated = torch.cat((-x2, x1), dim=-1)  # (B, nh, T, hs)
+    roped = (x * cos) + (rotated * sin)
+    return roped.type_as(x)
 
-        # Mask heads if we want to
-        if head_mask is not None:
-            attn_weights = attn_weights * head_mask
 
-        attn_output = torch.matmul(attn_weights, value)
-
-        return attn_output, attn_weights
+class CausalSelfAttention(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        # size of all q,k,v projections of all heads
+        shape = (config.n_head + 2 * config.n_query_groups) * config.head_size
+        # n_embd is the size of the input embedding for a token
+        self.attn = nn.Linear(config.n_embd, shape, bias=config.bias)
+        # output projection
+        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.kv_cache: Optional[torch.Tensor] = None
+        self.config = config
 
     def forward(
         self,
-        hidden_states,
-        attention_mask=None,
-        layer_past=None,
-        head_mask=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
-        query = self.q_proj(hidden_states)
-        key = self.k_proj(hidden_states)
-        value = self.v_proj(hidden_states)
+        x: Tensor,
+        # for positional embeddings
+        cos: Tensor,
+        sin: Tensor,
+        mask: Optional[Tensor] = None,
+        input_pos: Optional[Tensor] = None,
+    ) -> Tensor:
+        # batch size, sequence length, n_embd (i.e. embedding size)
+        B, T, C = x.shape
 
-        query = self._split_heads(query, self.num_heads, self.head_dim)
-        key = self._split_heads(key, self.num_heads, self.head_dim)
-        value = self._split_heads(value, self.num_heads, self.head_dim)
+        # perform attention projections
+        qkv: Tensor = self.attn(x)
 
-        if layer_past is not None:
-            past_key = layer_past[0]
-            past_value = layer_past[1]
-            key = torch.cat((past_key, key), dim=-2)
-            value = torch.cat((past_value, value), dim=-2)
+        # get the number of query groups for MHA, GQA
+        # if this value is 1, then we are using standard multi-head attention
+        q_per_kv = self.config.n_head // self.config.n_query_groups
+        total_qkv = q_per_kv + 2  # each group has 1 key, and 1 value
 
-        if use_cache is True:
-            present = (key, value)
-        else:
-            present = None
-
-        attn_output, attn_weights = self._attn(
-            query, key, value, attention_mask, head_mask
+        qkv = qkv.view(
+            B, T, self.config.n_query_groups, total_qkv, self.config.head_size
         )
+        # qkv is hidden_state per token per query-key-value combination per query group per batch entry
+        qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, hs)
 
-        attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
-        attn_output = self.out_proj(attn_output)
-        attn_output = self.resid_dropout(attn_output)
+        q, k, v = qkv.split([q_per_kv, 1, 1], dim=2)
 
-        outputs = (attn_output, present)
-        if output_attentions:
-            outputs += (attn_weights,)
-
-        return outputs  # a, present, (attentions)
-
-
-class GPTNeoAttention(nn.Module):
-    def __init__(self, config, layer_id=0):
-        super().__init__()
-        self.layer_id = layer_id
-        self.attention_layers = config.attention_layers
-        self.attention_type = self.attention_layers[layer_id]
-
-        self.attention = GPTNeoSelfAttention(config, self.attention_type)
-
-    def forward(
-        self,
-        hidden_states,
-        layer_past=None,
-        attention_mask=None,
-        head_mask=None,
-        use_cache=False,
-        output_attentions=False,
-    ):
-        return self.attention(
-            hidden_states,
-            attention_mask=attention_mask,
-            layer_past=layer_past,
-            head_mask=head_mask,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-        )
-
-
-class GPTNeoMLP(nn.Module):
-    def __init__(self, intermediate_size: int, config: GPTNeoConfig) -> None:
-        super().__init__()
-        embed_dim = config.hidden_size
-        self.c_fc = nn.Linear(embed_dim, intermediate_size)
-        self.c_proj = nn.Linear(intermediate_size, embed_dim)
-        self.act = nn.GELU()
-        self.dropout = nn.Dropout(float(config.resid_dropout))
-
-    def forward(self, hidden_states):
-        hidden_states = self.c_fc(hidden_states)
-        hidden_states = self.act(hidden_states)
-        hidden_states = self.c_proj(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        return hidden_states
-
-
-class GPTNeoBlock(nn.Module):
-    def __init__(self, config: GPTNeoConfig, layer_id: int) -> None:
-        super().__init__()
-        hidden_size = config.hidden_size
-        inner_dim = (
-            config.intermediate_size
-            if config.intermediate_size is not None
-            else 4 * hidden_size
-        )
-        # layer norm normalizes the hidden states of the layers
-        self.ln_1 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.attn = GPTNeoAttention(config, layer_id)
-        self.ln_2 = nn.LayerNorm(hidden_size, eps=config.layer_norm_epsilon)
-        self.mlp = GPTNeoMLP(inner_dim, hidden_size, config)
-
-
-class GPTNeoModel:
-    def __init__(self, config: GPTNeoConfig) -> None:
-        self.embed_dim = config.hidden_size
-        # word token embedding
-        self.wte = nn.Embedding(config.vocab_size, self.embed_dim)
-        # word position embedding
-        self.wpe = nn.Embedding(config.max_position_embeddings, self.embed_dim)
-        self.drop = nn.Dropout(float(config.embed_dropout))
-        self.h = nn.ModuleList(
-            [GPTNeoBlock(config, i) for i in range(config.num_layers)]
-        )
-
-        self.gradient_checkpointing = False
-        # Initialize weights and apply final processing
-        self.post_init()
-
-
-class GPTNeoForCausalLM:
-    def _init_weights(self, module):
-        """Initialize the weights."""
-        if isinstance(module, (nn.Linear,)):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def __init__(self, config: GPTNeoConfig):
-        super().__init__(config)
-        self.transformer = GPTNeoModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-
-        self._init_weights()
-
-    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, **kwargs):
-        token_type_ids = kwargs.get("token_type_ids", None)
-        # only last token for inputs_ids if past is defined in kwargs
-        if past_key_values:
-            input_ids = input_ids[:, -1].unsqueeze(-1)
-            if token_type_ids is not None:
-                token_type_ids = token_type_ids[:, -1].unsqueeze(-1)
-
-        attention_mask = kwargs.get("attention_mask", None)
-        position_ids = kwargs.get("position_ids", None)
-
-        if attention_mask is not None and position_ids is None:
-            # create position_ids on the fly for batch generation
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-            if past_key_values:
-                position_ids = position_ids[:, -1].unsqueeze(-1)
-        else:
-            position_ids = None
-        return {
-            "input_ids": input_ids,
-            "past_key_values": past_key_values,
-            "use_cache": kwargs.get("use_cache"),
-            "position_ids": position_ids,
-            "attention_mask": attention_mask,
-            "token_type_ids": token_type_ids,
-        }
-
-    def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        past_key_values: Optional[Tuple[torch.FloatTensor]] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> CausalLMOutputWithPast:
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
-
-        transformer_outputs = self.transformer(
-            input_ids,
-            past_key_values=past_key_values,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-        hidden_states = transformer_outputs[0]
-
-        lm_logits = self.lm_head(hidden_states)
-
-        loss = None
-        if labels is not None:
-            # move labels to correct device to enable model parallelism
-            labels = labels.to(lm_logits.device)
-            # Compute loss in fp32 to match with mesh-tf version
-            # https://github.com/EleutherAI/gpt-neo/blob/89ce74164da2fb16179106f54e2269b5da8db333/models/gpt2/gpt2.py#L179
-            lm_logits = lm_logits.to(torch.float32)
-
-            # Shift so that tokens < n predict n
-            shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+        # repeat k and v for non multi-head attention
+        # flash attention also requires this
+        if self.config.n_query_groups != self.config.n_head and (
+            input_pos is None or self.config.n_query_groups != 1
+        ):
+            # expand all singleton dimensions to required size
+            k = k.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
+            v = v.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
             )
 
-            lm_logits = lm_logits.to(hidden_states.dtype)
-            loss = loss.to(hidden_states.dtype)
+        # Reshape to (B, nh_q, T, hs)
+        q = q.reshape(B, -1, T, self.config.head_size)
+        k = k.reshape(B, -1, T, self.config.head_size)
+        v = v.reshape(B, -1, T, self.config.head_size)
 
-        if not return_dict:
-            output = (lm_logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+        # we only apply rope to the first N tokens
+        q_roped = apply_rope(q[..., : self.config.rope_n_elem], cos, sin)
+        k_roped = apply_rope(k[..., : self.config.rope_n_elem], cos, sin)
+        q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
+        k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
 
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=lm_logits,
-            past_key_values=transformer_outputs.past_key_values,
-            hidden_states=transformer_outputs.hidden_states,
-            attentions=transformer_outputs.attentions,
+        if input_pos is not None:
+            if not isinstance(self.kv_cache, KVCache):
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            k, v = self.kv_cache(input_pos, k, v)
+
+        y = self.scaled_dot_product_attention(q, k, v, mask)
+        y = y.reshape(B, T, C)  # re-assemble all head outputs side by side
+
+        # output projection
+        return self.proj(y)
+
+    def scaled_dot_product_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        # scale by sqrt of head size
+        scale = 1.0 / math.sqrt(self.config.head_size)
+        # can also use flash attention
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=0.0, scale=scale, is_causal=mask is None
         )
+        return y.transpose(1, 2)
+
+    def build_kv_cache(
+        self,
+        batch_size: int,
+        max_seq_length: int,
+        device: torch.device,
+        dtype: torch.dtype,
+        rope_cache_length: Optional[int] = 0,
+    ) -> "KVCache":
+        heads = 1 if self.config.n_query_groups == 1 else self.config.n_head
+        v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
+        if rope_cache_length is None:
+            if self.config.rotary_percentage != 1.0:
+                raise TypeError("Please pass the `rope_cache_length=gpt.cos.size(-1)` value")
+            k_shape = v_shape
+        else:
+            k_shape = (
+                batch_size,
+                heads,
+                max_seq_length,
+                rope_cache_length + self.config.head_size - self.config.rope_n_elem,
+            )
+        return KVCache(k_shape, v_shape, device, dtype=dtype)
+
+class KVCache(nn.Module):
+    def __init__(
+        self,
+        k_shape: Tuple[int, int, int, int],
+        v_shape: Tuple[int, int, int, int],
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> None:
+        super().__init__()
+        self.register_buffer(
+            "k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False
+        )
+
+    def forward(self, input_pos: Tensor, k: Tensor, v: Tensor) -> Tuple[Tensor, Tensor]:
+        # use correct dtype
+        self.k = self.k.to(k.dtype)
+        self.v = self.v.to(k.dtype)
+        # update cache with new values
+        # https://pytorch.org/docs/stable/generated/torch.Tensor.index_copy_.html#torch.Tensor.index_copy_
+        k = self.k.index_copy(2, input_pos, k)
+        v = self.k.index_copy(2, input_pos, v)
+        return k, v
