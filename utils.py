@@ -16,7 +16,16 @@ import sys
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, ContextManager, Dict, List, Mapping, Optional, TypeVar, Union
+from typing import (
+    TYPE_CHECKING,
+    ContextManager,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import lightning as L
 import torch
@@ -89,15 +98,14 @@ def get_completion_samples(
     tokenizer: AutoTokenizer,
     input_ids: torch.Tensor,
 ):
-
     probs = F.softmax(logits, dim=1)
     token_index = torch.argmax(probs, dim=2)
     # iterate over batch
     completions = []
     for i in range(token_index.shape[0]):
-        sample_completion = tokenizer.decode(token_index[i]) # type: ignore
-        sample_prompt = tokenizer.decode(input_ids[i]) # type: ignore
-        print('prompt:\n', sample_prompt, '\ncompletion:\n', sample_completion)
+        sample_completion = tokenizer.decode(token_index[i])  # type: ignore
+        sample_prompt = tokenizer.decode(input_ids[i])  # type: ignore
+        print("prompt:\n", sample_prompt, "\ncompletion:\n", sample_completion)
         completions.append((sample_prompt, sample_completion))
 
     log_dict = {"completions": completions}
@@ -118,12 +126,14 @@ def print_trainable_parameters(model):
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
     )
 
+
 def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
     files = {
         "lit_model.pth": (checkpoint_dir / "lit_model.pth").is_file(),
-        "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file() or (
-            checkpoint_dir / "tokenizer.model"
-        ).is_file(),
+        "tokenizer.json OR tokenizer.model": (
+            checkpoint_dir / "tokenizer.json"
+        ).is_file()
+        or (checkpoint_dir / "tokenizer.model").is_file(),
         "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
     }
     if checkpoint_dir.is_dir():
@@ -137,7 +147,9 @@ def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
     # list locally available checkpoints
     available = list(Path("checkpoints").glob("*/*"))
     if available:
-        options = "\n --checkpoint_dir ".join([""] + [repr(str(p.resolve())) for p in available])
+        options = "\n --checkpoint_dir ".join(
+            [""] + [repr(str(p.resolve())) for p in available]
+        )
         extra = f"\nYou have downloaded locally:{options}\n"
     else:
         extra = ""
@@ -150,19 +162,21 @@ def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
     print(error_message, file=sys.stderr)
     raise SystemExit(1)
 
-def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
-    if isinstance(fabric.strategy, FSDPStrategy):
-        fabric.load_raw(checkpoint_path, model, strict=strict)
-    else:
-        state_dict = lazy_load(checkpoint_path)
-        state_dict = state_dict.get("model", state_dict)
-        model.load_state_dict(state_dict, strict=strict)
+
+def load_checkpoint(
+    model: nn.Module, checkpoint_path: Path, strict: bool = True
+) -> None:
+    state_dict = lazy_load(checkpoint_path)
+    state_dict = state_dict.get("model", state_dict)
+    model.load_state_dict(state_dict, strict=strict)
+
 
 def find_multiple(n: int, k: int) -> int:
     assert k > 0
     if n % k == 0:
         return n
     return n + k - (n % k)
+
 
 class SavingProxyForStorage:
     def __init__(self, obj, saver, protocol_version=5):
@@ -186,7 +200,13 @@ class SavingProxyForStorage:
         storage_key = saver._write_storage_and_return_key(storage)
         location = torch.serialization.location_tag(storage)
 
-        self.storage_info = ("storage", storage_type, storage_key, location, storage_numel)
+        self.storage_info = (
+            "storage",
+            storage_type,
+            storage_key,
+            location,
+            storage_numel,
+        )
 
     def __reduce_ex__(self, protocol_version):
         assert False, "this should be handled with out of band"
@@ -199,19 +219,30 @@ class SavingProxyForTensor:
         if reduce_args[0] == torch._utils._rebuild_tensor_v2:
             # for Tensors with Python attributes
             (a0, a1, (storage, *a2_other), *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (a0, a1, (storage_proxy, *a2_other), *other_reduce_args)
         else:
             (storage, *other_reduce_args) = reduce_args
-            assert isinstance(storage, torch.storage.TypedStorage), "Please check for updates"
-            storage_proxy = SavingProxyForStorage(storage, saver, protocol_version=protocol_version)
+            assert isinstance(
+                storage, torch.storage.TypedStorage
+            ), "Please check for updates"
+            storage_proxy = SavingProxyForStorage(
+                storage, saver, protocol_version=protocol_version
+            )
             self.reduce_args = (storage_proxy, *other_reduce_args)
 
     def __reduce_ex__(self, protocol_version):
         if protocol_version != self.protocol_version:
-            raise RuntimeError(f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}")
+            raise RuntimeError(
+                f"Unexpected protocol version: expected {self.protocol_version}, got {protocol_version}"
+            )
         return self.reduce_ret_fn, self.reduce_args
+
 
 class IncrementalPyTorchPickler(pickle.Pickler):
     def __init__(self, saver, *args, **kwargs):
@@ -272,7 +303,7 @@ class IncrementalPyTorchPickler(pickle.Pickler):
 class incremental_save:
     def __init__(self, name):
         self.name = name
-        self.zipfile = torch._C.PyTorchFileWriter(str(name)) # type: ignore
+        self.zipfile = torch._C.PyTorchFileWriter(str(name))  # type: ignore
         self.has_saved = False
         self.next_key = 0
 
@@ -309,3 +340,4 @@ class incremental_save:
 
     def __exit__(self, type, value, traceback):
         self.zipfile.write_end_of_file()
+

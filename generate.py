@@ -1,20 +1,17 @@
 import sys
 import time
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
-import lightning as L
 import torch
-from lightning.fabric.plugins import BitsandbytesPrecision
-from lightning.fabric.strategies.fsdp import FSDPStrategy
 import fire
-from utils import check_valid_checkpoint_dir, load_checkpoint
+from utils import check_valid_checkpoint_dir, load_checkpoint, get_available_device
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
 
-from model import GPT, Config, Block
+from model import GPT, Config
 from tokenizer import Tokenizer
 
 @torch.inference_mode()
@@ -112,13 +109,7 @@ def main(
         devices: How many devices to use.
         precision: Indicates the Fabric precision setting to use.
     """
-    precision = "bf16-true"
 
-
-    plugins = None
-
-    fabric = L.Fabric(devices=devices, precision=precision, strategy=strategy, plugins=plugins)
-    fabric.launch()
     checkpoint_dir = Path(checkpoint_dir)
     model_file = "lit_model.pth"
     checkpoint_path = checkpoint_dir / model_file
@@ -127,47 +118,41 @@ def main(
 
     config = Config.from_name(checkpoint_dir.name)
 
+    device = get_available_device()
+    print(f"Using device: {str(device)}")
 
-    fabric.print(f"Loading model {str(checkpoint_path)!r} with {config.__dict__}", file=sys.stderr)
     t0 = time.perf_counter()
-    with fabric.init_module(empty_init=True):
-        model: GPT = GPT(config)
-    fabric.print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.", file=sys.stderr)
+    model: GPT = GPT(config, device)
+    model.to(device)
 
     model.eval()
-    model = fabric.setup_module(model) # type: ignore
 
     t0 = time.perf_counter()
-    load_checkpoint(fabric, model, checkpoint_path)
-    fabric.print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.", file=sys.stderr)
+    load_checkpoint(model, checkpoint_path)
+    print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
     tokenizer = Tokenizer(checkpoint_dir)
-    encoded = tokenizer.encode(prompt, device=fabric.device)
+    encoded = tokenizer.encode(prompt, device=device)
     prompt_length = encoded.size(0)
     max_returned_tokens = prompt_length + max_new_tokens
 
-    with fabric.init_tensor():
-        # set the max_seq_length to limit the memory usage to what we need
-        model.max_seq_length = max_returned_tokens
+    # set the max_seq_length to limit the memory usage to what we need
+    model.max_seq_length = max_returned_tokens
 
-    L.seed_everything(1234)
-    device = fabric.device
     for i in range(num_samples):
-        with fabric.init_tensor():
-            # enable the kv cache
-            model.set_kv_cache(batch_size=1, device=device)
+        # enable the kv cache
+        model.set_kv_cache(batch_size=1, device=device)
 
         t0 = time.perf_counter()
         y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k) # type: ignore
         t = time.perf_counter() - t0
 
-        fabric.print(tokenizer.decode(y))
+        print(tokenizer.decode(y))
         tokens_generated = y.size(0) - prompt_length
-        fabric.print(
+        print(
             f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec", file=sys.stderr
         )
-    if fabric.device.type == "cuda":
-        fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB", file=sys.stderr)
+        print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB", file=sys.stderr)
 
 
 if __name__ == "__main__":

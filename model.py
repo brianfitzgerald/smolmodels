@@ -35,86 +35,75 @@ class Config:
     # only used for phi-1.5
     shared_attention_norm: bool = False
     # no. of query groups for MHA, GQA
-    _n_query_groups: Optional[int] = None
+    n_query_groups: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
     model_family: str = ModelFamily.LLAMA.value
-    _intermediate_size: int = 5632
+    intermediate_size: int = 5632
     extra_tokens: int = 0
-
-    @property
-    def n_query_groups(self) -> int:
-        if self._n_query_groups is None:
-            return self.n_head
-        return self._n_query_groups  # type: ignore
-
-    # no. of embeddings per head
-    @property
-    def head_size(self) -> int:
-        return self.n_embd // self.n_head
-
-    @property
-    def rope_n_elem(self) -> int:
-        return int(self.rotary_percentage * self.head_size)
-
-    @property
-    def intermediate_size(self) -> int:
-        if not self._intermediate_size:
-            return self.n_embd * 4
-        return self._intermediate_size
 
     @classmethod
     def from_name(cls, name: str) -> Self:
         return name_to_config[name]
 
-    def __post_init__(self) -> None:
-        # used to pad the vocab size to a multiple of 512
+    def __post_init__(self):
+        assert self.n_embd % self.n_head == 0
+        self.head_size = self.n_embd // self.n_head
+
+        # vocab size should be a power of 2 to be optimal on hardware. compute the closest value
         if self.padded_vocab_size is None:
-            self.padded_vocab_size = (
-                find_multiple(self.vocab_size, self.padding_multiple)
-                + self.extra_tokens
+            self.padded_vocab_size = find_multiple(
+                self.vocab_size, self.padding_multiple
             )
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
 
+        # compute the number of query groups
+        if self.n_query_groups is not None:
+            assert self.n_head % self.n_query_groups == 0
+        else:
+            self.n_query_groups = self.n_head
 
-tinyllama_chat_config = Config(
-    model_family=ModelFamily.LLAMA.value,
-    block_size=2048,
-    vocab_size=32000,
-    padding_multiple=64,
-    n_layer=22,
-    n_head=32,
-    n_embd=2048,
-    _n_query_groups=4,
-    rotary_percentage=1.0,
-    parallel_residual=False,
-    bias=False,
-    _intermediate_size=5632,
-    norm_eps=1e-5,
-    extra_tokens=3,
-)
+        # compute the intermediate size for MLP if not set
+        if self.intermediate_size is None:
+            self.intermediate_size = 4 * self.n_embd
 
-tinyllama_config = Config(
-    model_family=ModelFamily.LLAMA.value,
-    block_size=2048,
-    vocab_size=32000,
-    padding_multiple=64,
-    n_layer=22,
-    n_head=32,
-    n_embd=2048,
-    rotary_percentage=1.0,
-    parallel_residual=False,
-    bias=False,
-    norm_eps=1e-5,
-    _intermediate_size=5632,
-    _n_query_groups=4,
-)
+        self.rope_n_elem = int(self.rotary_percentage * self.head_size)
+
 
 name_to_config = {
-    "TinyLlama-1.1B-Chat-v0.3": tinyllama_chat_config,
-    "TinyLlama-1.1B-intermediate-step-480k-1T": tinyllama_config,
+    "TinyLlama-1.1B-Chat-v0.3": Config(
+        model_family=ModelFamily.LLAMA.value,
+        block_size=2048,
+        vocab_size=32000,
+        padding_multiple=64,
+        n_layer=22,
+        n_head=32,
+        n_embd=2048,
+        n_query_groups=4,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        intermediate_size=5632,
+        norm_eps=1e-5,
+        extra_tokens=3,
+    ),
+    "TinyLlama-1.1B-intermediate-step-480k-1T": Config(
+        model_family=ModelFamily.LLAMA.value,
+        block_size=2048,
+        vocab_size=32000,
+        padding_multiple=64,
+        n_layer=22,
+        n_head=32,
+        n_embd=2048,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_eps=1e-5,
+        intermediate_size=5632,
+        n_query_groups=4,
+    ),
 }
 
 
@@ -143,12 +132,12 @@ class RMSNorm(nn.Module):
 def build_rope_cache(
     seq_len: int,
     n_elem: int,
-    device: Optional[torch.device] = None,
+    device: torch.device,
     base: int = 10000,
     condense_ratio: int = 1,
 ) -> Tuple[Tensor, Tensor]:
     # create a range of indices from 0 to n_elem
-    theta = 1.0 / (base ** torch.arange(0, n_elem, 2).float() / n_elem)
+    theta = (1.0 / (base ** torch.arange(0, n_elem, 2).float() / n_elem)).to(device)
 
     # create a range of indices from 0 to seq_len
     seq_idx = torch.arange(seq_len, device=device) / condense_ratio
@@ -160,10 +149,11 @@ def build_rope_cache(
 
 
 class GPT(nn.Module):
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, device: torch.device) -> None:
         super().__init__()
         assert config.padded_vocab_size is not None
         self.config = config
+        self.device = device
 
         self.lm_head = nn.Linear(
             config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias
@@ -199,7 +189,9 @@ class GPT(nn.Module):
             # passing `attn_mask` to SDPA downgrades it to use the inefficient implementation. since we only need the mask
             # for the kv-cache support (only during inference), we only create it in that situation
             # this will be resolved by https://github.com/pytorch/pytorch/issues/96099
-            ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
+            ones = torch.ones(
+                (max_seq_length, max_seq_length), device=device, dtype=torch.bool
+            )
             self.mask_cache = torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
     def clear_kv_cache(self) -> None:
@@ -224,18 +216,16 @@ class GPT(nn.Module):
         self._max_seq_length = value
         if not hasattr(self, "cos"):
             # first call
-            cos, sin = self.rope_cache()
+            cos, sin = self.rope_cache(self.device)
             self.register_buffer("cos", cos, persistent=False)
             self.register_buffer("sin", sin, persistent=False)
         elif value != self.cos.size(0):
             # override
-            self.cos, self.sin = self.rope_cache(device=self.cos.device)
+            self.cos, self.sin = self.rope_cache(device=self.device)
         # the mask and kv cache size will get updated on `set_kv_cache`. we cannot update it here because we don't know
         # if the kv cache is expected
 
-    def rope_cache(
-        self, device: Optional[torch.device] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    def rope_cache(self, device: torch.device) -> Tuple[Tensor, Tensor]:
         return build_rope_cache(
             seq_len=self.max_seq_length,
             n_elem=self.config.rope_n_elem,
@@ -294,7 +284,7 @@ class Block(nn.Module):
         self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
         self.norm_2 = (
-            None
+            nn.Identity
             if config.shared_attention_norm
             else RMSNorm(config.n_embd, eps=config.norm_eps)
         )
@@ -359,6 +349,7 @@ class KVCache(nn.Module):
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
+        assert config.n_query_groups
         # size of all q,k,v projections of all heads
         shape = (config.n_head + 2 * config.n_query_groups) * config.head_size
         # n_embd is the size of the input embedding for a token
@@ -383,6 +374,8 @@ class CausalSelfAttention(nn.Module):
         # perform attention projections
         qkv: Tensor = self.attn(x)
 
+        assert self.config.n_head and self.config.n_query_groups
+
         # get the number of query groups for MHA, GQA
         # if this value is 1, then we are using standard multi-head attention
         q_per_kv = self.config.n_head // self.config.n_query_groups
@@ -398,9 +391,15 @@ class CausalSelfAttention(nn.Module):
 
         # repeat k and v for non multi-head attention
         # flash attention also requires this
-        if self.config.n_query_groups != self.config.n_head and (input_pos is None or self.config.n_query_groups != 1):
-            k = k.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
-            v = v.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
+        if self.config.n_query_groups != self.config.n_head and (
+            input_pos is None or self.config.n_query_groups != 1
+        ):
+            k = k.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
+            v = v.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
 
         # Reshape to (B, nh_q, T, hs)
         q = q.reshape(B, -1, T, self.config.head_size)
