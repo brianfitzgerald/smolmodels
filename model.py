@@ -11,9 +11,11 @@ from enum import Enum
 import json
 from utils import find_multiple
 
+
 class ModelFamily(Enum):
     LLAMA = "llama"
     PHI = "phi"
+
 
 @dataclass
 class Config:
@@ -37,12 +39,13 @@ class Config:
     rope_condense_ratio: int = 1
     rope_base: int = 10000
     model_family: str = ModelFamily.LLAMA.value
+    _intermediate_size: int = 5632
 
     @property
     def n_query_groups(self) -> int:
         if self._n_query_groups is None:
             return self.n_head
-        return self._n_query_groups # type: ignore
+        return self._n_query_groups  # type: ignore
 
     # no. of embeddings per head
     @property
@@ -55,7 +58,9 @@ class Config:
 
     @property
     def intermediate_size(self) -> int:
-        return self.n_embd * 4
+        if not self._intermediate_size:
+            return self.n_embd * 4
+        return self._intermediate_size
 
     @classmethod
     def from_name(cls, name: str) -> Self:
@@ -64,7 +69,9 @@ class Config:
     def __post_init__(self) -> None:
         # used to pad the vocab size to a multiple of 512
         if self.padded_vocab_size is None:
-            self.padded_vocab_size = find_multiple(self.vocab_size, self.padding_multiple)
+            self.padded_vocab_size = find_multiple(
+                self.vocab_size, self.padding_multiple
+            )
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
@@ -84,11 +91,18 @@ class Config:
         if "condense_ratio" in kwargs:  # legacy name
             kwargs["rope_condense_ratio"] = kwargs.pop("condense_ratio")
         if "org" in json_kwargs:  # legacy name
-            json_kwargs["hf_config"] = {"name": json_kwargs["name"], "org": json_kwargs.pop("org")}
+            json_kwargs["hf_config"] = {
+                "name": json_kwargs["name"],
+                "org": json_kwargs.pop("org"),
+            }
         if "org" in kwargs:  # legacy name
-            kwargs["hf_config"] = {"name": kwargs.get("name", json_kwargs["name"]), "org": kwargs.pop("org")}
+            kwargs["hf_config"] = {
+                "name": kwargs.get("name", json_kwargs["name"]),
+                "org": kwargs.pop("org"),
+            }
         json_kwargs.update(kwargs)
         return cls(**json_kwargs)
+
 
 name_to_config = {
     "TinyLlama-1.1B-Chat-v0.3": Config(
@@ -103,10 +117,10 @@ name_to_config = {
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
+        _intermediate_size=5632,
         norm_eps=1e-5,
     )
 }
-
 
 
 # https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py
@@ -255,10 +269,10 @@ class GPT(nn.Module):
         # wte is embedding
         x = self.transformer.wte(idx)  # type: ignore # token embeddings of shape (b, t, n_embd)
         # self attention blocks
-        for block in self.transformer.h: # type: ignore
+        for block in self.transformer.h:  # type: ignore
             x = block(x, cos, sin, mask, input_pos)
         # RMSnorm
-        x = self.transformer.ln_f(x) # type: ignore
+        x = self.transformer.ln_f(x)  # type: ignore
         return self.lm_head(x)  # (b, t, vocab_size)
 
 
