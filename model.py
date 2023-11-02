@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from typing_extensions import Self
 from torch import Tensor
+import torch.nn.functional as F
 
 
 @dataclass
@@ -26,6 +27,8 @@ class Config:
     # only used for phi-1.5
     shared_attention_norm: bool = False
     _n_query_groups: Optional[int] = None
+    rope_condense_ratio: int = 1
+    rope_base: int = 10000
 
     @property
     def n_query_groups(self) -> int:
@@ -41,6 +44,10 @@ class Config:
     @property
     def rope_n_elem(self) -> int:
         return int(self.rotary_percentage * self.head_size)
+
+    @property
+    def intermediate_size(self) -> int:
+        return self.n_embd * 4
 
 
 # https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py
@@ -63,6 +70,26 @@ class RMSNorm(nn.Module):
         nn.init.ones_(self.weight)
 
 
+# return a tuple of (cos, sin) of shape (seq_len, n_elem)
+def build_rope_cache(
+    seq_len: int,
+    n_elem: int,
+    device: Optional[torch.device] = None,
+    base: int = 10000,
+    condense_ratio: int = 1,
+) -> Tuple[Tensor, Tensor]:
+    # create a range of indices from 0 to n_elem
+    theta = 1.0 / (base ** torch.arange(0, n_elem, 2).float() / n_elem)
+
+    # create a range of indices from 0 to seq_len
+    seq_idx = torch.arange(seq_len, device=device) / condense_ratio
+
+    # Calculate the product of position index and $\theta_i$
+    idx_theta = torch.outer(seq_idx, theta).repeat(1, 2)
+
+    return torch.cos(idx_theta), torch.sin(idx_theta)
+
+
 class GPT(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -80,8 +107,7 @@ class GPT(nn.Module):
             )
         )
         self.max_seq_length = self.config.block_size
-        self.mask_cache: Optional[torch.Tensor] = None
-
+        self.mask_cache: Optional[Tensor] = None
 
     def set_kv_cache(
         self,
@@ -91,24 +117,107 @@ class GPT(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         if rope_cache_length is None:
-            rope_cache_length = self.cos.shape[-1] # type: ignore
+            rope_cache_length = self.cos.shape[-1]  # type: ignore
         max_seq_length = self.max_seq_length
 
         # initialize the kv cache for all blocks
-        for block in self.transformer.h: # type: ignore
+        for block in self.transformer.h:  # type: ignore
             block.attn.kv_cache = block.attn.build_kv_cache(
                 batch_size, max_seq_length, rope_cache_length, device, dtype
             )
 
         if self.mask_cache is None or self.mask_cache.size(3) != max_seq_length:
             # https://github.com/pytorch/pytorch/issues/96099
-            ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
+            ones = torch.ones(
+                (max_seq_length, max_seq_length), device=device, dtype=torch.bool
+            )
             self.mask_cache = torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
     def clear_kv_cache(self) -> None:
         self.mask_cache = None
-        for block in self.transformer.h: # type: ignore
+        for block in self.transformer.h:  # type: ignore
             block.attn.kv_cache = None
+
+    @property
+    def max_seq_length(self) -> int:
+        return self._max_seq_length
+
+    @max_seq_length.setter
+    def max_seq_length(self, value: int) -> None:
+        """
+        When doing inference, the sequences used might be shorter than the model's context length.
+        This allows setting a smaller number to avoid allocating unused memory
+        """
+        if value > self.config.block_size:
+            raise ValueError(
+                f"Cannot attend to {value}, block size is only {self.config.block_size}"
+            )
+        self._max_seq_length = value
+        if not hasattr(self, "cos"):
+            # first call
+            cos, sin = self.rope_cache()
+            self.register_buffer("cos", cos, persistent=False)
+            self.register_buffer("sin", sin, persistent=False)
+        elif value != self.cos.size(0):
+            # override
+            self.cos, self.sin = self.rope_cache(device=self.cos.device)
+        # the mask and kv cache size will get updated on `set_kv_cache`. we cannot update it here because we don't know
+        # if the kv cache is expected
+
+    def rope_cache(
+        self, device: Optional[torch.device] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return build_rope_cache(
+            seq_len=self.max_seq_length,
+            n_elem=self.config.rope_n_elem,
+            device=device,
+            condense_ratio=self.config.rope_condense_ratio,
+            base=self.config.rope_base,
+        )
+
+    def forward(self, idx: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+        T = idx.shape[1]
+        if self.max_seq_length < T:
+            raise ValueError(
+                f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
+            )
+
+        if input_pos is not None:  # use the kv cache
+            cos = self.cos.index_select(0, input_pos)
+            sin = self.sin.index_select(0, input_pos)
+            if self.mask_cache is None:
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            mask = self.mask_cache.index_select(2, input_pos)
+        else:
+            cos = self.cos[:T]
+            sin = self.sin[:T]
+            mask = None
+
+        # wte is embedding
+        x = self.transformer.wte(idx)  # type: ignore # token embeddings of shape (b, t, n_embd)
+        # self attention blocks
+        for block in self.transformer.h: # type: ignore
+            x = block(x, cos, sin, mask, input_pos)
+        # RMSnorm
+        x = self.transformer.ln_f(x) # type: ignore
+        return self.lm_head(x)  # (b, t, vocab_size)
+
+
+# classic MLP with a projection from hidden size to intermediate size
+# and back to hidden
+class LlaMAMLP(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.fc2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+
+    def forward(self, x: Tensor) -> Tensor:
+        x_fc_1 = self.fc1(x)
+        x_fc_2 = self.fc2(x)
+        x = torch.nn.functional.silu(x_fc_1) * x_fc_2
+        return self.proj(x)
+
 
 class Block(nn.Module):
     def __init__(self, config: Config) -> None:
@@ -116,10 +225,30 @@ class Block(nn.Module):
         self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
         self.norm_2 = (
-            None
+            nn.Identity()
             if config.shared_attention_norm
             else RMSNorm(config.n_embd, eps=config.norm_eps)
         )
+        self.mlp = LlaMAMLP(config)
+        self.config = config
+
+    def forward(
+        self,
+        x: Tensor,
+        cos: Tensor,
+        sin: Tensor,
+        mask: Optional[Tensor] = None,
+        input_pos: Optional[Tensor] = None,
+    ) -> Tensor:
+        n_1 = self.norm_1(x)
+        h = self.attn(n_1, cos, sin, mask, input_pos)
+        if self.config.parallel_residual:
+            n_2 = n_1 if self.config.shared_attention_norm else self.norm_2(x)
+            x = self.mlp(n_2) + h + x
+        else:
+            x = h + x
+            x = self.mlp(self.norm_2(x)) + x
+        return x
 
 
 def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
@@ -233,7 +362,9 @@ class CausalSelfAttention(nn.Module):
         v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
         if rope_cache_length is None:
             if self.config.rotary_percentage != 1.0:
-                raise TypeError("Please pass the `rope_cache_length=gpt.cos.size(-1)` value")
+                raise TypeError(
+                    "Please pass the `rope_cache_length=gpt.cos.size(-1)` value"
+                )
             k_shape = v_shape
         else:
             k_shape = (
@@ -243,6 +374,7 @@ class CausalSelfAttention(nn.Module):
                 rope_cache_length + self.config.head_size - self.config.rope_n_elem,
             )
         return KVCache(k_shape, v_shape, device, dtype=dtype)
+
 
 class KVCache(nn.Module):
     def __init__(
