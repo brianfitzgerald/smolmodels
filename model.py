@@ -35,11 +35,13 @@ class Config:
     # determines whether to share the attention norm per block
     # only used for phi-1.5
     shared_attention_norm: bool = False
+    # no. of query groups for MHA, GQA
     _n_query_groups: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
     model_family: str = ModelFamily.LLAMA.value
     _intermediate_size: int = 5632
+    extra_tokens: int = 0
 
     @property
     def n_query_groups(self) -> int:
@@ -71,38 +73,10 @@ class Config:
         if self.padded_vocab_size is None:
             self.padded_vocab_size = find_multiple(
                 self.vocab_size, self.padding_multiple
-            )
+            ) + self.extra_tokens
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
-        if self.model_family == ModelFamily.LLAMA.value:
-            self._n_query_groups = self.n_head
-        elif self.model_family == ModelFamily.PHI.value:
-            self._n_query_groups = 1
-        else:
-            raise ValueError(f"Unknown model family {self.model_family}")
-
-    @classmethod
-    def from_json(cls, path: Union[str, Path], **kwargs: Any) -> Self:
-        with open(path, encoding="utf-8") as fp:
-            json_kwargs = json.load(fp)
-        if "condense_ratio" in json_kwargs:  # legacy name
-            json_kwargs["rope_condense_ratio"] = json_kwargs.pop("condense_ratio")
-        if "condense_ratio" in kwargs:  # legacy name
-            kwargs["rope_condense_ratio"] = kwargs.pop("condense_ratio")
-        if "org" in json_kwargs:  # legacy name
-            json_kwargs["hf_config"] = {
-                "name": json_kwargs["name"],
-                "org": json_kwargs.pop("org"),
-            }
-        if "org" in kwargs:  # legacy name
-            kwargs["hf_config"] = {
-                "name": kwargs.get("name", json_kwargs["name"]),
-                "org": kwargs.pop("org"),
-            }
-        json_kwargs.update(kwargs)
-        return cls(**json_kwargs)
-
 
 name_to_config = {
     "TinyLlama-1.1B-Chat-v0.3": Config(
@@ -114,11 +88,13 @@ name_to_config = {
         n_layer=22,
         n_head=32,
         n_embd=2048,
+        _n_query_groups=4,
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         _intermediate_size=5632,
         norm_eps=1e-5,
+        extra_tokens=3
     )
 }
 
@@ -333,6 +309,32 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
     return roped.type_as(x)
 
 
+class KVCache(nn.Module):
+    def __init__(
+        self,
+        k_shape: Tuple[int, int, int, int],
+        v_shape: Tuple[int, int, int, int],
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> None:
+        super().__init__()
+        self.register_buffer(
+            "k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False
+        )
+
+    def forward(self, input_pos: Tensor, k: Tensor, v: Tensor) -> Tuple[Tensor, Tensor]:
+        # use correct dtype
+        self.k = self.k.to(k.dtype)
+        self.v = self.v.to(k.dtype)
+        # update cache with new values
+        # https://pytorch.org/docs/stable/generated/torch.Tensor.index_copy_.html#torch.Tensor.index_copy_
+        k = self.k.index_copy(2, input_pos, k)
+        v = self.k.index_copy(2, input_pos, v)
+        return k, v
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -427,10 +429,10 @@ class CausalSelfAttention(nn.Module):
         self,
         batch_size: int,
         max_seq_length: int,
-        device: torch.device,
-        dtype: torch.dtype,
         rope_cache_length: Optional[int] = 0,
-    ) -> "KVCache":
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> KVCache:
         heads = 1 if self.config.n_query_groups == 1 else self.config.n_head
         v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
         if rope_cache_length is None:
@@ -446,31 +448,4 @@ class CausalSelfAttention(nn.Module):
                 max_seq_length,
                 rope_cache_length + self.config.head_size - self.config.rope_n_elem,
             )
-        return KVCache(k_shape, v_shape, device, dtype=dtype)
-
-
-class KVCache(nn.Module):
-    def __init__(
-        self,
-        k_shape: Tuple[int, int, int, int],
-        v_shape: Tuple[int, int, int, int],
-        device: torch.device,
-        dtype: torch.dtype,
-    ) -> None:
-        super().__init__()
-        self.register_buffer(
-            "k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False
-        )
-        self.register_buffer(
-            "v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False
-        )
-
-    def forward(self, input_pos: Tensor, k: Tensor, v: Tensor) -> Tuple[Tensor, Tensor]:
-        # use correct dtype
-        self.k = self.k.to(k.dtype)
-        self.v = self.v.to(k.dtype)
-        # update cache with new values
-        # https://pytorch.org/docs/stable/generated/torch.Tensor.index_copy_.html#torch.Tensor.index_copy_
-        k = self.k.index_copy(2, input_pos, k)
-        v = self.k.index_copy(2, input_pos, v)
-        return k, v
+        return KVCache(k_shape, v_shape, device, dtype=dtype) # type: ignore

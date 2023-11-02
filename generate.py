@@ -86,7 +86,7 @@ def generate(
 def main(
     prompt: str = "Hello, my name is",
     num_samples: int = 1,
-    max_new_tokens: int = 50,
+    max_new_tokens: int = 250,
     top_k: int = 200,
     temperature: float = 0.8,
     checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
@@ -125,17 +125,17 @@ def main(
 
     check_valid_checkpoint_dir(checkpoint_dir)
 
-    config = Config.from_json(checkpoint_dir / "lit_config.json")
+    config = Config.from_name(checkpoint_dir.name)
 
 
     fabric.print(f"Loading model {str(checkpoint_path)!r} with {config.__dict__}", file=sys.stderr)
     t0 = time.perf_counter()
     with fabric.init_module(empty_init=True):
-        model = GPT(config)
+        model: GPT = GPT(config)
     fabric.print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.", file=sys.stderr)
 
     model.eval()
-    model = fabric.setup_module(model)
+    model = fabric.setup_module(model) # type: ignore
 
     t0 = time.perf_counter()
     load_checkpoint(fabric, model, checkpoint_path)
@@ -151,10 +151,11 @@ def main(
         model.max_seq_length = max_returned_tokens
 
     L.seed_everything(1234)
+    device = fabric.device
     for i in range(num_samples):
         with fabric.init_tensor():
             # enable the kv cache
-            model.set_kv_cache(batch_size=1)
+            model.set_kv_cache(batch_size=1, device=device)
 
         t0 = time.perf_counter()
         y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k) # type: ignore
