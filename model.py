@@ -1,5 +1,6 @@
 import math
-from typing import Any, Optional, Tuple
+from pathlib import Path
+from typing import Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
@@ -7,6 +8,8 @@ from typing_extensions import Self
 from torch import Tensor
 import torch.nn.functional as F
 from enum import Enum
+import json
+from utils import find_multiple
 
 class ModelFamily(Enum):
     LLAMA = "llama"
@@ -57,6 +60,35 @@ class Config:
     @classmethod
     def from_name(cls, name: str) -> Self:
         return name_to_config[name]
+
+    def __post_init__(self) -> None:
+        # used to pad the vocab size to a multiple of 512
+        if self.padded_vocab_size is None:
+            self.padded_vocab_size = find_multiple(self.vocab_size, self.padding_multiple)
+        else:
+            # vocab size shouldn't be larger than padded vocab size
+            self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
+        if self.model_family == ModelFamily.LLAMA.value:
+            self._n_query_groups = self.n_head
+        elif self.model_family == ModelFamily.PHI.value:
+            self._n_query_groups = 1
+        else:
+            raise ValueError(f"Unknown model family {self.model_family}")
+
+    @classmethod
+    def from_json(cls, path: Union[str, Path], **kwargs: Any) -> Self:
+        with open(path, encoding="utf-8") as fp:
+            json_kwargs = json.load(fp)
+        if "condense_ratio" in json_kwargs:  # legacy name
+            json_kwargs["rope_condense_ratio"] = json_kwargs.pop("condense_ratio")
+        if "condense_ratio" in kwargs:  # legacy name
+            kwargs["rope_condense_ratio"] = kwargs.pop("condense_ratio")
+        if "org" in json_kwargs:  # legacy name
+            json_kwargs["hf_config"] = {"name": json_kwargs["name"], "org": json_kwargs.pop("org")}
+        if "org" in kwargs:  # legacy name
+            kwargs["hf_config"] = {"name": kwargs.get("name", json_kwargs["name"]), "org": kwargs.pop("org")}
+        json_kwargs.update(kwargs)
+        return cls(**json_kwargs)
 
 name_to_config = {
     "TinyLlama-1.1B-Chat-v0.3": Config(

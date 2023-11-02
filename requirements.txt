@@ -9,3 +9,4 @@ tensorboard
 lightning
 safetensors
 huggingface_hub
+sentencepiece

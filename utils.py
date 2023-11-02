@@ -8,6 +8,23 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer
 from pprint import pprint
 from icecream import ic
+from pathlib import Path
+import sys
+import math
+import pickle
+import sys
+from contextlib import nullcontext
+from io import BytesIO
+from pathlib import Path
+from typing import TYPE_CHECKING, ContextManager, Dict, List, Mapping, Optional, TypeVar, Union
+
+import lightning as L
+import torch
+import torch.nn as nn
+import torch.utils._device
+from lightning.fabric.strategies.fsdp import FSDPStrategy
+from lightning.fabric.utilities.load import _lazy_load as lazy_load
+from torch.serialization import normalize_storage_type
 
 
 def get_available_device():
@@ -70,7 +87,7 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
 def get_completion_samples(
     logits: torch.Tensor,
     tokenizer: AutoTokenizer,
-    input_ids: torch.Tensor = None,
+    input_ids: torch.Tensor,
 ):
 
     probs = F.softmax(logits, dim=1)
@@ -78,8 +95,8 @@ def get_completion_samples(
     # iterate over batch
     completions = []
     for i in range(token_index.shape[0]):
-        sample_completion = tokenizer.decode(token_index[i])
-        sample_prompt = tokenizer.decode(input_ids[i])
+        sample_completion = tokenizer.decode(token_index[i]) # type: ignore
+        sample_prompt = tokenizer.decode(input_ids[i]) # type: ignore
         print('prompt:\n', sample_prompt, '\ncompletion:\n', sample_completion)
         completions.append((sample_prompt, sample_completion))
 
@@ -100,3 +117,50 @@ def print_trainable_parameters(model):
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
     )
+
+def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
+    files = {
+        "lit_model.pth": (checkpoint_dir / "lit_model.pth").is_file(),
+        "lit_config.json": (checkpoint_dir / "lit_config.json").is_file(),
+        "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file() or (
+            checkpoint_dir / "tokenizer.model"
+        ).is_file(),
+        "tokenizer_config.json": (checkpoint_dir / "tokenizer_config.json").is_file(),
+    }
+    if checkpoint_dir.is_dir():
+        if all(files.values()):
+            # we're good
+            return
+        problem = f" is missing the files: {[f for f, exists in files.items() if not exists]!r}"
+    else:
+        problem = " is not a checkpoint directory"
+
+    # list locally available checkpoints
+    available = list(Path("checkpoints").glob("*/*"))
+    if available:
+        options = "\n --checkpoint_dir ".join([""] + [repr(str(p.resolve())) for p in available])
+        extra = f"\nYou have downloaded locally:{options}\n"
+    else:
+        extra = ""
+
+    error_message = (
+        f"--checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
+        "\nFind download instructions at https://github.com/Lightning-AI/lit-gpt/blob/main/tutorials\n"
+        f"{extra}\nSee all download options by running:\n python scripts/download.py"
+    )
+    print(error_message, file=sys.stderr)
+    raise SystemExit(1)
+
+def load_checkpoint(fabric: L.Fabric, model: nn.Module, checkpoint_path: Path, strict: bool = True) -> None:
+    if isinstance(fabric.strategy, FSDPStrategy):
+        fabric.load_raw(checkpoint_path, model, strict=strict)
+    else:
+        state_dict = lazy_load(checkpoint_path)
+        state_dict = state_dict.get("model", state_dict)
+        model.load_state_dict(state_dict, strict=strict)
+
+def find_multiple(n: int, k: int) -> int:
+    assert k > 0
+    if n % k == 0:
+        return n
+    return n + k - (n % k)
