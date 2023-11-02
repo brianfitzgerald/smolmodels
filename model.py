@@ -37,9 +37,9 @@ class Config:
 
     @property
     def n_query_groups(self) -> int:
-        if self.n_query_groups is None:
+        if self._n_query_groups is None:
             return self.n_head
-        return self.n_query_groups
+        return self._n_query_groups # type: ignore
 
     # no. of embeddings per head
     @property
