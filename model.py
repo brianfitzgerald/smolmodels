@@ -6,6 +6,11 @@ import torch.nn as nn
 from typing_extensions import Self
 from torch import Tensor
 import torch.nn.functional as F
+from enum import Enum
+
+class ModelFamily(Enum):
+    LLAMA = "llama"
+    PHI = "phi"
 
 @dataclass
 class Config:
@@ -28,6 +33,7 @@ class Config:
     _n_query_groups: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
+    model_family: str = ModelFamily.LLAMA.value
 
     @property
     def n_query_groups(self) -> int:
@@ -53,8 +59,9 @@ class Config:
         return name_to_config[name]
 
 name_to_config = {
-    "tiny_llama": Config(
+    "TinyLlama-1.1B-Chat-v0.3": Config(
         name="tiny-llama-1.1b",
+        model_family=ModelFamily.LLAMA.value,
         block_size=2048,
         vocab_size=32000,
         padding_multiple=64,

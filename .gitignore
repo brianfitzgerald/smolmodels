@@ -155,3 +155,7 @@ roleplay_dataset.json
 outputs/
 wandb/
 checkpoints/
+
+*.safetensors
+*.safetensors.*
+*.bin

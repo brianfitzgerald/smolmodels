@@ -7,3 +7,5 @@ icecream
 fire
 tensorboard
 lightning
+safetensors
+huggingface_hub
