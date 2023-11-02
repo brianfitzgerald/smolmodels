@@ -86,9 +86,9 @@ def generate(
 def main(
     prompt: str = "Hello, my name is",
     num_samples: int = 1,
-    max_new_tokens: int = 250,
+    max_new_tokens: int = 50,
     top_k: int = 200,
-    temperature: float = 0.8,
+    temperature: float = 0.2,
     checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
     strategy: str = "auto",
     devices: int = 1,

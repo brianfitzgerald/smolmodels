@@ -15,7 +15,7 @@ class Tokenizer:
         if (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
             from sentencepiece import SentencePieceProcessor
 
-            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path)) # type: ignore
+            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))
             self.backend = "sentencepiece"
             self.bos_id = self.processor.bos_id()
             self.eos_id = self.processor.eos_id()
@@ -33,8 +33,6 @@ class Tokenizer:
                 self.bos_id = self.token_to_id(bos_token) if bos_token is not None else None
                 eos_token = config.get("eos_token")
                 self.eos_id = self.token_to_id(eos_token) if eos_token is not None else None
-                if "added_tokens_decoder" in config:
-                    self.processor.add_special_tokens(config["added_tokens_decoder"])
             if (special_tokens_path := checkpoint_dir / "generation_config.json").is_file():
                 with open(special_tokens_path) as fp:
                     config = json.load(fp)
@@ -48,16 +46,16 @@ class Tokenizer:
     @property
     def vocab_size(self) -> int:
         if self.backend == "huggingface":
-            return self.processor.get_vocab_size(with_added_tokens=True) # type: ignore
+            return self.processor.get_vocab_size(with_added_tokens=False)
         if self.backend == "sentencepiece":
             return self.processor.vocab_size()
         raise RuntimeError
 
     def token_to_id(self, token: str) -> int:
         if self.backend == "huggingface":
-            id_ = self.processor.token_to_id(token) # type: ignore
+            id_ = self.processor.token_to_id(token)
         elif self.backend == "sentencepiece":
-            id_ = self.processor.piece_to_id(token) # type: ignore
+            id_ = self.processor.piece_to_id(token)
         else:
             raise RuntimeError
         if id_ is None:
@@ -84,9 +82,9 @@ class Tokenizer:
         max_length: int = -1,
     ) -> torch.Tensor:
         if self.backend == "huggingface":
-            tokens = self.processor.encode(string).ids # type: ignore
+            tokens = self.processor.encode(string).ids
         elif self.backend == "sentencepiece":
-            tokens = self.processor.encode(string) # type: ignore
+            tokens = self.processor.encode(string)
         else:
             raise RuntimeError
         if bos or (bos is None and self.use_bos):
@@ -102,4 +100,4 @@ class Tokenizer:
 
     def decode(self, tensor: torch.Tensor) -> str:
         tokens = [tensor.item()] if tensor.ndim == 0 else tensor.tolist()
-        return self.processor.decode(tokens) # type: ignore
+        return self.processor.decode(tokens)

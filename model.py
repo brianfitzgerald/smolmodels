@@ -104,13 +104,12 @@ tinyllama_config = Config(
     n_layer=22,
     n_head=32,
     n_embd=2048,
-    _n_query_groups=4,
     rotary_percentage=1.0,
     parallel_residual=False,
     bias=False,
-    _intermediate_size=5632,
     norm_eps=1e-5,
-    extra_tokens=3,
+    _intermediate_size=5632,
+    _n_query_groups=4,
 )
 
 name_to_config = {
@@ -128,14 +127,15 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.dim = dim
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor) -> torch.Tensor:
         dtype = x.dtype
         x = x.float()
-        norm_x = torch.mean(x * x, self.dim, keepdim=True)
+        # NOTE: the original RMSNorm paper implementation is not equivalent
+        norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
         x_normed = x * torch.rsqrt(norm_x + self.eps)
-        return (self.weight * x_normed).to(dtype)
+        return (self.weight * x_normed).to(dtype=dtype)
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         nn.init.ones_(self.weight)
 
 
@@ -186,20 +186,20 @@ class GPT(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         if rope_cache_length is None:
-            rope_cache_length = self.cos.shape[-1]  # type: ignore
+            rope_cache_length = self.cos.size(-1)
         max_seq_length = self.max_seq_length
 
         # initialize the kv cache for all blocks
-        for block in self.transformer.h:  # type: ignore
+        for block in self.transformer.h:
             block.attn.kv_cache = block.attn.build_kv_cache(
                 batch_size, max_seq_length, rope_cache_length, device, dtype
             )
 
         if self.mask_cache is None or self.mask_cache.size(3) != max_seq_length:
-            # https://github.com/pytorch/pytorch/issues/96099
-            ones = torch.ones(
-                (max_seq_length, max_seq_length), device=device, dtype=torch.bool
-            )
+            # passing `attn_mask` to SDPA downgrades it to use the inefficient implementation. since we only need the mask
+            # for the kv-cache support (only during inference), we only create it in that situation
+            # this will be resolved by https://github.com/pytorch/pytorch/issues/96099
+            ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
             self.mask_cache = torch.tril(ones).unsqueeze(0).unsqueeze(0)
 
     def clear_kv_cache(self) -> None:
@@ -274,16 +274,16 @@ class GPT(nn.Module):
 
 # classic MLP with a projection from hidden size to intermediate size
 # and back to hidden
-class LlaMAMLP(nn.Module):
+class LLaMAMLP(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.fc2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
         self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
 
-    def forward(self, x: Tensor) -> Tensor:
-        x_fc_1 = self.fc1(x)
-        x_fc_2 = self.fc2(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_fc_1 = self.fc_1(x)
+        x_fc_2 = self.fc_2(x)
         x = torch.nn.functional.silu(x_fc_1) * x_fc_2
         return self.proj(x)
 
@@ -294,11 +294,11 @@ class Block(nn.Module):
         self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
         self.norm_2 = (
-            nn.Identity()
+            None
             if config.shared_attention_norm
             else RMSNorm(config.n_embd, eps=config.norm_eps)
         )
-        self.mlp = LlaMAMLP(config)
+        self.mlp = LLaMAMLP(config)
         self.config = config
 
     def forward(
@@ -398,16 +398,9 @@ class CausalSelfAttention(nn.Module):
 
         # repeat k and v for non multi-head attention
         # flash attention also requires this
-        if self.config.n_query_groups != self.config.n_head and (
-            input_pos is None or self.config.n_query_groups != 1
-        ):
-            # expand all singleton dimensions to required size
-            k = k.expand(
-                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
-            )
-            v = v.expand(
-                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
-            )
+        if self.config.n_query_groups != self.config.n_head and (input_pos is None or self.config.n_query_groups != 1):
+            k = k.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
+            v = v.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
 
         # Reshape to (B, nh_q, T, hs)
         q = q.reshape(B, -1, T, self.config.head_size)
