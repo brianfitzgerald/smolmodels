@@ -7,7 +7,6 @@ from typing_extensions import Self
 from torch import Tensor
 import torch.nn.functional as F
 
-
 @dataclass
 class Config:
     name: str = ""
@@ -48,6 +47,27 @@ class Config:
     @property
     def intermediate_size(self) -> int:
         return self.n_embd * 4
+
+    @classmethod
+    def from_name(cls, name: str) -> Self:
+        return name_to_config[name]
+
+name_to_config = {
+    "tiny_llama": Config(
+        name="tiny-llama-1.1b",
+        block_size=2048,
+        vocab_size=32000,
+        padding_multiple=64,
+        n_layer=22,
+        n_head=32,
+        n_embd=2048,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_eps=1e-5,
+    )
+}
+
 
 
 # https://github.com/bzhangGo/rmsnorm/blob/master/rmsnorm_torch.py

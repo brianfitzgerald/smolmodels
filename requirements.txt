@@ -6,3 +6,4 @@ wandb
 icecream
 fire
 tensorboard
+lightning
