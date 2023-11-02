@@ -121,7 +121,6 @@ def print_trainable_parameters(model):
 def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
     files = {
         "lit_model.pth": (checkpoint_dir / "lit_model.pth").is_file(),
-        "lit_config.json": (checkpoint_dir / "lit_config.json").is_file(),
         "tokenizer.json OR tokenizer.model": (checkpoint_dir / "tokenizer.json").is_file() or (
             checkpoint_dir / "tokenizer.model"
         ).is_file(),

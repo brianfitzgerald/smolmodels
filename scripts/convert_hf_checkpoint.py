@@ -212,8 +212,6 @@ def convert_hf_checkpoint(
     config = Config.from_name(model_name)
     config_dict = asdict(config)
     print(f"Model config {config_dict}")
-    with open(os.path.join(checkpoint_dir, "lit_config.json"), "w") as json_config: # type: ignore
-        json.dump(config_dict, json_config)
 
     if config.model_family == ModelFamily.LLAMA.value:
         # holder to reconstitute the split q, k, v

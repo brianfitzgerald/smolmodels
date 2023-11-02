@@ -19,7 +19,6 @@ class ModelFamily(Enum):
 
 @dataclass
 class Config:
-    name: str = ""
     block_size: int = 4096
     vocab_size: int = 50254
     padding_multiple: int = 512
@@ -71,31 +70,52 @@ class Config:
     def __post_init__(self) -> None:
         # used to pad the vocab size to a multiple of 512
         if self.padded_vocab_size is None:
-            self.padded_vocab_size = find_multiple(
-                self.vocab_size, self.padding_multiple
-            ) + self.extra_tokens
+            self.padded_vocab_size = (
+                find_multiple(self.vocab_size, self.padding_multiple)
+                + self.extra_tokens
+            )
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
 
+
+tinyllama_chat_config = Config(
+    model_family=ModelFamily.LLAMA.value,
+    block_size=2048,
+    vocab_size=32000,
+    padding_multiple=64,
+    n_layer=22,
+    n_head=32,
+    n_embd=2048,
+    _n_query_groups=4,
+    rotary_percentage=1.0,
+    parallel_residual=False,
+    bias=False,
+    _intermediate_size=5632,
+    norm_eps=1e-5,
+    extra_tokens=3,
+)
+
+tinyllama_config = Config(
+    model_family=ModelFamily.LLAMA.value,
+    block_size=2048,
+    vocab_size=32000,
+    padding_multiple=64,
+    n_layer=22,
+    n_head=32,
+    n_embd=2048,
+    _n_query_groups=4,
+    rotary_percentage=1.0,
+    parallel_residual=False,
+    bias=False,
+    _intermediate_size=5632,
+    norm_eps=1e-5,
+    extra_tokens=3,
+)
+
 name_to_config = {
-    "TinyLlama-1.1B-Chat-v0.3": Config(
-        name="tiny-llama-1.1b",
-        model_family=ModelFamily.LLAMA.value,
-        block_size=2048,
-        vocab_size=32000,
-        padding_multiple=64,
-        n_layer=22,
-        n_head=32,
-        n_embd=2048,
-        _n_query_groups=4,
-        rotary_percentage=1.0,
-        parallel_residual=False,
-        bias=False,
-        _intermediate_size=5632,
-        norm_eps=1e-5,
-        extra_tokens=3
-    )
+    "TinyLlama-1.1B-Chat-v0.3": tinyllama_chat_config,
+    "TinyLlama-1.1B-intermediate-step-480k-1T": tinyllama_config,
 }
 
 
@@ -335,6 +355,7 @@ class KVCache(nn.Module):
         v = self.k.index_copy(2, input_pos, v)
         return k, v
 
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -448,4 +469,4 @@ class CausalSelfAttention(nn.Module):
                 max_seq_length,
                 rope_cache_length + self.config.head_size - self.config.rope_n_elem,
             )
-        return KVCache(k_shape, v_shape, device, dtype=dtype) # type: ignore
+        return KVCache(k_shape, v_shape, device, dtype=dtype)  # type: ignore
