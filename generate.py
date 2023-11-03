@@ -149,10 +149,10 @@ def main(
         model.set_kv_cache(batch_size=1, device=device)
 
         t0 = time.perf_counter()
-        y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k) # type: ignore
+        y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k, eos_id=tokenizer.eos_id) # type: ignore
         t = time.perf_counter() - t0
 
-        print(tokenizer.decode(y))
+        print(tokenizer.decode(y[prompt_length:]))
         tokens_generated = y.size(0) - prompt_length
         print(
             f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec", file=sys.stderr
