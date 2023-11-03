@@ -54,7 +54,7 @@ class Config:
         if self.padded_vocab_size is None:
             self.padded_vocab_size = find_multiple(
                 self.vocab_size, self.padding_multiple
-            )
+            ) + self.extra_tokens
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)

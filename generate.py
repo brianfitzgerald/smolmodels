@@ -14,6 +14,8 @@ sys.path.append(str(wd))
 
 from model import GPT, Config
 from tokenizer import Tokenizer
+from dalle import get_dalle_model_input
+from transformers import AutoTokenizer
 
 @torch.inference_mode()
 def generate(
@@ -82,7 +84,7 @@ def generate(
 
 
 def main(
-    prompt: str = "Hello, my name is",
+    prompt: str = "a dog wearing a hat",
     num_samples: int = 1,
     max_new_tokens: int = 50,
     top_k: int = 200,
@@ -132,7 +134,9 @@ def main(
     load_checkpoint(model, checkpoint_path)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
+    llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
     tokenizer = Tokenizer(checkpoint_dir)
+    prompt = get_dalle_model_input(prompt, llama_tokenizer) # type: ignore
     encoded = tokenizer.encode(prompt, device=device)
     prompt_length = encoded.size(0)
     max_returned_tokens = prompt_length + max_new_tokens

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 from typing import Optional
+from tokenizers import Tokenizer as HFTokenizer
+from transformers import AutoTokenizer
 
 import torch
 
@@ -11,17 +13,7 @@ class Tokenizer:
         self.bos_id = None
         self.eos_id = None
 
-        # some checkpoints have both files, `.model` takes precedence
-        if (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
-            from sentencepiece import SentencePieceProcessor
-
-            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))  # type: ignore
-            self.backend = "sentencepiece"
-            self.bos_id = self.processor.bos_id()
-            self.eos_id = self.processor.eos_id()
-
-        elif (vocabulary_path := checkpoint_dir / "tokenizer.json").is_file():
-            from tokenizers import Tokenizer as HFTokenizer
+        if (vocabulary_path := checkpoint_dir / "tokenizer.json").is_file():
 
             self.processor = HFTokenizer.from_file(str(vocabulary_path))
             self.backend = "huggingface"
@@ -48,6 +40,14 @@ class Tokenizer:
                     self.bos_id = config.get("bos_token_id")
                 if self.eos_id is None:
                     self.eos_id = config.get("eos_token_id")
+        elif (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
+            from sentencepiece import SentencePieceProcessor
+
+            self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))  # type: ignore
+            self.backend = "sentencepiece"
+            self.bos_id = self.processor.bos_id()
+            self.eos_id = self.processor.eos_id()
+
         else:
             raise NotImplementedError
 

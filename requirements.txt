@@ -1,4 +1,4 @@
-torch
+torch==2.1.0
 transformers
 datasets
 evaluate
@@ -6,7 +6,6 @@ wandb
 icecream
 fire
 tensorboard
-lightning
 safetensors
 huggingface_hub
 sentencepiece
