@@ -2,10 +2,11 @@ import sys
 import time
 from pathlib import Path
 from typing import Optional
+from tqdm import tqdm
 
 import torch
 import fire
-from utils import check_valid_checkpoint_dir, load_checkpoint, get_available_device
+from utils import check_valid_checkpoint_dir, load_checkpoint, get_available_device, weight_sum
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -52,7 +53,7 @@ def generate(
     input_pos = torch.arange(0, T, device=device)
 
     # generate up to a fixed number of tokens
-    for _ in range(max_returned_tokens - T):
+    for _ in tqdm(range(max_returned_tokens - T)):
         x = idx.index_select(0, input_pos).view(1, -1)
 
         # forward
@@ -87,8 +88,6 @@ def main(
     top_k: int = 200,
     temperature: float = 0.2,
     checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
-    strategy: str = "auto",
-    devices: int = 1,
 ) -> None:
     """Generates text samples based on a pre-trained model and tokenizer.
 
@@ -123,7 +122,9 @@ def main(
 
     t0 = time.perf_counter()
     model: GPT = GPT(config, device)
-    model.to(device)
+
+    dtype = torch.float32
+    model.to(device=device, dtype=dtype)
 
     model.eval()
 

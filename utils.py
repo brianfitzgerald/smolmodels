@@ -341,3 +341,10 @@ class incremental_save:
     def __exit__(self, type, value, traceback):
         self.zipfile.write_end_of_file()
 
+
+
+def weight_sum(model: nn.Module, name: Optional[str] = None):
+    if not name:
+        name = model.__class__.__name__
+    ws = torch.sum(torch.stack([torch.sum(p) for p in model.parameters()])).item()
+    print(f"weight sum for {name}: {ws}")
