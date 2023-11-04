@@ -115,6 +115,7 @@ def copy_weights_hf_llama(
         q = load_param(q, f"layer {i} q", dtype)
         k = load_param(k, f"layer {i} k", dtype)
         v = load_param(v, f"layer {i} v", dtype)
+        assert config.n_query_groups
         q_per_kv = config.n_head // config.n_query_groups
         qs = torch.split(q, config.head_size * q_per_kv)
         ks = torch.split(k, config.head_size)
@@ -167,6 +168,7 @@ def copy_weights_phi(
             to_name = weight_map[name]
         param = load_param(param, name, dtype)
         if "Wqkv" in name:
+            assert config.n_query_groups
             q_per_kv = config.n_head // config.n_query_groups
             total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
             param = param.view(total_qkv, config.n_query_groups, -1).transpose(0, 1)

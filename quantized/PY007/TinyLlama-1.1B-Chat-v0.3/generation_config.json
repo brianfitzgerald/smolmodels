@@ -1,0 +1,4 @@
+{
+  "max_new_tokens": 32,
+  "transformers_version": "4.35.0"
+}

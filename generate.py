@@ -1,12 +1,18 @@
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, Dict, Tuple
 from tqdm import tqdm
+from torch import Tensor
 
 import torch
 import fire
-from utils import check_valid_checkpoint_dir, load_checkpoint, get_available_device, weight_sum
+from utils import (
+    check_valid_checkpoint_dir,
+    load_checkpoint,
+    get_available_device,
+    weight_sum,
+)
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -17,12 +23,12 @@ from tokenizer import Tokenizer
 from dalle import get_dalle_model_input
 from transformers import AutoTokenizer
 
+
 @torch.inference_mode()
 def generate(
     model: GPT,
-    idx: torch.Tensor,
+    encoded_prompt: Tensor,
     max_returned_tokens: int,
-    *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     eos_id: Optional[int] = None,
@@ -39,24 +45,26 @@ def generate(
         top_k: If specified, only sample among the tokens with the k highest probabilities.
         eos_id: If specified, stop generating any more token once the <eos> token is triggered.
     """
-    T = idx.size(0)
+    T = encoded_prompt.size(0)
     assert max_returned_tokens > T
     if model.max_seq_length < max_returned_tokens - 1:
         # rolling the kv cache based on the `input_pos` value would be necessary. However, doing so would introduce a
         # data dependency on the `input_pos` tensor and impact model compilation. Since this setting is uncommon, we do
         # not support it to avoid negatively impacting the overall speed
-        raise NotImplementedError(f"max_seq_length {model.max_seq_length} needs to be >= {max_returned_tokens - 1}")
+        raise NotImplementedError(
+            f"max_seq_length {model.max_seq_length} needs to be >= {max_returned_tokens - 1}"
+        )
 
-    device, dtype = idx.device, idx.dtype
+    device, dtype = encoded_prompt.device, encoded_prompt.dtype
     # create an empty tensor of the expected final shape and fill in the current tokens
     empty = torch.empty(max_returned_tokens, dtype=dtype, device=device)
-    empty[:T] = idx
-    idx = empty
+    empty[:T] = encoded_prompt
+    encoded_prompt = empty
     input_pos = torch.arange(0, T, device=device)
 
     # generate up to a fixed number of tokens
-    for _ in tqdm(range(max_returned_tokens - T)):
-        x = idx.index_select(0, input_pos).view(1, -1)
+    for i in tqdm(range(max_returned_tokens - T)):
+        x = encoded_prompt.index_select(0, input_pos).view(1, -1)
 
         # forward
         logits = model(x, input_pos)
@@ -68,19 +76,19 @@ def generate(
             logits = torch.where(logits < v[[-1]], -float("Inf"), logits)
 
         probs = torch.nn.functional.softmax(logits, dim=-1)
-        idx_next = torch.multinomial(probs, num_samples=1).to(dtype=dtype)
+        next_token_idx = torch.multinomial(probs, num_samples=1).to(dtype=dtype)
 
         # advance
         input_pos = input_pos[-1:] + 1
 
         # concatenate the new generation
-        idx = idx.index_copy(0, input_pos, idx_next)
+        encoded_prompt = encoded_prompt.index_copy(0, input_pos, next_token_idx)
 
         # if <eos> token is triggered, return the output (stop generation)
-        if idx_next == eos_id:
-            return idx[:input_pos]  # include the EOS token
+        if next_token_idx == eos_id:
+            return encoded_prompt[:input_pos]  # include the EOS token
 
-    return idx
+    return encoded_prompt
 
 
 def main(
@@ -125,18 +133,20 @@ def main(
     t0 = time.perf_counter()
     model: GPT = GPT(config, device)
 
-    dtype = torch.float32
+    dtype = torch.float16
+    print(f"Creating model...")
     model.to(device=device, dtype=dtype)
 
     model.eval()
 
+    print(f"Loading model weights...")
     t0 = time.perf_counter()
     load_checkpoint(model, checkpoint_path)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
     llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
     tokenizer = Tokenizer(checkpoint_dir)
-    prompt = get_dalle_model_input(prompt, llama_tokenizer) # type: ignore
+    prompt = get_dalle_model_input(prompt, llama_tokenizer)  # type: ignore
     encoded = tokenizer.encode(prompt, device=device)
     prompt_length = encoded.size(0)
     max_returned_tokens = prompt_length + max_new_tokens
@@ -149,18 +159,28 @@ def main(
         model.set_kv_cache(batch_size=1, device=device)
 
         t0 = time.perf_counter()
-        y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k, eos_id=tokenizer.eos_id) # type: ignore
+        y = generate(
+            model,
+            encoded,
+            max_returned_tokens,
+            temperature,
+            top_k,
+            tokenizer.eos_id,
+        )
         t = time.perf_counter() - t0
 
         print(tokenizer.decode(y[prompt_length:]))
         tokens_generated = y.size(0) - prompt_length
         print(
-            f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec", file=sys.stderr
+            f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec",
+            file=sys.stderr,
         )
-        print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB", file=sys.stderr)
+        print(
+            f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
-
     torch.set_float32_matmul_precision("high")
     fire.Fire(main)

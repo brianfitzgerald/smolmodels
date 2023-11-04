@@ -2,6 +2,7 @@ import os
 from typing import Dict, List, Tuple
 from transformers import PreTrainedTokenizer
 
+
 def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
     """
     Prepares the system and user-assistant style messages for inference.
@@ -26,6 +27,14 @@ def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
     user_conversation = [
         {
             "role": "user",
+            "content": "Create an imaginative image descriptive caption or modify an earlier caption for the user input : 'make the light red'",
+        },
+        {
+            "role": "assistant",
+            "content": "a pale figure with long white hair stands in the center of a dark forest, holding a sword high above his head. the blade glows with a red light, casting a warm glow on the trees and bushes surrounding him.",
+        },
+        {
+            "role": "user",
             "content": "Create an imaginative image descriptive caption or modify an earlier caption for the user input : 'draw a frog playing dominoes'",
         },
         {
@@ -40,12 +49,9 @@ def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
     return system_message, user_conversation
 
 
-
 def get_dalle_model_input(user_input: str, tokenizer: PreTrainedTokenizer):
     system_message, user_conversation = get_messages_for_chat()
-    updated_prompt = user_conversation[-1]["content"].format(
-        prompt=user_input
-    )
+    updated_prompt = user_conversation[-1]["content"].format(prompt=user_input)
     user_conversation[-1]["content"] = updated_prompt
 
     final_message = [system_message, *user_conversation]
