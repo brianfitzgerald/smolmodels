@@ -71,7 +71,7 @@ def main(
     prompt: str = "a dog with a hat",
     model_name: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
     force_quantize: bool = False,
-    n_samples = 100,
+    n_samples = 10,
 ):
 
     model_dir = Path(model_name)

@@ -3,10 +3,10 @@ from typing import Dict, List, Tuple
 from transformers import PreTrainedTokenizer
 
 
-def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
+def get_dalle_model_input(
+    user_input: str, message_history: List[Dict], tokenizer: PreTrainedTokenizer
+):
     """
-    Prepares the system and user-assistant style messages for inference.
-
     Example messages come from the DALL-E 3 technical report:
     https://cdn.openai.com/papers/dall-e-3.pdf.
     """
@@ -41,21 +41,15 @@ def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
             "role": "assistant",
             "content": "a frog sits on a worn table playing a game of dominoes with an elderly raccoon. the table is covered in a green cloth, and the frog is wearing a jacket and a pair of jeans. The scene is set in a forest, with a large tree in the background.",
         },
-        {
-            "role": "user",
-            "content": "Create an imaginative image descriptive caption or modify an earlier caption for the user input : '{prompt}'",
-        },
     ]
-    return system_message, user_conversation
+    
+    user_conversation.extend(message_history)
 
-
-def get_dalle_model_input(user_input: str, tokenizer: PreTrainedTokenizer):
-    system_message, user_conversation = get_messages_for_chat()
-    updated_prompt = user_conversation[-1]["content"].format(prompt=user_input)
-    user_conversation[-1]["content"] = updated_prompt
+    formatted_new_prompt = f"Create an imaginative image descriptive caption or modify an earlier caption for the user input : '{user_input}'"
+    user_conversation.append({"role": "user", "content": formatted_new_prompt})
 
     final_message = [system_message, *user_conversation]
     full_conversation_formatted: str = tokenizer.apply_chat_template(  # type: ignore
         final_message, tokenize=False, add_generation_prompt=True
     )
-    return full_conversation_formatted
+    return full_conversation_formatted, user_conversation

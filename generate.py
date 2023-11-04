@@ -1,7 +1,7 @@
 import sys
 import time
 from pathlib import Path
-from typing import Literal, Optional, Dict, Tuple
+from typing import Literal, Optional, Dict, Tuple, List
 from tqdm import tqdm
 from torch import Tensor
 
@@ -22,6 +22,7 @@ from model import GPT, Config
 from tokenizer import Tokenizer
 from dalle import get_dalle_model_input
 from transformers import AutoTokenizer
+from prompt_toolkit import prompt, PromptSession
 
 
 @torch.inference_mode()
@@ -92,12 +93,11 @@ def generate(
 
 
 def main(
-    prompt: str = "a dog wearing a hat",
-    num_samples: int = 1,
+    num_samples: int = 10,
     max_new_tokens: int = 50,
     top_k: int = 200,
     temperature: float = 0.2,
-    checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
+    checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
 ) -> None:
     """Generates text samples based on a pre-trained model and tokenizer.
 
@@ -119,44 +119,50 @@ def main(
         precision: Indicates the Fabric precision setting to use.
     """
 
-    checkpoint_dir = Path(checkpoint_dir)
+    checkpoint_dir_path = Path(checkpoint_dir)
     model_file = "lit_model.pth"
-    checkpoint_path = checkpoint_dir / model_file
+    checkpoint_path = checkpoint_dir_path / model_file
 
-    check_valid_checkpoint_dir(checkpoint_dir)
+    check_valid_checkpoint_dir(checkpoint_dir_path)
 
-    config = Config.from_name(checkpoint_dir.name)
+    config = Config.from_name(checkpoint_dir_path.name)
 
     device = get_available_device()
     print(f"Using device: {str(device)}")
 
     t0 = time.perf_counter()
-    model: GPT = GPT(config, device)
 
     dtype = torch.float16
-    print(f"Creating model...")
+    print(f"Instantiating model...")
+    t0 = time.perf_counter()
+    model: GPT = GPT(config, device)
     model.to(device=device, dtype=dtype)
-
     model.eval()
+    print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
 
     print(f"Loading model weights...")
     t0 = time.perf_counter()
     load_checkpoint(model, checkpoint_path)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
-    llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
-    tokenizer = Tokenizer(checkpoint_dir)
-    prompt = get_dalle_model_input(prompt, llama_tokenizer)  # type: ignore
-    encoded = tokenizer.encode(prompt, device=device)
-    prompt_length = encoded.size(0)
-    max_returned_tokens = prompt_length + max_new_tokens
+    message_history: List[Dict] = []
 
-    # set the max_seq_length to limit the memory usage to what we need
-    model.max_seq_length = max_returned_tokens
+    llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
+    tokenizer = Tokenizer(checkpoint_dir_path)
+
+    model.set_kv_cache(batch_size=1, device=device)
 
     for i in range(num_samples):
-        # enable the kv cache
-        model.set_kv_cache(batch_size=1, device=device)
+
+        user_prompt = prompt("Enter your prompt or modification: ")
+
+        full_formatted_prompt, message_history = get_dalle_model_input(user_prompt, message_history, llama_tokenizer)  # type: ignore
+        encoded = tokenizer.encode(full_formatted_prompt, device=device)
+        prompt_length = encoded.size(0)
+        max_returned_tokens = prompt_length + max_new_tokens
+
+        # set the max_seq_length to limit the memory usage to what we need
+        model.max_seq_length = max_returned_tokens
 
         t0 = time.perf_counter()
         y = generate(
@@ -169,10 +175,13 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        print(tokenizer.decode(y[prompt_length:]))
-        tokens_generated = y.size(0) - prompt_length
+        new_model_output = tokenizer.decode(y[prompt_length:])
+        print(new_model_output)
+        message_history.append({"role": "assistant", "content": new_model_output})
+
+        num_tokens_generated = y.size(0) - prompt_length
         print(
-            f"Time for inference {i + 1}: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec",
+            f"Time for inference {i + 1}: {t:.02f} sec total, {num_tokens_generated / t:.02f} tokens/sec",
             file=sys.stderr,
         )
         print(
