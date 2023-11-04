@@ -320,7 +320,6 @@ def convert_hf_checkpoint(
         for bin_file in sorted(bin_files):
             print("Processing", bin_file)
             hf_weights = lazy_load(bin_file)
-            breakpoint()
             copy_fn(sd, hf_weights, saver=saver, dtype=dtype)  # type: ignore
         gc.collect()
         print("Saving converted checkpoint")

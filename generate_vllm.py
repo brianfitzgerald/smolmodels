@@ -3,7 +3,7 @@ from awq.models.base import BaseAWQForCausalLM
 from transformers import AutoTokenizer
 import fire
 from vllm import LLM, SamplingParams
-from dalle import model_conversation_input
+from chat import model_conversation_input
 from pathlib import Path
 import time
 import torch.nn as nn

@@ -1,7 +1,7 @@
 import sys
 import time
 from pathlib import Path
-from typing import Literal, Optional, Dict, Tuple, List
+from typing import Optional, Dict, List
 from tqdm import tqdm
 from torch import Tensor
 
@@ -11,7 +11,6 @@ from utils import (
     check_valid_checkpoint_dir,
     load_checkpoint,
     get_available_device,
-    weight_sum,
 )
 
 # support running without installing as a package
@@ -20,9 +19,8 @@ sys.path.append(str(wd))
 
 from model import GPT, Config
 from tokenizer import Tokenizer
-from dalle import model_conversation_input
-from transformers import AutoTokenizer
-from prompt_toolkit import prompt, PromptSession
+from chat import model_conversation_input
+from prompt_toolkit import prompt
 
 
 @torch.inference_mode()
@@ -94,7 +92,7 @@ def generate(
 
 def main(
     num_samples: int = 10,
-    max_new_tokens: int = 64,
+    max_new_tokens: int = 128,
     top_k: int = 200,
     temperature: float = 0.2,
     checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
@@ -147,21 +145,20 @@ def main(
 
     message_history: List[Dict] = []
 
-    llama_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
     tokenizer = Tokenizer(checkpoint_dir_path)
 
     model.set_kv_cache(batch_size=1, device=device)
 
     for i in range(num_samples):
 
-        user_prompt = prompt("Enter your prompt or modification: ")
+        user_prompt = prompt("Enter a message: ")
         message_history.append({"role": "user", "content": user_prompt})
 
-        full_formatted_prompt = model_conversation_input(user_prompt, message_history, llama_tokenizer)  # type: ignore
+        full_formatted_prompt = model_conversation_input(user_prompt, message_history)  # type: ignore
+
         encoded = tokenizer.encode(full_formatted_prompt, device=device)
         prompt_length = encoded.size(0)
         max_returned_tokens = prompt_length + max_new_tokens
-        breakpoint()
 
         # set the max_seq_length to limit the memory usage to what we need
         model.max_seq_length = max_returned_tokens
@@ -177,7 +174,8 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        new_model_output = tokenizer.decode(y[prompt_length:])
+        model_output = tokenizer.decode(y)
+        new_model_output = model_output[prompt_length:]
         print(new_model_output)
         message_history.append({"role": "assistant", "content": new_model_output})
 

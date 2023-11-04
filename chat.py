@@ -1,12 +1,9 @@
-import os
-from typing import Dict, List, Tuple
-from transformers import PreTrainedTokenizer
+from typing import Dict, List
 
 
 def model_conversation_input(
     user_input: str,
     message_history: List[Dict],
-    tokenizer: PreTrainedTokenizer,
     prompt_enhancer_mode: bool = False,
 ):
     """
@@ -53,12 +50,14 @@ def model_conversation_input(
         formatted_new_prompt = f"Create an imaginative image descriptive caption or modify an earlier caption for the user input : '{user_input}'"
         user_conversation.append({"role": "user", "content": formatted_new_prompt})
     else:
-        system_message = {"role": "system", "content": ""}
+        system_message = {"role": "system", "content": "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions."}
 
     user_conversation.extend(message_history)
+    # formatted_prompt = f"<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
 
-    final_message = [system_message, *user_conversation]
-    full_conversation_formatted: str = tokenizer.apply_chat_template(  # type: ignore
-        final_message, tokenize=False, add_generation_prompt=True
+    all_messages: List[Dict] = [system_message, *user_conversation]
+    full_conversation_formatted = "\n".join(
+        [f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>" for message in all_messages]
     )
+    
     return full_conversation_formatted
