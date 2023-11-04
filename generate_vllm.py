@@ -3,7 +3,7 @@ from awq.models.base import BaseAWQForCausalLM
 from transformers import AutoTokenizer
 import fire
 from vllm import LLM, SamplingParams
-from dalle import get_dalle_model_input
+from dalle import model_conversation_input
 from pathlib import Path
 import time
 import torch.nn as nn
@@ -101,7 +101,7 @@ def main(
     print("Loading model...")
     sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=64)
     model = LLM(quantized_model_path_str, dtype="auto", quantization="awq")
-    dalle_model_input = get_dalle_model_input(prompt, tokenizer)  # type: ignore
+    dalle_model_input = model_conversation_input(prompt, tokenizer)  # type: ignore
     for _ in range(n_samples):
         t0 = time.perf_counter()
         outputs = model.generate(dalle_model_input, sampling_params)

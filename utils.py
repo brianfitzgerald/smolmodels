@@ -79,7 +79,6 @@ class Task(IntEnum):
 
 
 def get_model_output_for_loss(outputs, batch, device):
-    breakpoint()
     logits = outputs["logits"]
     batch_size, seq_length, num_classes = logits.shape
     logits = logits.view(batch_size * seq_length, num_classes)
