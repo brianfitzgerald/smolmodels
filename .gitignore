@@ -159,3 +159,4 @@ checkpoints/
 *.safetensors
 *.safetensors.*
 *.bin
+quantized/
