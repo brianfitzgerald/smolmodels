@@ -59,8 +59,7 @@ def copy_weights_gpt_neox(
         param = load_param(param, name, dtype)
         if saver is not None:
             param = saver.store_early(param)
-        state_dict[to_name] = param # type: ignore
-
+        state_dict[to_name] = param  # type: ignore
 
 
 def copy_weights_hf_llama(
@@ -92,11 +91,11 @@ def copy_weights_hf_llama(
             from_name, number = layer_template(name, 2)
             qkv = qkv_weights.setdefault(number, [None, None, None])
             if "q_proj" in name:
-                qkv[0] = param # type: ignore
+                qkv[0] = param  # type: ignore
             elif "k_proj" in name:
-                qkv[1] = param # type: ignore
+                qkv[1] = param  # type: ignore
             elif "v_proj" in name:
-                qkv[2] = param # type: ignore
+                qkv[2] = param  # type: ignore
             to_name = weight_map[from_name]
             if to_name is None:
                 continue
@@ -106,7 +105,69 @@ def copy_weights_hf_llama(
         param = load_param(param, name, dtype)
         if saver is not None:
             param = saver.store_early(param)
-        state_dict[to_name] = param # type: ignore
+        state_dict[to_name] = param  # type: ignore
+
+    for i, (q, k, v) in list(qkv_weights.items()):
+        if q is None or k is None or v is None:
+            # split across different .bin files
+            continue
+        q = load_param(q, f"layer {i} q", dtype)
+        k = load_param(k, f"layer {i} k", dtype)
+        v = load_param(v, f"layer {i} v", dtype)
+        assert config.n_query_groups
+        q_per_kv = config.n_head // config.n_query_groups
+        qs = torch.split(q, config.head_size * q_per_kv)
+        ks = torch.split(k, config.head_size)
+        vs = torch.split(v, config.head_size)
+        cycled = [t for group in zip(qs, ks, vs) for t in group]
+        qkv = torch.cat(cycled)
+        state_dict[f"transformer.h.{i}.attn.attn.weight"] = qkv
+        del qkv_weights[i]
+
+
+def copy_weights_stablelm(
+    config: Config,
+    state_dict: Dict[str, torch.Tensor],
+    hf_weights: Dict[str, Union[torch.Tensor, NotYetLoadedTensor]],
+    saver: Optional[incremental_save] = None,
+    dtype: Optional[torch.dtype] = None,
+) -> None:
+    weight_map = {
+        "model.embed_tokens.weight": "transformer.wte.weight",
+        "model.layers.{}.input_layernorm.weight": "transformer.h.{}.norm_1.weight",
+        "model.layers.{}.self_attn.q_proj.weight": None,
+        "model.layers.{}.self_attn.k_proj.weight": None,
+        "model.layers.{}.self_attn.v_proj.weight": None,
+        "model.layers.{}.self_attn.o_proj.weight": "transformer.h.{}.attn.proj.weight",
+        "model.layers.{}.self_attn.rotary_emb.inv_freq": None,
+        "model.layers.{}.post_attention_layernorm.weight": "transformer.h.{}.norm_2.weight",
+        "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.fc_1.weight",
+        "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
+        "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
+        "model.norm.weight": "transformer.ln_f.weight",
+        "lm_head.weight": "lm_head.weight",
+    }
+
+    for name, param in hf_weights.items():
+        if "model.layers" in name:
+            from_name, number = layer_template(name, 2)
+            qkv = qkv_weights.setdefault(number, [None, None, None])
+            if "q_proj" in name:
+                qkv[0] = param  # type: ignore
+            elif "k_proj" in name:
+                qkv[1] = param  # type: ignore
+            elif "v_proj" in name:
+                qkv[2] = param  # type: ignore
+            to_name = weight_map[from_name]
+            if to_name is None:
+                continue
+            to_name = to_name.format(number)
+        else:
+            to_name = weight_map[name]
+        param = load_param(param, name, dtype)
+        if saver is not None:
+            param = saver.store_early(param)
+        state_dict[to_name] = param  # type: ignore
 
     for i, (q, k, v) in list(qkv_weights.items()):
         if q is None or k is None or v is None:
@@ -177,7 +238,7 @@ def copy_weights_phi(
                 param = param.squeeze()
         if saver is not None:
             param = saver.store_early(param)
-        state_dict[to_name] = param # type: ignore
+        state_dict[to_name] = param  # type: ignore
 
 
 def layer_template(layer_name: str, idx: int) -> Tuple[str, int]:
@@ -188,15 +249,23 @@ def layer_template(layer_name: str, idx: int) -> Tuple[str, int]:
     return from_name, number
 
 
-def load_param(param: Union[torch.Tensor, NotYetLoadedTensor], name: str, dtype: Optional[torch.dtype]) -> torch.Tensor:
+def load_param(
+    param: Union[torch.Tensor, NotYetLoadedTensor],
+    name: str,
+    dtype: Optional[torch.dtype],
+) -> torch.Tensor:
     if hasattr(param, "_load_tensor"):
         # support tensors loaded via `lazy_load()`
         print(f"Loading {name!r} into RAM")
-        param = param._load_tensor() # type: ignore
-    if dtype is not None and type(dtype) is not NotYetLoadedTensor and dtype != param.dtype:
+        param = param._load_tensor()  # type: ignore
+    if (
+        dtype is not None
+        and type(dtype) is not NotYetLoadedTensor
+        and dtype != param.dtype
+    ):
         print(f"Converting {name!r} from {param.dtype} to {dtype}")
         param = param.to(dtype)
-    return param # type: ignore
+    return param  # type: ignore
 
 
 @torch.inference_mode()
@@ -221,6 +290,8 @@ def convert_hf_checkpoint(
         copy_fn = partial(copy_weights_hf_llama, config, qkv_weights)
     elif config.model_family == ModelFamily.PHI.value:
         copy_fn = partial(copy_weights_phi, config)
+    elif config.model_family == ModelFamily.STABLE_LM.value:
+        copy_fn = partial(copy_weights_stablelm, config)
     else:
         copy_fn = copy_weights_gpt_neox
 
@@ -228,7 +299,9 @@ def convert_hf_checkpoint(
     sd = {}
 
     # Load the json file containing weight mapping
-    pytorch_bin_map_json_path = os.path.join(checkpoint_dir, "pytorch_model.bin.index.json")
+    pytorch_bin_map_json_path = os.path.join(
+        checkpoint_dir, "pytorch_model.bin.index.json"
+    )
     checkpoint_path = Path(checkpoint_dir)
     if os.path.exists(pytorch_bin_map_json_path):  # not all checkpoints have this file
         with open(pytorch_bin_map_json_path) as json_map:
@@ -247,7 +320,8 @@ def convert_hf_checkpoint(
         for bin_file in sorted(bin_files):
             print("Processing", bin_file)
             hf_weights = lazy_load(bin_file)
-            copy_fn(sd, hf_weights, saver=saver, dtype=dtype) # type: ignore
+            breakpoint()
+            copy_fn(sd, hf_weights, saver=saver, dtype=dtype)  # type: ignore
         gc.collect()
         print("Saving converted checkpoint")
         saver.save(sd)

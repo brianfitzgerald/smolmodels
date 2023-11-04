@@ -11,6 +11,7 @@ from utils import find_multiple
 class ModelFamily(Enum):
     LLAMA = "llama"
     PHI = "phi"
+    STABLE_LM = "stablelm"
 
 
 @dataclass
@@ -87,6 +88,21 @@ name_to_config = {
     ),
     "TinyLlama-1.1B-intermediate-step-480k-1T": Config(
         model_family=ModelFamily.LLAMA.value,
+        block_size=2048,
+        vocab_size=32000,
+        padding_multiple=64,
+        n_layer=22,
+        n_head=32,
+        n_embd=2048,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        norm_eps=1e-5,
+        intermediate_size=5632,
+        n_query_groups=4,
+    ),
+    "Nous-Capybara-3B-V1.9": Config(
+        model_family=ModelFamily.STABLE_LM.value,
         block_size=2048,
         vocab_size=32000,
         padding_multiple=64,
