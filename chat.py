@@ -82,3 +82,13 @@ def clip_message_history_to_max_tokens(
             return message_history[i:]
         total_tokens += token_count
     return message_history
+
+def extract_text_from_generated_message(message: str):
+    """
+    Extract the text from a ChatML response.
+    """
+    message = message.replace("(?:assistant|\\n|<|(.*?)|>)", "")
+    message = message.replace("<|im_start|>", "")
+    message = message.replace("<|im_end|>", "")
+    message = message.strip()
+    return message

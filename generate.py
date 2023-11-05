@@ -19,7 +19,11 @@ sys.path.append(str(wd))
 
 from model import GPT, Config
 from tokenizer import Tokenizer
-from chat import clip_message_history_to_max_tokens, model_conversation_input
+from chat import (
+    clip_message_history_to_max_tokens,
+    extract_text_from_generated_message,
+    model_conversation_input,
+)
 from prompt_toolkit import prompt
 
 
@@ -85,7 +89,7 @@ def generate(
 
         # if <eos> token is triggered, return the output (stop generation)
         # if the token was generated in the first few indices, then continue
-        if next_token_idx == eos_id and i > 5:
+        if next_token_idx == eos_id and i > 10:
             return encoded_prompt[:input_pos]  # include the EOS token
 
     return encoded_prompt
@@ -93,7 +97,7 @@ def generate(
 
 def main(
     num_samples: int = 10,
-    max_new_tokens: int = 64,
+    max_new_tokens: int = 256,
     top_k: int = 64,
     temperature: float = 0.2,
     checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
@@ -155,15 +159,17 @@ def main(
         user_prompt = prompt("Enter a message: ")
         message_history.append({"role": "user", "content": user_prompt})
 
+        print(f"Message history:\n{message_history}")
         full_formatted_prompt = model_conversation_input(user_prompt, message_history)  # type: ignore
         full_formatted_prompt = clip_message_history_to_max_tokens(
             full_formatted_prompt, model.max_seq_length, tokenizer
         )
         full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
+        print(f"Formatted prompt str:\n{full_formatted_prompt_str}")
         encoded = tokenizer.encode(full_formatted_prompt_str, device=device)
-        prompt_length = encoded.shape[0]
-        max_returned_tokens = prompt_length + max_new_tokens
+        encoded_context_length = encoded.shape[0]
+        max_returned_tokens = encoded_context_length + max_new_tokens
 
         # set the max_seq_length to limit the memory usage to what we need
         model.max_seq_length = max_returned_tokens
@@ -180,11 +186,12 @@ def main(
         t = time.perf_counter() - t0
 
         model_output = tokenizer.decode(y)
-        new_model_output = model_output[prompt_length:]
-        print(new_model_output)
+        new_model_output = model_output[encoded_context_length:]
+        new_model_output = extract_text_from_generated_message(new_model_output)
+        print(f"New model output:\n{new_model_output}")
         message_history.append({"role": "assistant", "content": new_model_output})
 
-        num_tokens_generated = y.size(0) - prompt_length
+        num_tokens_generated = y.size(0) - encoded_context_length
         print(
             f"Time for inference {i + 1}: {t:.02f} sec total, {num_tokens_generated / t:.02f} tokens/sec",
             file=sys.stderr,
