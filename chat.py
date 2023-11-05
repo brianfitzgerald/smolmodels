@@ -1,4 +1,5 @@
 from typing import Dict, List
+from tokenizer import Tokenizer
 
 
 def model_conversation_input(
@@ -50,14 +51,34 @@ def model_conversation_input(
         formatted_new_prompt = f"Create an imaginative image descriptive caption or modify an earlier caption for the user input : '{user_input}'"
         user_conversation.append({"role": "user", "content": formatted_new_prompt})
     else:
-        system_message = {"role": "system", "content": "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions."}
+        system_message = {
+            "role": "system",
+            "content": "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+        }
 
     user_conversation.extend(message_history)
-    # formatted_prompt = f"<|im_start|>user\n{user_prompt}<|im_end|>\n<|im_start|>assistant\n"
 
     all_messages: List[Dict] = [system_message, *user_conversation]
-    full_conversation_formatted = "\n".join(
-        [f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>" for message in all_messages]
-    )
-    
+    full_conversation_formatted = [
+        f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>"
+        for message in all_messages
+    ]
+
     return full_conversation_formatted
+
+
+def clip_message_history_to_max_tokens(
+    message_history: List[str], max_tokens: int, tokenizer: Tokenizer
+) -> List[str]:
+    """
+    Clip the message history to the max number of tokens allowed for the model.
+    """
+    total_tokens = 0
+    for i in range(len(message_history)):
+        encoded_msg = tokenizer.encode(message_history[i])
+        token_count = encoded_msg.shape[0]
+        if total_tokens + token_count > max_tokens:
+            print(f"Clipping message history to last {i} messages.")
+            return message_history[i:]
+        total_tokens += token_count
+    return message_history

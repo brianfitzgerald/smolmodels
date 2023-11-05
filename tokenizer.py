@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 from tokenizers import Tokenizer as HFTokenizer
 from transformers import AutoTokenizer
+from sentencepiece import SentencePieceProcessor
 
 import torch
 
@@ -41,7 +42,6 @@ class Tokenizer:
                 if self.eos_id is None:
                     self.eos_id = config.get("eos_token_id")
         elif (vocabulary_path := checkpoint_dir / "tokenizer.model").is_file():
-            from sentencepiece import SentencePieceProcessor
 
             self.processor = SentencePieceProcessor(model_file=str(vocabulary_path))  # type: ignore
             self.backend = "sentencepiece"

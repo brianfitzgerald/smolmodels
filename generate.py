@@ -19,7 +19,7 @@ sys.path.append(str(wd))
 
 from model import GPT, Config
 from tokenizer import Tokenizer
-from chat import model_conversation_input
+from chat import clip_message_history_to_max_tokens, model_conversation_input
 from prompt_toolkit import prompt
 
 
@@ -84,7 +84,8 @@ def generate(
         encoded_prompt = encoded_prompt.index_copy(0, input_pos, next_token_idx)
 
         # if <eos> token is triggered, return the output (stop generation)
-        if next_token_idx == eos_id:
+        # if the token was generated in the first few indices, then continue
+        if next_token_idx == eos_id and i > 5:
             return encoded_prompt[:input_pos]  # include the EOS token
 
     return encoded_prompt
@@ -92,8 +93,8 @@ def generate(
 
 def main(
     num_samples: int = 10,
-    max_new_tokens: int = 128,
-    top_k: int = 200,
+    max_new_tokens: int = 64,
+    top_k: int = 64,
     temperature: float = 0.2,
     checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
 ) -> None:
@@ -119,7 +120,7 @@ def main(
 
     checkpoint_dir_path = Path(checkpoint_dir)
     model_file = "lit_model.pth"
-    checkpoint_path = checkpoint_dir_path / model_file
+    model_checkpoint_path = checkpoint_dir_path / model_file
 
     check_valid_checkpoint_dir(checkpoint_dir_path)
 
@@ -134,13 +135,14 @@ def main(
     print(f"Instantiating model...")
     t0 = time.perf_counter()
     model: GPT = GPT(config, device)
-    model.to(device=device, dtype=dtype)
     model.eval()
     print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
 
     print(f"Loading model weights...")
     t0 = time.perf_counter()
-    load_checkpoint(model, checkpoint_path)
+    model_ckpt = torch.load(model_checkpoint_path)
+    model.load_state_dict(model_ckpt)
+    model.to(device)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
     message_history: List[Dict] = []
@@ -150,14 +152,17 @@ def main(
     model.set_kv_cache(batch_size=1, device=device)
 
     for i in range(num_samples):
-
         user_prompt = prompt("Enter a message: ")
         message_history.append({"role": "user", "content": user_prompt})
 
         full_formatted_prompt = model_conversation_input(user_prompt, message_history)  # type: ignore
+        full_formatted_prompt = clip_message_history_to_max_tokens(
+            full_formatted_prompt, model.max_seq_length, tokenizer
+        )
+        full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
-        encoded = tokenizer.encode(full_formatted_prompt, device=device)
-        prompt_length = encoded.size(0)
+        encoded = tokenizer.encode(full_formatted_prompt_str, device=device)
+        prompt_length = encoded.shape[0]
         max_returned_tokens = prompt_length + max_new_tokens
 
         # set the max_seq_length to limit the memory usage to what we need
