@@ -1,3 +1,4 @@
+from pprint import pprint
 import sys
 import time
 from pathlib import Path
@@ -98,7 +99,7 @@ def generate(
 def main(
     num_samples: int = 10,
     max_new_tokens: int = 256,
-    top_k: int = 64,
+    top_k: int = 256,
     temperature: float = 0.2,
     checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
 ) -> None:
@@ -185,10 +186,12 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        model_output = tokenizer.decode(y)
-        new_model_output = model_output[encoded_context_length:]
+        full_model_output = tokenizer.decode(y)
+        new_model_output = tokenizer.decode(y[encoded_context_length:max_new_tokens])
+        print(f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}")
         new_model_output = extract_text_from_generated_message(new_model_output)
-        print(f"New model output:\n{new_model_output}")
+        print(f"Full output:\n{full_model_output}")
+        print(f"New output:\n{new_model_output}")
         message_history.append({"role": "assistant", "content": new_model_output})
 
         num_tokens_generated = y.size(0) - encoded_context_length

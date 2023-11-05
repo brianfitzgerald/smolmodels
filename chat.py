@@ -1,5 +1,6 @@
 from typing import Dict, List
 from tokenizer import Tokenizer
+import re
 
 
 def model_conversation_input(
@@ -11,9 +12,9 @@ def model_conversation_input(
     Example messages come from the DALL-E 3 technical report:
     https://cdn.openai.com/papers/dall-e-3.pdf.
     """
-    user_conversation = []
 
     if prompt_enhancer_mode:
+        user_conversation: List[Dict] = []
         system_message = {
             "role": "system",
             "content": """You are part of a team of bots that creates images. You work with an assistant bot that will draw anything you say in square brackets. For example, outputting "a beautiful morning in the woods with the sun peaking through the trees" will trigger your partner bot to output an image of a forest morning, as described. You will be prompted by people looking to create detailed, amazing images. The way to accomplish this is to take their short prompts and make them extremely detailed and descriptive.
@@ -47,18 +48,17 @@ def model_conversation_input(
             },
         ]
 
-        user_conversation.extend(dalle_base_conversation)
         formatted_new_prompt = f"Create an imaginative image descriptive caption or modify an earlier caption for the user input : '{user_input}'"
         user_conversation.append({"role": "user", "content": formatted_new_prompt})
+        all_messages: List[Dict] = [*dalle_base_conversation, *user_conversation]
     else:
         system_message = {
             "role": "system",
-            "content": "A chat between a curious human and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+            "content": "A chat between a human and an assistant named Steve. The assistant gives helpful, detailed, and polite answers to the user's questions.",
         }
 
-    user_conversation.extend(message_history)
+        all_messages: List[Dict] = [system_message, *message_history]
 
-    all_messages: List[Dict] = [system_message, *user_conversation]
     full_conversation_formatted = [
         f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>"
         for message in all_messages
@@ -83,12 +83,11 @@ def clip_message_history_to_max_tokens(
         total_tokens += token_count
     return message_history
 
+
 def extract_text_from_generated_message(message: str):
     """
     Extract the text from a ChatML response.
     """
-    message = message.replace("(?:assistant|\\n|<|(.*?)|>)", "")
-    message = message.replace("<|im_start|>", "")
-    message = message.replace("<|im_end|>", "")
+    message = re.sub(r"(?:assistant|system|user|\n|<\|(.*?)\|>)", "", message)
     message = message.strip()
     return message
