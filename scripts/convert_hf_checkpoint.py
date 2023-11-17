@@ -26,29 +26,41 @@ def copy_weights_gpt_neox(
     dtype: Optional[torch.dtype] = None,
 ) -> None:
     weight_map = {
-        "gpt_neox.embed_in.weight": "transformer.wte.weight",
-        "gpt_neox.layers.{}.input_layernorm.bias": "transformer.h.{}.norm_1.bias",
-        "gpt_neox.layers.{}.input_layernorm.weight": "transformer.h.{}.norm_1.weight",
-        "gpt_neox.layers.{}.attention.query_key_value.bias": "transformer.h.{}.attn.attn.bias",
-        "gpt_neox.layers.{}.attention.query_key_value.weight": "transformer.h.{}.attn.attn.weight",
-        "gpt_neox.layers.{}.attention.dense.bias": "transformer.h.{}.attn.proj.bias",
-        "gpt_neox.layers.{}.attention.dense.weight": "transformer.h.{}.attn.proj.weight",
-        "gpt_neox.layers.{}.attention.rotary_emb.inv_freq": None,
-        "gpt_neox.layers.{}.attention.bias": None,
-        "gpt_neox.layers.{}.attention.masked_bias": None,
-        "gpt_neox.layers.{}.post_attention_layernorm.bias": "transformer.h.{}.norm_2.bias",
-        "gpt_neox.layers.{}.post_attention_layernorm.weight": "transformer.h.{}.norm_2.weight",
-        "gpt_neox.layers.{}.mlp.dense_h_to_4h.bias": "transformer.h.{}.mlp.fc.bias",
-        "gpt_neox.layers.{}.mlp.dense_h_to_4h.weight": "transformer.h.{}.mlp.fc.weight",
-        "gpt_neox.layers.{}.mlp.dense_4h_to_h.bias": "transformer.h.{}.mlp.proj.bias",
-        "gpt_neox.layers.{}.mlp.dense_4h_to_h.weight": "transformer.h.{}.mlp.proj.weight",
-        "gpt_neox.final_layer_norm.bias": "transformer.ln_f.bias",
-        "gpt_neox.final_layer_norm.weight": "transformer.ln_f.weight",
-        "embed_out.weight": "lm_head.weight",
+        "model.layers.{}.input_layernorm.bias": "transformer.h.{}.norm_1.bias",
+        "model.layers.{}.input_layernorm.weight": "transformer.h.{}.norm_1.weight",
+        "model.layers.{}.attention.query_key_value.bias": "transformer.h.{}.attn.attn.bias",
+        "model.layers.{}.attention.query_key_value.weight": "transformer.h.{}.attn.attn.weight",
+        "model.layers.{}.attention.dense.bias": "transformer.h.{}.attn.proj.bias",
+        "model.layers.{}.attention.dense.weight": "transformer.h.{}.attn.proj.weight",
+        "model.layers.{}.attention.rotary_emb.inv_freq": None,
+        "model.layers.{}.attention.bias": None,
+        "model.layers.{}.attention.masked_bias": None,
+        "model.layers.{}.post_attention_layernorm.bias": "transformer.h.{}.norm_2.bias",
+        "model.layers.{}.post_attention_layernorm.weight": "transformer.h.{}.norm_2.weight",
+        "model.layers.{}.mlp.dense_h_to_4h.bias": "transformer.h.{}.mlp.fc.bias",
+        "model.layers.{}.mlp.dense_h_to_4h.weight": "transformer.h.{}.mlp.fc.weight",
+        "model.layers.{}.mlp.dense_4h_to_h.bias": "transformer.h.{}.mlp.proj.bias",
+        "model.layers.{}.mlp.dense_4h_to_h.weight": "transformer.h.{}.mlp.proj.weight",
+
+        "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.fc_1.weight",
+        "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
+        "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
+        "model.layers.{}.self_attn.q_proj.weight": None,
+        "model.layers.{}.self_attn.k_proj.weight": None,
+        "model.layers.{}.self_attn.v_proj.weight": None,
+        "model.layers.{}.self_attn.o_proj.weight": "transformer.h.{}.attn.proj.weight",
+
+        "model.final_layer_norm.bias": "transformer.ln_f.bias",
+        "model.final_layer_norm.weight": "transformer.ln_f.weight",
+        "model.embed_tokens.weight": "transformer.wte.weight",
+        "lm_head.weight": "lm_head.weight",
+        "model.norm.bias": None,
+        "model.norm.weight": "transformer.ln_f.weight",
     }
 
     for name, param in hf_weights.items():
-        if "gpt_neox.layers" in name:
+        print('copy', name)
+        if "model.layers" in name:
             from_name, number = layer_template(name, 2)
             to_name = weight_map[from_name]
             if to_name is None:
@@ -65,68 +77,6 @@ def copy_weights_gpt_neox(
 def copy_weights_hf_llama(
     config: Config,
     qkv_weights: Dict[int, List[Optional[NotYetLoadedTensor]]],
-    state_dict: Dict[str, torch.Tensor],
-    hf_weights: Dict[str, Union[torch.Tensor, NotYetLoadedTensor]],
-    saver: Optional[incremental_save] = None,
-    dtype: Optional[torch.dtype] = None,
-) -> None:
-    weight_map = {
-        "model.embed_tokens.weight": "transformer.wte.weight",
-        "model.layers.{}.input_layernorm.weight": "transformer.h.{}.norm_1.weight",
-        "model.layers.{}.self_attn.q_proj.weight": None,
-        "model.layers.{}.self_attn.k_proj.weight": None,
-        "model.layers.{}.self_attn.v_proj.weight": None,
-        "model.layers.{}.self_attn.o_proj.weight": "transformer.h.{}.attn.proj.weight",
-        "model.layers.{}.self_attn.rotary_emb.inv_freq": None,
-        "model.layers.{}.post_attention_layernorm.weight": "transformer.h.{}.norm_2.weight",
-        "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.fc_1.weight",
-        "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
-        "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
-        "model.norm.weight": "transformer.ln_f.weight",
-        "lm_head.weight": "lm_head.weight",
-    }
-
-    for name, param in hf_weights.items():
-        if "model.layers" in name:
-            from_name, number = layer_template(name, 2)
-            qkv = qkv_weights.setdefault(number, [None, None, None])
-            if "q_proj" in name:
-                qkv[0] = param  # type: ignore
-            elif "k_proj" in name:
-                qkv[1] = param  # type: ignore
-            elif "v_proj" in name:
-                qkv[2] = param  # type: ignore
-            to_name = weight_map[from_name]
-            if to_name is None:
-                continue
-            to_name = to_name.format(number)
-        else:
-            to_name = weight_map[name]
-        param = load_param(param, name, dtype)
-        if saver is not None:
-            param = saver.store_early(param)
-        state_dict[to_name] = param  # type: ignore
-
-    for i, (q, k, v) in list(qkv_weights.items()):
-        if q is None or k is None or v is None:
-            # split across different .bin files
-            continue
-        q = load_param(q, f"layer {i} q", dtype)
-        k = load_param(k, f"layer {i} k", dtype)
-        v = load_param(v, f"layer {i} v", dtype)
-        assert config.n_query_groups
-        q_per_kv = config.n_head // config.n_query_groups
-        qs = torch.split(q, config.head_size * q_per_kv)
-        ks = torch.split(k, config.head_size)
-        vs = torch.split(v, config.head_size)
-        cycled = [t for group in zip(qs, ks, vs) for t in group]
-        qkv = torch.cat(cycled)
-        state_dict[f"transformer.h.{i}.attn.attn.weight"] = qkv
-        del qkv_weights[i]
-
-
-def copy_weights_stablelm(
-    config: Config,
     state_dict: Dict[str, torch.Tensor],
     hf_weights: Dict[str, Union[torch.Tensor, NotYetLoadedTensor]],
     saver: Optional[incremental_save] = None,
@@ -291,8 +241,6 @@ def convert_hf_checkpoint(
     elif config.model_family == ModelFamily.PHI.value:
         copy_fn = partial(copy_weights_phi, config)
     elif config.model_family == ModelFamily.STABLE_LM.value:
-        copy_fn = partial(copy_weights_stablelm, config)
-    else:
         copy_fn = copy_weights_gpt_neox
 
     # initialize a new empty state dict to hold our new weights
