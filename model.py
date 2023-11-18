@@ -23,7 +23,7 @@ class Config:
     padded_vocab_size: Optional[int] = None
     n_layer: int = 16
     n_head: int = 32
-    n_embd: int = 4096
+    hidden_size: int = 4096
     rotary_percentage: float = 0.25
     parallel_residual: bool = True
     bias: bool = True
@@ -39,14 +39,15 @@ class Config:
     model_family: str = ModelFamily.LLAMA.value
     intermediate_size: int = 5632
     extra_tokens: int = 0
+    gelu_approximate: str = "none"
 
     @classmethod
     def from_name(cls, name: str) -> Self:
         return name_to_config[name]
 
     def __post_init__(self):
-        assert self.n_embd % self.n_head == 0
-        self.head_size = self.n_embd // self.n_head
+        assert self.hidden_size % self.n_head == 0
+        self.head_size = self.hidden_size // self.n_head
 
         # vocab size should be a power of 2 to be optimal on hardware. compute the closest value
         if self.padded_vocab_size is None:
@@ -66,7 +67,7 @@ class Config:
 
         # compute the intermediate size for MLP if not set
         if self.intermediate_size is None:
-            self.intermediate_size = 4 * self.n_embd
+            self.intermediate_size = 4 * self.hidden_size
 
         self.rope_n_elem = int(self.rotary_percentage * self.head_size)
 
@@ -79,7 +80,7 @@ name_to_config = {
         padding_multiple=64,
         n_layer=22,
         n_head=32,
-        n_embd=2048,
+        hidden_size=2048,
         n_query_groups=4,
         rotary_percentage=1.0,
         parallel_residual=False,
@@ -95,7 +96,7 @@ name_to_config = {
         padding_multiple=64,
         n_layer=22,
         n_head=32,
-        n_embd=2048,
+        hidden_size=2048,
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
@@ -110,7 +111,7 @@ name_to_config = {
         padding_multiple=64,
         n_layer=22,
         n_head=32,
-        n_embd=2560,
+        hidden_size=2560,
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
@@ -150,15 +151,15 @@ class GPT(nn.Module):
         self.device = device
 
         self.lm_head = nn.Linear(
-            config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias
+            config.hidden_size, config.padded_vocab_size, bias=config.lm_head_bias
         )
         self.transformer = nn.ModuleDict(
             dict(
-                wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
+                wte=nn.Embedding(config.padded_vocab_size, config.hidden_size),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
             )
         )
-        self.norm = nn.LayerNorm(config.n_embd, eps=config.norm_eps)
+        self.norm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
 
@@ -276,20 +277,19 @@ class Block(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
         if config.model_family == ModelFamily.LLAMA:
-            self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
+            self.norm_1 = RMSNorm(config.hidden_size, eps=config.norm_eps)
         else:
-            self.norm_1 = nn.LayerNorm(config.n_embd, eps=config.norm_eps)
+            self.norm_1 = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
         self.norm_2 = (
             nn.Identity
             if config.shared_attention_norm
-            else RMSNorm(config.n_embd, eps=config.norm_eps)
+            else RMSNorm(config.hidden_size, eps=config.norm_eps)
         )
         if config.model_family == ModelFamily.LLAMA.value:
             self.mlp = LLaMAMLP(config)
-        else:
-            self.mlp = GptNeoxMLP(config)
-
+        elif config.model_family == ModelFamily.STABLE_LM:
+            self.mlp = StableLMMLP(config)
 
         self.config = config
 
@@ -354,9 +354,9 @@ class CausalSelfAttention(nn.Module):
         shape = (config.n_head + 2 * config.n_query_groups) * config.head_size
         # n_embd is the size of the input embedding for a token
         # key, query, value projections for all heads, but in a batch
-        self.attn = nn.Linear(config.n_embd, shape, bias=config.bias)
+        self.attn = nn.Linear(config.hidden_size, shape, bias=config.bias)
         # output projection
-        self.proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.proj = nn.Linear(config.hidden_size, config.hidden_size, bias=config.bias)
         # disabled by default
         self.kv_cache: Optional[KVCache] = None
 
@@ -470,9 +470,15 @@ class CausalSelfAttention(nn.Module):
 class LLaMAMLP(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+        self.fc_1 = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=config.bias
+        )
+        self.fc_2 = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=config.bias
+        )
+        self.proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=config.bias
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_fc_1 = self.fc_1(x)
@@ -480,11 +486,16 @@ class LLaMAMLP(nn.Module):
         x = torch.nn.functional.silu(x_fc_1) * x_fc_2
         return self.proj(x)
 
+
 class GptNeoxMLP(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.fc = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
-        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+        self.fc = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=config.bias
+        )
+        self.proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=config.bias
+        )
 
         self.config = config
 
@@ -492,6 +503,27 @@ class GptNeoxMLP(nn.Module):
         x = self.fc(x)
         x = torch.nn.functional.gelu(x, approximate=self.config.gelu_approximate)
         return self.proj(x)
+
+
+class StableLMMLP(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.config = config
+        self.hidden_size = config.hidden_size
+        self.intermediate_size = config.intermediate_size
+        self.gate_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=False
+        )
+        self.up_proj = nn.Linear(
+            config.hidden_size, config.intermediate_size, bias=False
+        )
+        self.down_proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=False
+        )
+        self.act_fn = nn.SiLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 
 # return a tuple of (cos, sin) of shape (seq_len, n_elem)

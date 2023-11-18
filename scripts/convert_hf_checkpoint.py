@@ -19,8 +19,9 @@ from model import Config, ModelFamily
 from utils import incremental_save, lazy_load
 
 
-
-def copy_weights_gpt_neox(
+def copy_weights_stablelm(
+    config: Config,
+    qkv_weights: Dict[int, List[Optional[NotYetLoadedTensor]]],
     state_dict: Dict[str, torch.Tensor],
     hf_weights: Dict[str, Union[torch.Tensor, NotYetLoadedTensor]],
     saver: Optional[incremental_save] = None,
@@ -35,23 +36,33 @@ def copy_weights_gpt_neox(
         "model.layers.{}.attention.dense.bias": "transformer.h.{}.attn.proj.bias",
         "model.layers.{}.attention.dense.weight": "transformer.h.{}.attn.proj.weight",
         "model.layers.{}.attention.rotary_emb.inv_freq": None,
+        "model.layers.{}.self_attn.q_proj.weight": None,
+        "model.layers.{}.self_attn.k_proj.weight": None,
+        "model.layers.{}.self_attn.v_proj.weight": None,
+        "model.layers.{}.self_attn.o_proj.weight": "transformer.h.{}.attn.proj.weight",
         "model.layers.{}.attention.bias": None,
         "model.layers.{}.attention.masked_bias": None,
         "model.layers.{}.post_attention_layernorm.bias": "transformer.h.{}.norm_2.bias",
         "model.layers.{}.post_attention_layernorm.weight": "transformer.h.{}.norm_2.weight",
-        "model.layers.{}.mlp.dense_h_to_4h.bias": "transformer.h.{}.mlp.fc.bias",
-        "model.layers.{}.mlp.dense_h_to_4h.weight": "transformer.h.{}.mlp.fc.weight",
-        "model.layers.{}.mlp.dense_4h_to_h.bias": "transformer.h.{}.mlp.proj.bias",
-        "model.layers.{}.mlp.dense_4h_to_h.weight": "transformer.h.{}.mlp.proj.weight",
-        "model.final_layer_norm.bias": "transformer.ln_f.bias",
-        "model.final_layer_norm.weight": "transformer.ln_f.weight",
-        "embed_out.weight": "lm_head.weight",
+        "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.down_proj.weight",
+        "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.up_proj.weight",
+        "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.gate_proj.weight",
+        "model.norm.bias": "transformer.norm.bias",
+        "model.norm.weight": "transformer.norm.weight",
+        "lm_head.weight": "lm_head.weight",
     }
 
     for name, param in hf_weights.items():
         if "model.layers" in name:
             from_name, number = layer_template(name, 2)
             to_name = weight_map[from_name]
+            qkv = qkv_weights.setdefault(number, [None, None, None])
+            if "q_proj" in name:
+                qkv[0] = param  # type: ignore
+            elif "k_proj" in name:
+                qkv[1] = param  # type: ignore
+            elif "v_proj" in name:
+                qkv[2] = param  # type: ignore
             if to_name is None:
                 continue
             to_name = to_name.format(number)
@@ -60,7 +71,24 @@ def copy_weights_gpt_neox(
         param = load_param(param, name, dtype)
         if saver is not None:
             param = saver.store_early(param)
-        state_dict[to_name] = param
+        state_dict[to_name] = param  # type: ignore
+        for i, (q, k, v) in list(qkv_weights.items()):
+            if q is None or k is None or v is None:
+                # split across different .bin files
+                continue
+            q = load_param(q, f"layer {i} q", dtype)
+            k = load_param(k, f"layer {i} k", dtype)
+            v = load_param(v, f"layer {i} v", dtype)
+            assert config.n_query_groups
+            q_per_kv = config.n_head // config.n_query_groups
+            qs = torch.split(q, config.head_size * q_per_kv)
+            ks = torch.split(k, config.head_size)
+            vs = torch.split(v, config.head_size)
+            cycled = [t for group in zip(qs, ks, vs) for t in group]
+            qkv = torch.cat(cycled)
+            state_dict[f"transformer.h.{i}.attn.attn.weight"] = qkv
+            del qkv_weights[i]
+        print(f"loaded weights for {state_dict.keys()}")
 
 
 def copy_weights_hf_llama(
@@ -172,7 +200,7 @@ def copy_weights_phi(
             q_per_kv = config.n_head // config.n_query_groups
             total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
             param = param.view(total_qkv, config.n_query_groups, -1).transpose(0, 1)
-            param = param.reshape(config.n_embd * 3, -1)
+            param = param.reshape(config.hidden_size * 3, -1)
             if "bias" in name:
                 param = param.squeeze()
         if saver is not None:
@@ -230,7 +258,8 @@ def convert_hf_checkpoint(
     elif config.model_family == ModelFamily.PHI.value:
         copy_fn = partial(copy_weights_phi, config)
     elif config.model_family == ModelFamily.STABLE_LM.value:
-        copy_fn = copy_weights_gpt_neox
+        qkv_weights = {}
+        copy_fn = partial(copy_weights_stablelm, config, qkv_weights)
 
     # initialize a new empty state dict to hold our new weights
     sd = {}
