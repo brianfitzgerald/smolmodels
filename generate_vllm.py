@@ -53,7 +53,7 @@ def save_quantized(model: BaseAWQForCausalLM, save_dir: str, shard_size="10GB"):
 
     # Save config
     with open(f'{save_dir}/quant_config.json', 'w+') as file:
-        file.write(json.dumps(model.quant_config, indent=4))
+        file.write(json.dumps(model.quant_config.to_dict(), indent=4))
 
 def main(
     prompt: str = "a dog with a hat",
