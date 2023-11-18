@@ -10,22 +10,10 @@ import torch.nn as nn
 from safetensors.torch import save_file
 import os
 import os
-import gc
 import json
-import torch
 import torch.nn as nn
-from tqdm import tqdm
-from typing import List, Union, Dict
 from safetensors.torch import save_file
-from awq.modules.act import ScaledActivation
-from huggingface_hub import snapshot_download
-from awq.quantize.quantizer import AwqQuantizer
-from awq.utils.utils import simple_dispatch_model
 from transformers.modeling_utils import shard_checkpoint
-from awq.modules.linear import WQLinear_GEMM, WQLinear_GEMV
-from awq.utils.module import get_named_linears, set_op_by_name
-from transformers import AutoModelForCausalLM, AutoConfig, PreTrainedModel
-from accelerate import init_empty_weights, load_checkpoint_in_model, infer_auto_device_map
 
 
 # https://github.com/vllm-project/vllm/pull/1235/files
@@ -69,7 +57,7 @@ def save_quantized(model: BaseAWQForCausalLM, save_dir: str, shard_size="10GB"):
 
 def main(
     prompt: str = "a dog with a hat",
-    model_name: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
+    model_name: str = "HuggingFaceH4/zephyr-7b-beta",
     force_quantize: bool = False,
     n_samples = 10,
 ):

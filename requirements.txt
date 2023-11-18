@@ -12,3 +12,5 @@ sentencepiece
 vllm
 lightning_utilities
 lightning
+# may have to install autoawq from wheel, like  https://github.com/casper-hansen/AutoAWQ/releases/download/v0.1.6/autoawq-0.1.6+cu118-cp310-cp310-linux_x86_64.whl
+autoawq
