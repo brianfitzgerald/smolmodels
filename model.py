@@ -109,7 +109,7 @@ name_to_config = {
         block_size=2048,
         vocab_size=50304,
         padding_multiple=64,
-        n_layer=22,
+        n_layer=32,
         n_head=32,
         hidden_size=2560,
         rotary_percentage=1.0,
@@ -278,17 +278,18 @@ class Block(nn.Module):
         super().__init__()
         if config.model_family == ModelFamily.LLAMA:
             self.norm_1 = RMSNorm(config.hidden_size, eps=config.norm_eps)
+            self.norm_2 = (
+                nn.Identity
+                if config.shared_attention_norm
+                else RMSNorm(config.hidden_size, eps=config.norm_eps)
+            )
         else:
             self.norm_1 = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
+            self.norm_2 = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
-        self.norm_2 = (
-            nn.Identity
-            if config.shared_attention_norm
-            else RMSNorm(config.hidden_size, eps=config.norm_eps)
-        )
         if config.model_family == ModelFamily.LLAMA.value:
             self.mlp = LLaMAMLP(config)
-        elif config.model_family == ModelFamily.STABLE_LM:
+        elif config.model_family == ModelFamily.STABLE_LM.value:
             self.mlp = StableLMMLP(config)
 
         self.config = config

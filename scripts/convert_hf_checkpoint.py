@@ -47,8 +47,8 @@ def copy_weights_stablelm(
         "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.down_proj.weight",
         "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.up_proj.weight",
         "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.gate_proj.weight",
-        "model.norm.bias": "transformer.norm.bias",
-        "model.norm.weight": "transformer.norm.weight",
+        "model.norm.bias": "norm.bias",
+        "model.norm.weight": "norm.weight",
         "lm_head.weight": "lm_head.weight",
     }
 
@@ -88,7 +88,6 @@ def copy_weights_stablelm(
             qkv = torch.cat(cycled)
             state_dict[f"transformer.h.{i}.attn.attn.weight"] = qkv
             del qkv_weights[i]
-        print(f"loaded weights for {state_dict.keys()}")
 
 
 def copy_weights_hf_llama(
@@ -284,7 +283,6 @@ def convert_hf_checkpoint(
         # for checkpoints that split the QKV across several files, we need to keep all the bin files
         # open, so we use `ExitStack` to close them all together at the end
         for bin_file in sorted(bin_files):
-            print("Processing", bin_file)
             hf_weights = lazy_load(bin_file)
             copy_fn(sd, hf_weights, saver=saver, dtype=dtype)  # type: ignore
         gc.collect()
