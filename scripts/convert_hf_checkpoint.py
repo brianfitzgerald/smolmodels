@@ -54,12 +54,12 @@ def copy_weights_gpt_neox(
         "model.final_layer_norm.weight": "transformer.ln_f.weight",
         "model.embed_tokens.weight": "transformer.wte.weight",
         "lm_head.weight": "lm_head.weight",
-        "model.norm.bias": None,
-        "model.norm.weight": "transformer.ln_f.weight",
+        "model.norm.bias": "transformer.norm.bias",
+        "model.norm.weight": "transformer.norm.weight",
     }
 
     for name, param in hf_weights.items():
-        print('copy', name)
+        print('Copy layer', name)
         if "model.layers" in name:
             from_name, number = layer_template(name, 2)
             to_name = weight_map[from_name]

@@ -155,9 +155,9 @@ class GPT(nn.Module):
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
-                ln_f=RMSNorm(config.n_embd, eps=config.norm_eps),
             )
         )
+        self.norm = nn.LayerNorm(config.n_embd, eps=config.norm_eps)
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
 
@@ -223,7 +223,9 @@ class GPT(nn.Module):
         x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
         for block in self.transformer.h:
             x = block(x, cos, sin, mask, input_pos)
-        x = self.transformer.ln_f(x)
+
+        x = self.norm(x)
+
         return self.lm_head(x)  # (b, t, vocab_size)
 
     def rope_cache(
