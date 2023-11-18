@@ -19,6 +19,7 @@ from model import Config, ModelFamily
 from utils import incremental_save, lazy_load
 
 
+
 def copy_weights_gpt_neox(
     state_dict: Dict[str, torch.Tensor],
     hf_weights: Dict[str, Union[torch.Tensor, NotYetLoadedTensor]],
@@ -26,6 +27,7 @@ def copy_weights_gpt_neox(
     dtype: Optional[torch.dtype] = None,
 ) -> None:
     weight_map = {
+        "model.embed_tokens.weight": "transformer.wte.weight",
         "model.layers.{}.input_layernorm.bias": "transformer.h.{}.norm_1.bias",
         "model.layers.{}.input_layernorm.weight": "transformer.h.{}.norm_1.weight",
         "model.layers.{}.attention.query_key_value.bias": "transformer.h.{}.attn.attn.bias",
@@ -41,25 +43,12 @@ def copy_weights_gpt_neox(
         "model.layers.{}.mlp.dense_h_to_4h.weight": "transformer.h.{}.mlp.fc.weight",
         "model.layers.{}.mlp.dense_4h_to_h.bias": "transformer.h.{}.mlp.proj.bias",
         "model.layers.{}.mlp.dense_4h_to_h.weight": "transformer.h.{}.mlp.proj.weight",
-
-        "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.fc_1.weight",
-        "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
-        "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
-        "model.layers.{}.self_attn.q_proj.weight": None,
-        "model.layers.{}.self_attn.k_proj.weight": None,
-        "model.layers.{}.self_attn.v_proj.weight": None,
-        "model.layers.{}.self_attn.o_proj.weight": "transformer.h.{}.attn.proj.weight",
-
         "model.final_layer_norm.bias": "transformer.ln_f.bias",
         "model.final_layer_norm.weight": "transformer.ln_f.weight",
-        "model.embed_tokens.weight": "transformer.wte.weight",
-        "lm_head.weight": "lm_head.weight",
-        "model.norm.bias": "transformer.norm.bias",
-        "model.norm.weight": "transformer.norm.weight",
+        "embed_out.weight": "lm_head.weight",
     }
 
     for name, param in hf_weights.items():
-        print('Copy layer', name)
         if "model.layers" in name:
             from_name, number = layer_template(name, 2)
             to_name = weight_map[from_name]
@@ -71,7 +60,7 @@ def copy_weights_gpt_neox(
         param = load_param(param, name, dtype)
         if saver is not None:
             param = saver.store_early(param)
-        state_dict[to_name] = param  # type: ignore
+        state_dict[to_name] = param
 
 
 def copy_weights_hf_llama(

@@ -8,6 +8,7 @@ from torch import Tensor
 from enum import Enum
 from utils import find_multiple
 
+
 class ModelFamily(Enum):
     LLAMA = "llama"
     PHI = "phi"
@@ -49,9 +50,10 @@ class Config:
 
         # vocab size should be a power of 2 to be optimal on hardware. compute the closest value
         if self.padded_vocab_size is None:
-            self.padded_vocab_size = find_multiple(
-                self.vocab_size, self.padding_multiple
-            ) + self.extra_tokens
+            self.padded_vocab_size = (
+                find_multiple(self.vocab_size, self.padding_multiple)
+                + self.extra_tokens
+            )
         else:
             # vocab size shouldn't be larger than padded vocab size
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
@@ -104,16 +106,16 @@ name_to_config = {
     "Nous-Capybara-3B-V1.9": Config(
         model_family=ModelFamily.STABLE_LM.value,
         block_size=2048,
-        vocab_size=32000,
+        vocab_size=50304,
         padding_multiple=64,
         n_layer=22,
         n_head=32,
-        n_embd=2048,
+        n_embd=2560,
         rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         norm_eps=1e-5,
-        intermediate_size=5632,
+        intermediate_size=6912,
         n_query_groups=4,
     ),
 }
@@ -138,7 +140,6 @@ class RMSNorm(nn.Module):
 
     def reset_parameters(self) -> None:
         nn.init.ones_(self.weight)
-
 
 
 class GPT(nn.Module):
@@ -274,14 +275,21 @@ class GPT(nn.Module):
 class Block(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
+        if config.model_family == ModelFamily.LLAMA:
+            self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
+        else:
+            self.norm_1 = nn.LayerNorm(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
         self.norm_2 = (
             nn.Identity
             if config.shared_attention_norm
             else RMSNorm(config.n_embd, eps=config.norm_eps)
         )
-        self.mlp = LLaMAMLP(config)
+        if config.model_family == ModelFamily.LLAMA.value:
+            self.mlp = LLaMAMLP(config)
+        else:
+            self.mlp = GptNeoxMLP(config)
+
 
         self.config = config
 
@@ -307,6 +315,7 @@ class Block(nn.Module):
             x = h + x
             x = self.mlp(self.norm_2(x)) + x
         return x
+
 
 class KVCache(nn.Module):
     def __init__(
@@ -335,7 +344,6 @@ class KVCache(nn.Module):
         k = self.k.index_copy_(2, input_pos, k)
         v = self.v.index_copy_(2, input_pos, v)
         return k, v
-
 
 
 class CausalSelfAttention(nn.Module):
@@ -472,6 +480,20 @@ class LLaMAMLP(nn.Module):
         x = torch.nn.functional.silu(x_fc_1) * x_fc_2
         return self.proj(x)
 
+class GptNeoxMLP(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.fc = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+
+        self.config = config
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.fc(x)
+        x = torch.nn.functional.gelu(x, approximate=self.config.gelu_approximate)
+        return self.proj(x)
+
+
 # return a tuple of (cos, sin) of shape (seq_len, n_elem)
 def build_rope_cache(
     seq_len: int,
@@ -480,7 +502,6 @@ def build_rope_cache(
     base: int = 10000,
     condense_ratio: int = 1,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-
     theta = 1.0 / (base ** (torch.arange(0, n_elem, 2, device=device).float() / n_elem))
 
     # Create position indexes `[0, 1, ..., seq_len - 1]`
