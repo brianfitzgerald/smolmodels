@@ -113,7 +113,7 @@ def main(
 
     print("Loading language model...")
     tokenizer = AutoTokenizer.from_pretrained(language_model_id, trust_remote_code=True)
-    sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=128)
+    sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=77)
     vllm_model = LLM(quantized_model_path_str, dtype="auto", quantization="awq")
 
     print("Loading diffusion model...")
