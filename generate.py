@@ -1,4 +1,3 @@
-from pprint import pprint
 import sys
 import time
 from pathlib import Path
@@ -10,7 +9,6 @@ import torch
 import fire
 from utils import (
     check_valid_checkpoint_dir,
-    load_checkpoint,
     get_available_device,
 )
 
