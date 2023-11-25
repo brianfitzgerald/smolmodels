@@ -99,7 +99,7 @@ def main(
     max_new_tokens: int = 256,
     top_k: int = 256,
     temperature: float = 0.2,
-    checkpoint_dir: str = "PY007/TinyLlama-1.1B-Chat-v0.3",
+    checkpoint_dir: str = "TinyLlama/TinyLlama-1.1B-Chat-v0.6",
 ) -> None:
     """Generates text samples based on a pre-trained model and tokenizer.
 

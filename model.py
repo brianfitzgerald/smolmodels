@@ -73,7 +73,7 @@ class Config:
 
 
 name_to_config = {
-    "TinyLlama-1.1B-Chat-v0.3": Config(
+    "TinyLlama-1.1B-Chat-v0.6": Config(
         model_family=ModelFamily.LLAMA.value,
         block_size=2048,
         vocab_size=32000,
