@@ -110,7 +110,8 @@ def copy_weights_hf_llama(
         "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.fc_1.weight",
         "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
         "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
-        "model.norm.weight": "transformer.ln_f.weight",
+        "model.norm.weight": "transformer.norm.weight",
+        "model.norm.bias": "transformer.norm.bias",
         "lm_head.weight": "lm_head.weight",
     }
 
@@ -222,7 +223,7 @@ def load_param(
 ) -> torch.Tensor:
     if hasattr(param, "_load_tensor"):
         # support tensors loaded via `lazy_load()`
-        print(f"Loading {name!r} into RAM")
+        # print(f"Loading {name!r} into RAM")
         param = param._load_tensor()  # type: ignore
     if (
         dtype is not None

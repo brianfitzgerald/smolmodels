@@ -87,7 +87,7 @@ name_to_config = {
         bias=False,
         intermediate_size=5632,
         norm_eps=1e-5,
-        extra_tokens=3,
+        extra_tokens=0,
     ),
     "TinyLlama-1.1B-intermediate-step-480k-1T": Config(
         model_family=ModelFamily.LLAMA.value,
@@ -157,9 +157,9 @@ class GPT(nn.Module):
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.hidden_size),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
+                norm=nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
             )
         )
-        self.norm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.max_seq_length = self.config.block_size
         self.mask_cache: Optional[torch.Tensor] = None
 
@@ -276,7 +276,7 @@ class GPT(nn.Module):
 class Block(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        if config.model_family == ModelFamily.LLAMA:
+        if config.model_family == ModelFamily.LLAMA.value:
             self.norm_1 = RMSNorm(config.hidden_size, eps=config.norm_eps)
             self.norm_2 = (
                 nn.Identity
