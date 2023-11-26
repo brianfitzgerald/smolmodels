@@ -96,9 +96,9 @@ def generate(
 
 def main(
     num_samples: int = 10,
-    max_new_tokens: int = 256,
-    top_k: int = 256,
-    temperature: float = 0.2,
+    max_new_tokens: int = 128,
+    top_k: int = 64,
+    temperature: float = 0.8,
     checkpoint_dir: str = "TinyLlama/TinyLlama-1.1B-Chat-v0.6",
 ) -> None:
     """Generates text samples based on a pre-trained model and tokenizer.
@@ -159,7 +159,7 @@ def main(
         message_history.append({"role": "user", "content": user_prompt})
 
         print(f"Message history:\n{message_history}")
-        full_formatted_prompt = model_conversation_input(user_prompt, message_history)  # type: ignore
+        full_formatted_prompt = model_conversation_input(message_history)
         full_formatted_prompt = clip_message_history_to_max_tokens(
             full_formatted_prompt, model.max_seq_length, tokenizer
         )

@@ -153,11 +153,15 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(
             config.hidden_size, config.padded_vocab_size, bias=config.lm_head_bias
         )
+        if config.model_family == ModelFamily.LLAMA.value:
+            transformer_norm = RMSNorm(config.hidden_size, eps=config.norm_eps)
+        else:
+            transformer_norm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.hidden_size),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
-                norm=nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
+                norm=transformer_norm
             )
         )
         self.max_seq_length = self.config.block_size
@@ -226,7 +230,7 @@ class GPT(nn.Module):
         for block in self.transformer.h:
             x = block(x, cos, sin, mask, input_pos)
 
-        x = self.norm(x)
+        x = self.transformer.norm(x)
 
         return self.lm_head(x)  # (b, t, vocab_size)
 

@@ -61,7 +61,7 @@ def model_conversation_input(
 
     system_message = {
         "role": "system",
-        "content": "A chat between a human and an assistant named Steve. The assistant gives helpful, detailed, and polite answers to the user's questions.",
+        "content": "A chat between a human and an assistant. The assistant gives helpful, detailed, and polite answers to the user's questions.",
     }
 
     all_messages: List[Dict] = [system_message, *message_history]

@@ -111,7 +111,6 @@ def copy_weights_hf_llama(
         "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.fc_2.weight",
         "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.proj.weight",
         "model.norm.weight": "transformer.norm.weight",
-        "model.norm.bias": "transformer.norm.bias",
         "lm_head.weight": "lm_head.weight",
     }
 
@@ -246,10 +245,10 @@ def convert_hf_checkpoint(
     if dtype is not None:
         dtype = getattr(torch, dtype)
 
-    print(f"Model name {model_name}")
+    print(f"Converting model: {model_name}")
     config = Config.from_name(model_name)
     config_dict = asdict(config)
-    print(f"Model config {config_dict}")
+    print(f"Using model config: {config_dict}")
 
     if config.model_family == ModelFamily.LLAMA.value:
         # holder to reconstitute the split q, k, v
