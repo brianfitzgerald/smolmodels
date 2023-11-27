@@ -19,14 +19,14 @@ class ModelFamily(Enum):
 @dataclass
 class Config:
     # aka sliding_window in transformers
-    block_size: int = 4096
-    vocab_size: int = 50254
+    block_size: int = 2048
+    vocab_size: int = 32000
     padding_multiple: int = 64
     padded_vocab_size: Optional[int] = None
     n_layer: int = 16
     n_head: int = 32
     hidden_size: int = 4096
-    rotary_percentage: float = 0.25
+    rotary_percentage: float = 1
     parallel_residual: bool = True
     bias: bool = True
     lm_head_bias: bool = False
@@ -77,13 +77,10 @@ class Config:
 name_to_config = {
     "TinyLlama-1.1B-Chat-v0.6": Config(
         model_family=ModelFamily.LLAMA.value,
-        block_size=2048,
-        vocab_size=32000,
         n_layer=22,
         n_head=32,
         hidden_size=2048,
         n_query_groups=4,
-        rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         intermediate_size=5632,
@@ -92,12 +89,9 @@ name_to_config = {
     ),
     "TinyLlama-1.1B-intermediate-step-480k-1T": Config(
         model_family=ModelFamily.LLAMA.value,
-        block_size=2048,
-        vocab_size=32000,
         n_layer=22,
         n_head=32,
         hidden_size=2048,
-        rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         norm_eps=1e-5,
@@ -106,33 +100,55 @@ name_to_config = {
     ),
     "Nous-Capybara-3B-V1.9": Config(
         model_family=ModelFamily.STABLE_LM.value,
-        block_size=2048,
         vocab_size=50304,
         n_layer=32,
         n_head=32,
         hidden_size=2560,
-        rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         norm_eps=1e-5,
         intermediate_size=6912,
         n_query_groups=4,
     ),
+    "Mistral-7B-v0.1": Config(
+        model_family=ModelFamily.MISTRAL.value,
+        # TODO implement sliding window attention
+        block_size=4096,
+        n_layer=32,
+        n_query_groups=8,
+        hidden_size=4096,
+        parallel_residual=False,
+        bias=False,
+        intermediate_size=14336,
+        norm_eps=1e-5,
+        extra_tokens=0,
+    ),
     "OpenHermes-2.5-Mistral-7B": Config(
         model_family=ModelFamily.MISTRAL.value,
         # TODO implement sliding window attention
         block_size=4096,
-        vocab_size=32000,
-        n_head=32,
         n_layer=32,
+        n_query_groups=8,
         hidden_size=4096,
-        n_query_groups=4,
-        rotary_percentage=1.0,
         parallel_residual=False,
         bias=False,
         intermediate_size=14336,
         norm_eps=1e-5,
         extra_tokens=2,
+    ),
+    "rocket-3B": Config(
+        model_family=ModelFamily.STABLE_LM.value,
+        # TODO implement sliding window attention
+        block_size=4096,
+        n_layer=32,
+        n_head=32,
+        hidden_size=2560,
+        parallel_residual=False,
+        bias=False,
+        intermediate_size=6912,
+        norm_eps=1e-5,
+        extra_tokens=0,
+        vocab_size=50304,
     ),
 }
 
@@ -298,7 +314,7 @@ class GPT(nn.Module):
 class Block(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        if config.model_family == ModelFamily.LLAMA.value:
+        if config.model_family == ModelFamily.LLAMA.value or config.model_family == ModelFamily.MISTRAL.value:
             self.norm_1 = RMSNorm(config.hidden_size, eps=config.norm_eps)
             self.norm_2 = (
                 nn.Identity

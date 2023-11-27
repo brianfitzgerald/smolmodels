@@ -1,6 +1,6 @@
 from typing import Dict, List
-from tokenizer import Tokenizer
 import re
+from transformers import PreTrainedTokenizer
 
 
 def dalle_conversation(user_input: str):
@@ -75,14 +75,14 @@ def model_conversation_input(
 
 
 def clip_message_history_to_max_tokens(
-    message_history: List[str], max_tokens: int, tokenizer: Tokenizer
+    message_history: List[str], max_tokens: int, tokenizer: PreTrainedTokenizer
 ) -> List[str]:
     """
     Clip the message history to the max number of tokens allowed for the model.
     """
     total_tokens = 0
     for i in range(len(message_history)):
-        encoded_msg = tokenizer.encode(message_history[i])
+        encoded_msg = tokenizer.encode(message_history[i], return_tensors="pt")
         token_count = encoded_msg.shape[0]
         if total_tokens + token_count > max_tokens:
             print(f"Clipping message history to last {i} messages.")

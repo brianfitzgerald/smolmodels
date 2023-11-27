@@ -47,8 +47,8 @@ def copy_weights_stablelm(
         "model.layers.{}.mlp.down_proj.weight": "transformer.h.{}.mlp.down_proj.weight",
         "model.layers.{}.mlp.up_proj.weight": "transformer.h.{}.mlp.up_proj.weight",
         "model.layers.{}.mlp.gate_proj.weight": "transformer.h.{}.mlp.gate_proj.weight",
-        "model.norm.bias": "norm.bias",
-        "model.norm.weight": "norm.weight",
+        "model.norm.bias": "transformer.norm.bias",
+        "model.norm.weight": "transformer.norm.weight",
         "lm_head.weight": "lm_head.weight",
     }
 

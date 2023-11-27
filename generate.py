@@ -11,13 +11,13 @@ from utils import (
     check_valid_checkpoint_dir,
     get_available_device,
 )
+from transformers import AutoTokenizer
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
-
+from lightning.fabric.utilities.load import _lazy_load as lazy_load
 from model import GPT, Config
-from tokenizer import Tokenizer
 from chat import (
     clip_message_history_to_max_tokens,
     extract_text_from_generated_message,
@@ -128,7 +128,7 @@ def main(
 
     config = Config.from_name(checkpoint_dir_path.name)
 
-    fabric = L.Fabric(devices=1, precision="bf16-mixed")
+    fabric = L.Fabric(devices=1, precision="bf16-true")
     fabric.launch()
 
     device = fabric.device
@@ -138,19 +138,22 @@ def main(
 
     print(f"Instantiating model...")
     t0 = time.perf_counter()
-    with fabric.init_module(empty_init=True):
+    with fabric.init_module():
         model: GPT = GPT(config, device)
+    model = fabric.setup_module(model) # type: ignore
+    model.eval()
     print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
 
     print(f"Loading model weights...")
     t0 = time.perf_counter()
-    model_ckpt = torch.load(model_checkpoint_path)
-    model.load_state_dict(model_ckpt)
+    state_dict = lazy_load(model_checkpoint_path)
+    state_dict = state_dict.get("model", state_dict)
+    model.load_state_dict(state_dict, strict=True)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
     message_history: List[Dict] = []
 
-    tokenizer = Tokenizer(checkpoint_dir_path)
+    tokenizer = AutoTokenizer.from_pretrained("pansophic/rocket-3B", trust_remote_code=True)
 
     with fabric.init_tensor():
         model.set_kv_cache(batch_size=1, device=device)
@@ -161,13 +164,13 @@ def main(
 
         print(f"Message history:\n{message_history}")
         full_formatted_prompt = model_conversation_input(message_history)
-        full_formatted_prompt = clip_message_history_to_max_tokens(
-            full_formatted_prompt, model.max_seq_length, tokenizer
-        )
+        # full_formatted_prompt = clip_message_history_to_max_tokens(
+        #     full_formatted_prompt, model.max_seq_length, tokenizer # type: ignore
+        # )
         full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
         print(f"Formatted prompt str:\n{full_formatted_prompt_str}")
-        encoded = tokenizer.encode(full_formatted_prompt_str, device=device)
+        encoded: Tensor = tokenizer.encode(full_formatted_prompt_str, return_tensors="pt")[0].to(device) # type: ignore
         encoded_context_length = encoded.shape[0]
         max_returned_tokens = encoded_context_length + max_new_tokens
 
@@ -181,7 +184,7 @@ def main(
             max_returned_tokens,
             temperature,
             top_k,
-            tokenizer.eos_id,
+            tokenizer.eos_token_id,
         )
         t = time.perf_counter() - t0
 
@@ -207,4 +210,5 @@ def main(
 
 
 if __name__ == "__main__":
+    torch.set_float32_matmul_precision('high')
     fire.Fire(main)
