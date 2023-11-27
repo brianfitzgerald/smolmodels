@@ -250,7 +250,7 @@ def convert_hf_checkpoint(
     config_dict = asdict(config)
     print(f"Using model config: {config_dict}")
 
-    if config.model_family == ModelFamily.LLAMA.value:
+    if config.model_family == ModelFamily.LLAMA.value or config.model_family == ModelFamily.MISTRAL.value:
         # holder to reconstitute the split q, k, v
         qkv_weights = {}
         copy_fn = partial(copy_weights_hf_llama, config, qkv_weights)
@@ -271,7 +271,7 @@ def convert_hf_checkpoint(
     if os.path.exists(pytorch_bin_map_json_path):  # not all checkpoints have this file
         with open(pytorch_bin_map_json_path) as json_map:
             bin_index = json.load(json_map)
-        bin_files = {checkpoint_dir / bin for bin in bin_index["weight_map"].values()}
+        bin_files = {os.path.join(checkpoint_dir, bin_path) for bin_path in bin_index["weight_map"].values()}
     else:
         bin_files = set(checkpoint_path.glob("*.bin"))
         # some checkpoints serialize the training arguments

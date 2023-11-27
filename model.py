@@ -13,13 +13,15 @@ class ModelFamily(Enum):
     LLAMA = "llama"
     PHI = "phi"
     STABLE_LM = "stablelm"
+    MISTRAL = "mistral"
 
 
 @dataclass
 class Config:
+    # aka sliding_window in transformers
     block_size: int = 4096
     vocab_size: int = 50254
-    padding_multiple: int = 512
+    padding_multiple: int = 64
     padded_vocab_size: Optional[int] = None
     n_layer: int = 16
     n_head: int = 32
@@ -77,7 +79,6 @@ name_to_config = {
         model_family=ModelFamily.LLAMA.value,
         block_size=2048,
         vocab_size=32000,
-        padding_multiple=64,
         n_layer=22,
         n_head=32,
         hidden_size=2048,
@@ -93,7 +94,6 @@ name_to_config = {
         model_family=ModelFamily.LLAMA.value,
         block_size=2048,
         vocab_size=32000,
-        padding_multiple=64,
         n_layer=22,
         n_head=32,
         hidden_size=2048,
@@ -108,7 +108,6 @@ name_to_config = {
         model_family=ModelFamily.STABLE_LM.value,
         block_size=2048,
         vocab_size=50304,
-        padding_multiple=64,
         n_layer=32,
         n_head=32,
         hidden_size=2560,
@@ -118,6 +117,22 @@ name_to_config = {
         norm_eps=1e-5,
         intermediate_size=6912,
         n_query_groups=4,
+    ),
+    "OpenHermes-2.5-Mistral-7B": Config(
+        model_family=ModelFamily.MISTRAL.value,
+        # TODO implement sliding window attention
+        block_size=4096,
+        vocab_size=32000,
+        n_head=32,
+        n_layer=32,
+        hidden_size=4096,
+        n_query_groups=4,
+        rotary_percentage=1.0,
+        parallel_residual=False,
+        bias=False,
+        intermediate_size=14336,
+        norm_eps=1e-5,
+        extra_tokens=2,
     ),
 }
 
@@ -153,7 +168,10 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(
             config.hidden_size, config.padded_vocab_size, bias=config.lm_head_bias
         )
-        if config.model_family == ModelFamily.LLAMA.value:
+        if (
+            config.model_family == ModelFamily.LLAMA.value
+            or config.model_family == ModelFamily.MISTRAL.value
+        ):
             transformer_norm = RMSNorm(config.hidden_size, eps=config.norm_eps)
         else:
             transformer_norm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
@@ -161,7 +179,7 @@ class GPT(nn.Module):
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.hidden_size),
                 h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
-                norm=transformer_norm
+                norm=transformer_norm,
             )
         )
         self.max_seq_length = self.config.block_size
@@ -291,7 +309,10 @@ class Block(nn.Module):
             self.norm_1 = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
             self.norm_2 = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
-        if config.model_family == ModelFamily.LLAMA.value:
+        if (
+            config.model_family == ModelFamily.LLAMA.value
+            or config.model_family == ModelFamily.MISTRAL.value
+        ):
             self.mlp = LLaMAMLP(config)
         elif config.model_family == ModelFamily.STABLE_LM.value:
             self.mlp = StableLMMLP(config)

@@ -95,7 +95,6 @@ def generate(
 
 
 def main(
-    num_samples: int = 10,
     max_new_tokens: int = 128,
     top_k: int = 64,
     temperature: float = 0.8,
@@ -134,7 +133,6 @@ def main(
 
     t0 = time.perf_counter()
 
-    dtype = torch.float16
     print(f"Instantiating model...")
     t0 = time.perf_counter()
     model: GPT = GPT(config, device)
@@ -154,7 +152,7 @@ def main(
 
     model.set_kv_cache(batch_size=1, device=device)
 
-    for i in range(num_samples):
+    while True:
         user_prompt = prompt("Enter a message: ")
         message_history.append({"role": "user", "content": user_prompt})
 
@@ -186,7 +184,9 @@ def main(
 
         full_model_output = tokenizer.decode(y)
         new_model_output = tokenizer.decode(y[encoded_context_length:max_new_tokens])
-        print(f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}")
+        print(
+            f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}"
+        )
         new_model_output = extract_text_from_generated_message(new_model_output)
         print(f"Full output:\n{full_model_output}")
         print(f"New output:\n{new_model_output}")
@@ -194,7 +194,7 @@ def main(
 
         num_tokens_generated = y.size(0) - encoded_context_length
         print(
-            f"Time for inference {i + 1}: {t:.02f} sec total, {num_tokens_generated / t:.02f} tokens/sec",
+            f"Time for inference: {t:.02f} sec total, {num_tokens_generated / t:.02f} tokens/sec",
             file=sys.stderr,
         )
         print(
