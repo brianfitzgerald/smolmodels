@@ -8,5 +8,5 @@ tensorboard
 safetensors
 huggingface_hub
 sentencepiece
-vllm
 lightning_utilities
+lightning

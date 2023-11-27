@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Dict, List
 from tqdm import tqdm
 from torch import Tensor
-
+import lightning as L
 import torch
 import fire
 from utils import (
@@ -128,29 +128,32 @@ def main(
 
     config = Config.from_name(checkpoint_dir_path.name)
 
-    device = get_available_device()
+    fabric = L.Fabric(devices=1, precision="bf16-mixed")
+    fabric.launch()
+
+    device = fabric.device
     print(f"Using device: {str(device)}")
 
     t0 = time.perf_counter()
 
     print(f"Instantiating model...")
     t0 = time.perf_counter()
-    model: GPT = GPT(config, device)
-    model.eval()
+    with fabric.init_module(empty_init=True):
+        model: GPT = GPT(config, device)
     print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
 
     print(f"Loading model weights...")
     t0 = time.perf_counter()
     model_ckpt = torch.load(model_checkpoint_path)
     model.load_state_dict(model_ckpt)
-    model.to(device)
     print(f"Time to load the model weights: {time.perf_counter() - t0:.02f} seconds.")
 
     message_history: List[Dict] = []
 
     tokenizer = Tokenizer(checkpoint_dir_path)
 
-    model.set_kv_cache(batch_size=1, device=device)
+    with fabric.init_tensor():
+        model.set_kv_cache(batch_size=1, device=device)
 
     while True:
         user_prompt = prompt("Enter a message: ")
@@ -204,5 +207,4 @@ def main(
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision("high")
     fire.Fire(main)

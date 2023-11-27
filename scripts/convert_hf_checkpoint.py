@@ -238,12 +238,11 @@ def load_param(
 def convert_hf_checkpoint(
     checkpoint_dir: str,
     model_name: Optional[str] = None,
-    dtype: Optional[str] = None,
 ) -> None:
     if model_name is None:
         model_name = checkpoint_dir.split("/")[-1]
-    if dtype is not None:
-        dtype = getattr(torch, dtype)
+
+    dtype = torch.bfloat16
 
     print(f"Converting model: {model_name}")
     config = Config.from_name(model_name)
@@ -284,6 +283,7 @@ def convert_hf_checkpoint(
         # open, so we use `ExitStack` to close them all together at the end
         for bin_file in sorted(bin_files):
             hf_weights = lazy_load(bin_file)
+            print(f"loading {bin_file}...")
             copy_fn(sd, hf_weights, saver=saver, dtype=dtype)  # type: ignore
         gc.collect()
         print("Saving converted checkpoint")

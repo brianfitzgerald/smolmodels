@@ -3,3 +3,4 @@ autoawq
 # also pip3 install -U xformers --index-url https://download.pytorch.org/whl/cu118
 diffusers
 discord.py
+vllm
