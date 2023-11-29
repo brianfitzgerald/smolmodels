@@ -139,7 +139,6 @@ name_to_config = {
     ),
     "rocket-3B": Config(
         model_family=ModelFamily.STABLE_LM.value,
-        # TODO implement sliding window attention
         block_size=4096,
         n_layer=32,
         n_head=32,

@@ -10,3 +10,4 @@ huggingface_hub
 sentencepiece
 lightning_utilities
 lightning
+einops
