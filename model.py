@@ -35,6 +35,7 @@ class Config:
     # only used for phi-1.5
     shared_attention_norm: bool = False
     # no. of query groups for MHA, GQA
+    # aka num_key_value_heads
     n_query_groups: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
@@ -142,9 +143,12 @@ name_to_config = {
         block_size=4096,
         n_layer=32,
         n_head=32,
+        n_query_groups=32,
         hidden_size=2560,
         parallel_residual=False,
         bias=False,
+        rope_condense_ratio=1,
+        rotary_percentage=0.25,
         intermediate_size=6912,
         norm_eps=1e-5,
         extra_tokens=0,
