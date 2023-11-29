@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -15,14 +16,24 @@ class T5LayerNorm(nn.Module):
         return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
 
 
+class WrapperBlock(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.fn = fn
+        self.norm = T5LayerNorm(dim)
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
+
+
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult=4):
+    def __init__(self, dim, mult=4, dropout=0.1):
         super().__init__()
         inner_dim = int(dim * mult)
         self.net = nn.Sequential(
             nn.Linear(dim, inner_dim),
             nn.GELU(),
-            nn.Dropout(0.1),
+            nn.Dropout(dropout),
             nn.Linear(inner_dim, dim),
         )
 
@@ -217,46 +228,65 @@ class T5CrossAttention(nn.Module):
 
         return self.to_out(out)
 
+
 class T5Encoder(nn.Module):
     def __init__(
         self,
         *,
         dim,
         num_tokens,
-        #max_seq_len,
+        # max_seq_len,
         depth,
-        heads = 12,
-        dim_head = 64,
-        causal = False,
-        mlp_mult = 4,
-        dropout = 0.
+        heads=12,
+        dim_head=64,
+        causal=False,
+        mlp_mult=4,
+        dropout=0.0
     ):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, dim)
-        #self.pos_emb = nn.Embedding(max_seq_len, dim)
+        # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.layer = nn.ModuleList([])
         for _ in range(depth):
-            self.layer.append(nn.ModuleList([
-                Residual(PreNorm(dim, T5SelfAttention(dim = dim, heads = heads, dim_head = dim_head, causal = causal, dropout = dropout))),
-                Residual(PreNorm(dim, FeedForward(dim = dim, mult = mlp_mult, dropout = dropout))),
-            ]))
+            self.layer.append(
+                nn.ModuleList(
+                    [
+                        WrapperBlock(
+                            dim,
+                            T5SelfAttention(
+                                dim=dim,
+                                heads=heads,
+                                dim_head=dim_head,
+                                causal=causal,
+                                dropout=dropout,
+                            ),
+                        ),
+                        WrapperBlock(
+                            dim,
+                            FeedForward(dim=dim, mult=mlp_mult, dropout=dropout),
+                        ),
+                    ]
+                )
+            )
 
         self.final_norm = T5LayerNorm(dim)
 
-    def forward(self, x, mask = None):
+    def forward(self, x, mask=None):
         x = self.token_emb(x)
-        #x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
+        # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
         for attn, mlp in self.layer:
-            x = attn(x, mask = mask)
+            x = attn(x, mask=mask)
             x = mlp(x)
 
         x = self.final_norm(x)
 
         return x
 
+
 # T5 Decoder
+
 
 class T5Decoder(nn.Module):
     def __init__(
@@ -264,40 +294,61 @@ class T5Decoder(nn.Module):
         *,
         dim,
         num_tokens,
-        #max_seq_len,
+        # max_seq_len,
         depth,
-        heads = 12,
-        dim_head = 64,
-        causal = True,
-        mlp_mult = 4,
-        dropout = 0.
+        heads=12,
+        dim_head=64,
+        causal=True,
+        mlp_mult=4,
+        dropout=0.0
     ):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, dim)
-        #self.pos_emb = nn.Embedding(max_seq_len, dim)
+        # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.layer = nn.ModuleList([])
         for _ in range(depth):
-            self.layer.append(nn.ModuleList([
-                Residual(PreNorm(dim, T5SelfAttention(dim = dim, heads = heads, dim_head = dim_head, causal = causal, dropout = dropout))),
-                Residual(PreNorm(dim, T5CrossAttention(dim = dim, heads = heads, dim_head = dim_head, dropout = dropout))),
-                Residual(PreNorm(dim, FeedForward(dim = dim, mult = mlp_mult, dropout = dropout))),
-            ]))
+            self.layer.append(
+                nn.ModuleList(
+                    [
+                        WrapperBlock(
+                            dim,
+                            T5SelfAttention(
+                                dim=dim,
+                                heads=heads,
+                                dim_head=dim_head,
+                                causal=causal,
+                                dropout=dropout,
+                            ),
+                        ),
+                        WrapperBlock(
+                            dim,
+                            T5CrossAttention(
+                                dim=dim, heads=heads, dim_head=dim_head, dropout=dropout
+                            ),
+                        ),
+                        WrapperBlock(
+                            dim, FeedForward(dim=dim, mult=mlp_mult, dropout=dropout)
+                        ),
+                    ]
+                )
+            )
 
         self.final_norm = T5LayerNorm(dim)
 
-    def forward(self, x, context, mask = None, context_mask = None):
+    def forward(self, x, context, mask=None, context_mask=None):
         x = self.token_emb(x)
-        #x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
+        # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
         for attn, cross_attn, mlp in self.layer:
-            x = attn(x, mask = mask)
-            x = cross_attn(x, context = context, mask = mask, context_mask = context_mask)
+            x = attn(x, mask=mask)
+            x = cross_attn(x, context=context, mask=mask, context_mask=context_mask)
             x = mlp(x)
 
         x = self.final_norm(x)
 
         return x
+
 
 # T5
 
@@ -307,57 +358,80 @@ class T5(nn.Module):
         self,
         *,
         dim,
-        #max_seq_len,
-        enc_num_tokens,
-        enc_depth,
+        # max_seq_len,
+        enc_n_positions,
+        num_encoder_layers,
         enc_heads,
         enc_dim_head,
         enc_mlp_mult,
-        dec_num_tokens,
-        dec_depth,
+        dec_n_positions,
+        num_decoder_layers,
         dec_heads,
         dec_dim_head,
         dec_mlp_mult,
-        dropout = 0.,
-        tie_token_emb = True
+        dropout=0.0,
+        tie_token_emb=True
     ):
         super().__init__()
-        
-        self.embedding = nn.Embedding(enc_num_tokens, dim)
-        #self.pos_emb = nn.Embedding(max_seq_len, dim)
+
+        self.embedding = nn.Embedding(enc_n_positions, dim)
+        # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.encoder = T5Encoder(
-            dim = dim,
-            #max_seq_len = max_seq_len, 
-            num_tokens = enc_num_tokens, 
-            depth = enc_depth, 
-            heads = enc_heads, 
-            dim_head = enc_dim_head, 
-            mlp_mult = enc_mlp_mult, 
-            dropout = dropout
-        )
-        
-        self.decoder = T5Decoder(
-            dim = dim,
-            #max_seq_len= max_seq_len, 
-            num_tokens = dec_num_tokens, 
-            depth = dec_depth, 
-            heads = dec_heads, 
-            dim_head = dec_dim_head, 
-            mlp_mult = dec_mlp_mult, 
-            dropout = dropout
+            dim=dim,
+            # max_seq_len = max_seq_len,
+            num_tokens=enc_n_positions,
+            depth=num_encoder_layers,
+            heads=enc_heads,
+            dim_head=enc_dim_head,
+            mlp_mult=enc_mlp_mult,
+            dropout=dropout,
         )
 
-        self.to_logits = nn.Linear(dim, dec_num_tokens)
+        self.decoder = T5Decoder(
+            dim=dim,
+            # max_seq_len= max_seq_len,
+            num_tokens=dec_n_positions,
+            depth=num_decoder_layers,
+            heads=dec_heads,
+            dim_head=dec_dim_head,
+            mlp_mult=dec_mlp_mult,
+            dropout=dropout,
+        )
+
+        self.to_logits = nn.Linear(dim, dec_n_positions)
 
         # tie weights
         if tie_token_emb:
             self.encoder.token_emb.weight = self.decoder.token_emb.weight
 
-    def forward(self, src, tgt, mask = None, context_mask = None):
+    def forward(self, src, tgt, mask=None, context_mask=None):
         x = self.embedding(src)
-        #x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
-        x = self.encoder(src, mask = mask)
-        x = self.decoder(tgt, x, mask = mask, context_mask = context_mask)
+        # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
+        x = self.encoder(src, mask=mask)
+        x = self.decoder(tgt, x, mask=mask, context_mask=context_mask)
         x = self.to_logits(x)
         return x
+
+
+model = T5(
+    dim=768,
+    enc_n_positions=512,
+    num_encoder_layers=6,
+    enc_heads=12,
+    enc_dim_head=64,
+    enc_mlp_mult=4,
+    dec_n_positions=512,
+    num_decoder_layers=6,
+    dec_heads=12,
+    dec_dim_head=64,
+    dec_mlp_mult=4,
+    dropout=0.0,
+    tie_token_emb=True,
+)
+
+model.load_state_dict(
+    torch.load(
+        os.path.join("checkpoints", "google", "flan-t5-base", "pytorch_model.bin")
+    )
+)
