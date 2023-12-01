@@ -6,6 +6,7 @@ from einops import rearrange
 import math
 from scripts.download import download_from_hub
 from typing import Dict
+import re
 
 class T5LayerNorm(nn.Module):
     def __init__(self, dim):
@@ -177,7 +178,7 @@ class T5CrossAttention(nn.Module):
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_out = nn.Linear(inner_dim, dim)
+        self.to_o = nn.Linear(inner_dim, dim)
 
         # self.relative_position_bias = T5RelativePositionBias(
         #     scale = dim_head ** -0.5,
@@ -227,7 +228,7 @@ class T5CrossAttention(nn.Module):
 
         # combine heads and linear output
 
-        return self.to_out(out)
+        return self.to_o(out)
 
 
 class T5Encoder(nn.Module):
@@ -442,6 +443,26 @@ model_state_dict: Dict[str, torch.Tensor] = torch.load(
 )
 
 # remap state dict
+for k, v in list(model_state_dict.items()):
+    
+    # self attention
+    self_attn_pattern = r'(\w+)\.block\.(\d+)\.layer\.(\d+)\.(\w+)\.(\w+)\.(\w+)'
+    match = re.match(self_attn_pattern, k)
+    if match:
+        model_module, block_num, layer_num, module_name, tensor_name, weight_name = match.groups()
+        converted_key = f"{model_module}.block.{block_num}.{layer_num}.fn.to_{tensor_name}.{weight_name}"
+        print(f"remapping {k} to {converted_key}")
+        model_state_dict[converted_key] = v
+        del model_state_dict[k]
+
+    norm_pattern = r'(\w+)\.block\.(\d+)\.(\d+)\.(\w+).(\w+)'
+    match = re.match(norm_pattern, k)
+    if match:
+        model_module, block_num, layer_num, tensor_name = match.groups()
+        converted_key = f"{model_module}.block.{block_num}.{layer_num}.{tensor_name}"
+        breakpoint()
+        model_state_dict[converted_key] = v
+        del model_state_dict[k]
 
 
 model.load_state_dict(model_state_dict)
