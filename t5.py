@@ -1,3 +1,4 @@
+print("Loading dependencies")
 import os
 import torch
 from torch import nn
@@ -438,6 +439,7 @@ model_name = "t5-efficient-tiny"
 
 download_from_hub(f"{model_org}/{model_name}")
 
+print("Loading state dict")
 model_state_dict: Dict[str, torch.Tensor] = torch.load(
     os.path.join("checkpoints", model_org, model_name, "pytorch_model.bin")
 )
@@ -445,24 +447,33 @@ model_state_dict: Dict[str, torch.Tensor] = torch.load(
 # remap state dict
 for k, v in list(model_state_dict.items()):
     
-    # self attention
-    self_attn_pattern = r'(\w+)\.block\.(\d+)\.layer\.(\d+)\.(\w+)\.(\w+)\.(\w+)'
-    match = re.match(self_attn_pattern, k)
-    if match:
-        model_module, block_num, layer_num, module_name, tensor_name, weight_name = match.groups()
-        converted_key = f"{model_module}.block.{block_num}.{layer_num}.fn.to_{tensor_name}.{weight_name}"
-        print(f"remapping {k} to {converted_key}")
-        model_state_dict[converted_key] = v
-        del model_state_dict[k]
+    ln = k.split('.')
+    if len(ln) < 4:
+        continue
+    model_module = ln[0]
+    layer_idx = int(ln[2])
+    layer_sub_idx = ln[3]
+    new_key = None
+    # self attn layer
+    if ln[2].isdigit() and ln[4].isdigit():
+        block_idx = int(ln[2])
+        block_sub_idx = int(ln[4])
+        if ln[5] == 'SelfAttention' or ln[5] == 'EncDecAttention':
+            attn_layer = ln[6]
+            task = ln[7]
+            new_key = f'{model_module}.block.{layer_idx}.{block_idx}.fn.to_{attn_layer}.{task}'
+            model_state_dict[new_key] = v
+        elif ln[5] == 'layer_norm':
+            task = ln[6]
+            new_key = f'{model_module}.block.{layer_idx}.layer.{block_idx}.layer_norm.{task}'
 
-    norm_pattern = r'(\w+)\.block\.(\d+)\.(\d+)\.(\w+).(\w+)'
-    match = re.match(norm_pattern, k)
-    if match:
-        model_module, block_num, layer_num, tensor_name = match.groups()
-        converted_key = f"{model_module}.block.{block_num}.{layer_num}.{tensor_name}"
-        breakpoint()
-        model_state_dict[converted_key] = v
-        del model_state_dict[k]
+        if new_key:
+            print(f"remapping {k} to {new_key}")
+            model_state_dict[new_key] = v
+            del model_state_dict[k]
+
+
+
 
 
 model.load_state_dict(model_state_dict)
