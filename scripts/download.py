@@ -27,6 +27,10 @@ def download_from_hub(
         raise ModuleNotFoundError(str(_SAFETENSORS_AVAILABLE))
 
     directory = Path("checkpoints") / repo_id
+    if directory.exists():
+        print(f"Directory {directory} already exists. Skipping download.")
+        return
+
     snapshot_download(
         repo_id,
         local_dir=directory,

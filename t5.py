@@ -4,7 +4,8 @@ from torch import nn
 import torch.nn.functional as F
 from einops import rearrange
 import math
-
+from scripts.download import download_from_hub
+from typing import Dict
 
 class T5LayerNorm(nn.Module):
     def __init__(self, dim):
@@ -241,15 +242,15 @@ class T5Encoder(nn.Module):
         dim_head=64,
         causal=False,
         mlp_mult=4,
-        dropout=0.0
+        dropout=0.0,
     ):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
-        self.layer = nn.ModuleList([])
+        self.block = nn.ModuleList([])
         for _ in range(depth):
-            self.layer.append(
+            self.block.append(
                 nn.ModuleList(
                     [
                         WrapperBlock(
@@ -276,7 +277,7 @@ class T5Encoder(nn.Module):
         x = self.token_emb(x)
         # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
-        for attn, mlp in self.layer:
+        for attn, mlp in self.block:  # type: ignore
             x = attn(x, mask=mask)
             x = mlp(x)
 
@@ -300,15 +301,15 @@ class T5Decoder(nn.Module):
         dim_head=64,
         causal=True,
         mlp_mult=4,
-        dropout=0.0
+        dropout=0.0,
     ):
         super().__init__()
         self.token_emb = nn.Embedding(num_tokens, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
-        self.layer = nn.ModuleList([])
+        self.block = nn.ModuleList([])
         for _ in range(depth):
-            self.layer.append(
+            self.block.append(
                 nn.ModuleList(
                     [
                         WrapperBlock(
@@ -340,7 +341,7 @@ class T5Decoder(nn.Module):
         x = self.token_emb(x)
         # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
-        for attn, cross_attn, mlp in self.layer:
+        for attn, cross_attn, mlp in self.block:  # type: ignore
             x = attn(x, mask=mask)
             x = cross_attn(x, context=context, mask=mask, context_mask=context_mask)
             x = mlp(x)
@@ -370,7 +371,7 @@ class T5(nn.Module):
         dec_dim_head,
         dec_mlp_mult,
         dropout=0.0,
-        tie_token_emb=True
+        tie_token_emb=True,
     ):
         super().__init__()
 
@@ -430,8 +431,17 @@ model = T5(
     tie_token_emb=True,
 )
 
-model.load_state_dict(
-    torch.load(
-        os.path.join("checkpoints", "google", "flan-t5-base", "pytorch_model.bin")
-    )
+
+model_org = "google"
+model_name = "t5-efficient-tiny"
+
+download_from_hub(f"{model_org}/{model_name}")
+
+model_state_dict: Dict[str, torch.Tensor] = torch.load(
+    os.path.join("checkpoints", model_org, model_name, "pytorch_model.bin")
 )
+
+# remap state dict
+
+
+model.load_state_dict(model_state_dict)
