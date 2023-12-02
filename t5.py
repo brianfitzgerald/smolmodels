@@ -38,6 +38,7 @@ class WrapperBlock(nn.Module):
     def forward(self, x, **kwargs):
         return self.fn(x, **kwargs) + x
 
+
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4, dropout=0.1):
         super().__init__()
@@ -65,7 +66,6 @@ class T5RelativePositionBias(nn.Module):
         self.causal = causal
         self.num_buckets = num_buckets
         self.max_distance = max_distance
-        self.relative_attention_bias = nn.Embedding(num_buckets, heads)
 
     @staticmethod
     def _relative_position_bucket(
@@ -116,7 +116,17 @@ class T5RelativePositionBias(nn.Module):
 
 # TODO use scaled dot product attention
 class T5SelfAttention(nn.Module):
-    def __init__(self, *, dim, heads=12, dim_head=64, causal=False, dropout=0.0):
+    def __init__(
+        self,
+        *,
+        dim,
+        relative_attn_bias=False,
+        num_buckets=32,
+        heads=12,
+        dim_head=64,
+        causal=False,
+        dropout=0.0,
+    ):
         super().__init__()
         inner_dim = dim_head * heads
         self.heads = heads
@@ -128,11 +138,9 @@ class T5SelfAttention(nn.Module):
         self.to_v = nn.Linear(dim, inner_dim, bias=False)
         self.to_o = nn.Linear(inner_dim, dim, bias=False)
 
-        # self.relative_position_bias = T5RelativePositionBias(
-        #     scale=dim_head**-0.5, causal=causal, heads=heads
-        # )
-
         self.dropout = nn.Dropout(dropout)
+        if relative_attn_bias:
+            self.to_relative_attention_bias = nn.Embedding(num_buckets, heads)
 
     def forward(self, x, mask=None):
         b, n, _, h = *x.shape, self.heads
@@ -190,7 +198,7 @@ class T5CrossAttention(nn.Module):
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
-        self.to_o = nn.Linear(inner_dim, dim)
+        self.to_o = nn.Linear(inner_dim, dim, bias=False)
 
         # self.relative_position_bias = T5RelativePositionBias(
         #     scale = dim_head ** -0.5,
@@ -258,17 +266,18 @@ class T5Encoder(nn.Module):
         dropout=0.0,
     ):
         super().__init__()
-        self.token_emb = nn.Embedding(num_tokens, dim)
+        self.embed_tokens = nn.Embedding(num_tokens, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.block = nn.ModuleList([])
-        for _ in range(depth):
+        for i in range(depth):
             self.block.append(
                 nn.ModuleList(
                     [
                         WrapperBlock(
                             dim,
                             T5SelfAttention(
+                                relative_attn_bias=i == 0,
                                 dim=dim,
                                 heads=heads,
                                 dim_head=dim_head,
@@ -284,17 +293,17 @@ class T5Encoder(nn.Module):
                 )
             )
 
-        self.final_norm = T5LayerNorm(dim)
+        self.final_layer_norm = T5LayerNorm(dim)
 
     def forward(self, x, mask=None):
-        x = self.token_emb(x)
+        x = self.embed_tokens(x)
         # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
         for attn, mlp in self.block:  # type: ignore
             x = attn(x, mask=mask)
             x = mlp(x)
 
-        x = self.final_norm(x)
+        x = self.final_layer_norm(x)
 
         return x
 
@@ -317,17 +326,18 @@ class T5Decoder(nn.Module):
         dropout=0.0,
     ):
         super().__init__()
-        self.token_emb = nn.Embedding(num_tokens, dim)
+        self.embed_tokens = nn.Embedding(num_tokens, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.block = nn.ModuleList([])
-        for _ in range(depth):
+        for i in range(depth):
             self.block.append(
                 nn.ModuleList(
                     [
                         WrapperBlock(
                             dim,
                             T5SelfAttention(
+                                relative_attn_bias=i == 0,
                                 dim=dim,
                                 heads=heads,
                                 dim_head=dim_head,
@@ -348,10 +358,10 @@ class T5Decoder(nn.Module):
                 )
             )
 
-        self.final_norm = T5LayerNorm(dim)
+        self.final_layer_norm = T5LayerNorm(dim)
 
     def forward(self, x, context, mask=None, context_mask=None):
-        x = self.token_emb(x)
+        x = self.embed_tokens(x)
         # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
 
         for attn, cross_attn, mlp in self.block:  # type: ignore
@@ -359,7 +369,7 @@ class T5Decoder(nn.Module):
             x = cross_attn(x, context=context, mask=mask, context_mask=context_mask)
             x = mlp(x)
 
-        x = self.final_norm(x)
+        x = self.final_layer_norm(x)
 
         return x
 
@@ -388,7 +398,7 @@ class T5(nn.Module):
     ):
         super().__init__()
 
-        self.embedding = nn.Embedding(enc_n_positions, dim)
+        self.shared = nn.Embedding(enc_n_positions, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.encoder = T5Encoder(
@@ -413,29 +423,29 @@ class T5(nn.Module):
             dropout=dropout,
         )
 
-        self.to_logits = nn.Linear(dim, dec_n_positions)
+        self.lm_head = nn.Linear(dim, dec_n_positions, bias=False)
 
         # tie weights
         if tie_token_emb:
-            self.encoder.token_emb.weight = self.decoder.token_emb.weight
+            self.encoder.embed_tokens.weight = self.decoder.embed_tokens.weight
 
     def forward(self, src, tgt, mask=None, context_mask=None):
-        x = self.embedding(src)
+        x = self.shared(src)
         # x = x + self.pos_emb(torch.arange(x.shape[1], device = x.device))
         x = self.encoder(src, mask=mask)
         x = self.decoder(tgt, x, mask=mask, context_mask=context_mask)
-        x = self.to_logits(x)
+        x = self.lm_head(x)
         return x
 
 
 model = T5(
     dim=256,
-    enc_n_positions=512,
+    enc_n_positions=32128,
+    dec_n_positions=32128,
     num_encoder_layers=4,
     enc_heads=4,
     enc_dim_head=64,
     enc_mlp_mult=4,
-    dec_n_positions=512,
     num_decoder_layers=4,
     dec_heads=4,
     dec_dim_head=64,
@@ -474,16 +484,16 @@ for k, v in list(model_state_dict.items()):
         model_state_dict[new_key] = v
     elif ln[5] == "layer_norm":
         task = ln[6]
-        new_key = (
-            f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
-        )
-    elif ln[5] == 'net':
+        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
+    elif ln[5] == "net":
         task = ln[6]
-        new_key = f'{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}'
+        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
     elif ln[5] == "DenseReluDense":
         sub_layer = ln[6]
         task = ln[7]
-        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
+        new_key = (
+            f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
+        )
 
     if new_key:
         print(f"remapping {k} to {new_key}")
