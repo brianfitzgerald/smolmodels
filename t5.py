@@ -9,39 +9,50 @@ from scripts.download import download_from_hub
 from typing import Dict
 import re
 
-class T5LayerNorm(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.gamma = nn.Parameter(torch.ones(dim))
-        self.register_buffer("beta", torch.zeros(dim))
 
-    def forward(self, x):
-        return F.layer_norm(x, x.shape[-1:], self.gamma, self.beta)
+class T5LayerNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        """
+        Construct a layernorm module in the T5 style. No bias and no subtraction of mean.
+        """
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states):
+        variance = hidden_states.to(torch.float32).pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+
+        if self.weight.dtype in [torch.float16, torch.bfloat16]:
+            hidden_states = hidden_states.to(self.weight.dtype)
+
+        return self.weight * hidden_states
 
 
 class WrapperBlock(nn.Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.norm = T5LayerNorm(dim)
+        self.layer_norm = T5LayerNorm(dim)
 
     def forward(self, x, **kwargs):
         return self.fn(x, **kwargs) + x
-
 
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4, dropout=0.1):
         super().__init__()
         inner_dim = int(dim * mult)
-        self.net = nn.Sequential(
-            nn.Linear(dim, inner_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(inner_dim, dim),
-        )
+        self.wi = nn.Linear(dim, inner_dim, bias=False)
+        self.wo = nn.Linear(inner_dim, dim, bias=False)
+        self.dropout = nn.Dropout(dropout)
+        self.act = nn.ReLU()
 
-    def forward(self, x):
-        return self.net(x)
+    def forward(self, hidden_states):
+        hidden_states = self.wi(hidden_states)
+        hidden_states = self.act(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.wo(hidden_states)
+        return hidden_states
 
 
 # bucket the position bias to 32 positions
@@ -115,11 +126,11 @@ class T5SelfAttention(nn.Module):
         self.to_q = nn.Linear(dim, inner_dim, bias=False)
         self.to_k = nn.Linear(dim, inner_dim, bias=False)
         self.to_v = nn.Linear(dim, inner_dim, bias=False)
-        self.to_out = nn.Linear(inner_dim, dim)
+        self.to_o = nn.Linear(inner_dim, dim, bias=False)
 
-        self.relative_position_bias = T5RelativePositionBias(
-            scale=dim_head**-0.5, causal=causal, heads=heads
-        )
+        # self.relative_position_bias = T5RelativePositionBias(
+        #     scale=dim_head**-0.5, causal=causal, heads=heads
+        # )
 
         self.dropout = nn.Dropout(dropout)
 
@@ -133,7 +144,7 @@ class T5SelfAttention(nn.Module):
 
         sim = torch.einsum("b h i d, b h j d -> b h i j", q, k)
 
-        sim = self.relative_position_bias(sim)
+        # sim = self.relative_position_bias(sim)
 
         # mask
 
@@ -164,7 +175,7 @@ class T5SelfAttention(nn.Module):
 
         # combine heads and linear output
 
-        return self.to_out(out)
+        return self.to_o(out)
 
 
 class T5CrossAttention(nn.Module):
@@ -418,15 +429,15 @@ class T5(nn.Module):
 
 
 model = T5(
-    dim=768,
+    dim=256,
     enc_n_positions=512,
-    num_encoder_layers=6,
-    enc_heads=12,
+    num_encoder_layers=4,
+    enc_heads=4,
     enc_dim_head=64,
     enc_mlp_mult=4,
     dec_n_positions=512,
-    num_decoder_layers=6,
-    dec_heads=12,
+    num_decoder_layers=4,
+    dec_heads=4,
     dec_dim_head=64,
     dec_mlp_mult=4,
     dropout=0.0,
@@ -446,34 +457,38 @@ model_state_dict: Dict[str, torch.Tensor] = torch.load(
 
 # remap state dict
 for k, v in list(model_state_dict.items()):
-    
-    ln = k.split('.')
+    ln = k.split(".")
     if len(ln) < 4:
         continue
     model_module = ln[0]
-    layer_idx = int(ln[2])
+    layer_idx = ln[2]
     layer_sub_idx = ln[3]
     new_key = None
+    print(ln)
     # self attn layer
-    if ln[2].isdigit() and ln[4].isdigit():
-        block_idx = int(ln[2])
-        block_sub_idx = int(ln[4])
-        if ln[5] == 'SelfAttention' or ln[5] == 'EncDecAttention':
-            attn_layer = ln[6]
-            task = ln[7]
-            new_key = f'{model_module}.block.{layer_idx}.{block_idx}.fn.to_{attn_layer}.{task}'
-            model_state_dict[new_key] = v
-        elif ln[5] == 'layer_norm':
-            task = ln[6]
-            new_key = f'{model_module}.block.{layer_idx}.layer.{block_idx}.layer_norm.{task}'
+    block_sub_idx = int(ln[4])
+    if ln[5] == "SelfAttention" or ln[5] == "EncDecAttention":
+        attn_layer = ln[6]
+        task = ln[7]
+        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.to_{attn_layer}.{task}"
+        model_state_dict[new_key] = v
+    elif ln[5] == "layer_norm":
+        task = ln[6]
+        new_key = (
+            f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
+        )
+    elif ln[5] == 'net':
+        task = ln[6]
+        new_key = f'{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}'
+    elif ln[5] == "DenseReluDense":
+        sub_layer = ln[6]
+        task = ln[7]
+        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
 
-        if new_key:
-            print(f"remapping {k} to {new_key}")
-            model_state_dict[new_key] = v
-            del model_state_dict[k]
-
-
-
+    if new_key:
+        print(f"remapping {k} to {new_key}")
+        model_state_dict[new_key] = v
+        del model_state_dict[k]
 
 
 model.load_state_dict(model_state_dict)
