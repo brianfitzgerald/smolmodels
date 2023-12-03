@@ -11,3 +11,4 @@ sentencepiece
 lightning_utilities
 lightning
 einops
+pydantic==2.5.2

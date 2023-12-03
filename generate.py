@@ -9,9 +9,9 @@ import torch
 import fire
 from utils import (
     check_valid_checkpoint_dir,
-    get_available_device,
 )
 from transformers import AutoTokenizer
+from config import name_to_config
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -19,11 +19,9 @@ sys.path.append(str(wd))
 from lightning.fabric.utilities.load import _lazy_load as lazy_load
 from model import GPT, Config
 from chat import (
-    clip_message_history_to_max_tokens,
     extract_text_from_generated_message,
     model_conversation_input,
 )
-from prompt_toolkit import prompt
 
 
 @torch.inference_mode()
@@ -95,10 +93,10 @@ def generate(
 
 
 def main(
+    model_name: str = "TinyLlama-1.1B-Chat-v0.6",
     max_new_tokens: int = 128,
     top_k: int = 64,
     temperature: float = 0.8,
-    checkpoint_dir: str = "TinyLlama/TinyLlama-1.1B-Chat-v0.6",
 ) -> None:
     """Generates text samples based on a pre-trained model and tokenizer.
 
@@ -120,13 +118,15 @@ def main(
         precision: Indicates the Fabric precision setting to use.
     """
 
+    model_config: Config = name_to_config[model_name]
+
+    checkpoint_dir = f"checkpoints/{model_config.organization}/{model_config.name}"
     checkpoint_dir_path = Path(checkpoint_dir)
+
     model_file = "lit_model.pth"
     model_checkpoint_path = checkpoint_dir_path / model_file
 
     check_valid_checkpoint_dir(checkpoint_dir_path)
-
-    config = Config.from_name(checkpoint_dir_path.name)
 
     fabric = L.Fabric(devices=1, precision="bf16-true")
     fabric.launch()
@@ -139,8 +139,8 @@ def main(
     print(f"Instantiating model...")
     t0 = time.perf_counter()
     with fabric.init_module():
-        model: GPT = GPT(config, device)
-    model = fabric.setup_module(model) # type: ignore
+        model: GPT = GPT(model_config, device)
+    model = fabric.setup_module(model)  # type: ignore
     model.eval()
     print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
 
@@ -153,24 +153,24 @@ def main(
 
     message_history: List[Dict] = []
 
-    tokenizer = AutoTokenizer.from_pretrained("pansophic/rocket-3B", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "pansophic/rocket-3B", trust_remote_code=True
+    )
 
     with fabric.init_tensor():
         model.set_kv_cache(batch_size=1, device=device)
 
     while True:
-        user_prompt = prompt("Enter a message: ")
+        user_prompt = input("Enter a message: ")
         message_history.append({"role": "user", "content": user_prompt})
 
         print(f"Message history:\n{message_history}")
         full_formatted_prompt = model_conversation_input(message_history)
-        # full_formatted_prompt = clip_message_history_to_max_tokens(
-        #     full_formatted_prompt, model.max_seq_length, tokenizer # type: ignore
-        # )
+
         full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
         print(f"Formatted prompt str:\n{full_formatted_prompt_str}")
-        encoded: Tensor = tokenizer.encode(full_formatted_prompt_str, return_tensors="pt")[0].to(device) # type: ignore
+        encoded: Tensor = tokenizer.encode(full_formatted_prompt_str, return_tensors="pt")[0].to(device)  # type: ignore
         encoded_context_length = encoded.shape[0]
         max_returned_tokens = encoded_context_length + max_new_tokens
 
@@ -210,5 +210,5 @@ def main(
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision("high")
     fire.Fire(main)

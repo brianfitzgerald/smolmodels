@@ -112,7 +112,7 @@ def print_trainable_parameters(model):
     )
 
 
-def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
+def check_valid_checkpoint_dir(checkpoint_dir: Path) -> bool:
     files = {
         "lit_model.pth": (checkpoint_dir / "lit_model.pth").is_file(),
         "tokenizer.json OR tokenizer.model": (
@@ -124,28 +124,14 @@ def check_valid_checkpoint_dir(checkpoint_dir: Path) -> None:
     if checkpoint_dir.is_dir():
         if all(files.values()):
             # we're good
-            return
+            return True
         problem = f" is missing the files: {[f for f, exists in files.items() if not exists]!r}"
+        print(problem)
     else:
         problem = " is not a checkpoint directory"
+        print(problem)
 
-    # list locally available checkpoints
-    available = list(Path("checkpoints").glob("*/*"))
-    if available:
-        options = "\n --checkpoint_dir ".join(
-            [""] + [repr(str(p.resolve())) for p in available]
-        )
-        extra = f"\nYou have downloaded locally:{options}\n"
-    else:
-        extra = ""
-
-    error_message = (
-        f"--checkpoint_dir {str(checkpoint_dir.absolute())!r}{problem}."
-        "\nFind download instructions at https://github.com/Lightning-AI/lit-gpt/blob/main/tutorials\n"
-        f"{extra}\nSee all download options by running:\n python scripts/download.py"
-    )
-    print(error_message, file=sys.stderr)
-    raise SystemExit(1)
+    return False
 
 
 def load_checkpoint(
