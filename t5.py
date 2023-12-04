@@ -472,7 +472,6 @@ for k, v in list(model_state_dict.items()):
         continue
     model_module = ln[0]
     layer_idx = ln[2]
-    layer_sub_idx = ln[3]
     new_key = None
     print(ln)
     # self attn layer

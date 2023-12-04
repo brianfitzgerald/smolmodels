@@ -35,14 +35,25 @@ class Config(BaseModel):
     shared_attention_norm: bool = False
     # no. of query groups for MHA, GQA
     # aka num_key_value_heads
-    n_query_groups: Optional[int] = None
     rope_condense_ratio: int = 1
     rope_base: int = 10000
     intermediate_size: int = 5632
     extra_tokens: int = 0
     gelu_approximate: str = "none"
 
-    def __post_init__(self):
+    n_query_groups: int = 0
+    head_size: int = 0
+    rope_n_elem: int = 0
+
+    @classmethod
+    def from_name(cls, name: str) -> Self:
+        return cls(**name_to_config[name].dict())
+
+    @property
+    def hf_path(self) -> str:
+        return f"{self.organization}/{self.name}"
+
+    def model_post_init(self, __context) -> None:
         assert self.hidden_size % self.n_head == 0
         self.head_size = self.hidden_size // self.n_head
 
@@ -83,27 +94,25 @@ tiny_llama_config = Config(
     n_query_groups=4,
 )
 
-tiny_llama_chat_config = Config(
-    **tiny_llama_config.model_dump(), name="TinyLlama-1.1B-Chat-v0.6", extra_tokens=3
+tiny_llama_chat_config = tiny_llama_config.model_copy(
+    update=dict(name="TinyLlama-1.1B-Chat-v0.6", extra_tokens=3)
 )
 
-model_configs = [
-    Config(
-        name="Nous-Capybara-3B-V1.9",
-        organization="NousResearch",
-        model_family=ModelFamily.STABLE_LM.value,
-        vocab_size=50304,
-        n_layer=32,
-        n_head=32,
-        hidden_size=2560,
-        parallel_residual=False,
-        bias=False,
-        norm_eps=1e-5,
-        intermediate_size=6912,
-        n_query_groups=4,
-    ),
-    tiny_llama_config,
-    tiny_llama_chat_config
-]
+capybara_config = Config(
+    name="Nous-Capybara-3B-V1.9",
+    organization="NousResearch",
+    model_family=ModelFamily.STABLE_LM.value,
+    vocab_size=50304,
+    n_layer=32,
+    n_head=32,
+    hidden_size=2560,
+    parallel_residual=False,
+    bias=False,
+    norm_eps=1e-5,
+    intermediate_size=6912,
+    n_query_groups=4,
+)
+
+model_configs = [tiny_llama_config, tiny_llama_chat_config, capybara_config]
 
 name_to_config = {c.name: c for c in model_configs}

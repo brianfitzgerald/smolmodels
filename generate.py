@@ -11,7 +11,8 @@ from utils import (
     check_valid_checkpoint_dir,
 )
 from transformers import AutoTokenizer
-from config import name_to_config
+from scripts.download import download_from_hub
+from scripts.convert_hf_checkpoint import convert_hf_checkpoint
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -118,15 +119,17 @@ def main(
         precision: Indicates the Fabric precision setting to use.
     """
 
-    model_config: Config = name_to_config[model_name]
+    config: Config = Config.from_name(model_name)
 
-    checkpoint_dir = f"checkpoints/{model_config.organization}/{model_config.name}"
+    checkpoint_dir = f"checkpoints/{config.organization}/{config.name}"
     checkpoint_dir_path = Path(checkpoint_dir)
 
     model_file = "lit_model.pth"
     model_checkpoint_path = checkpoint_dir_path / model_file
 
-    check_valid_checkpoint_dir(checkpoint_dir_path)
+    if not check_valid_checkpoint_dir(checkpoint_dir_path):
+        download_from_hub(config.hf_path)
+        convert_hf_checkpoint(checkpoint_dir, config)
 
     fabric = L.Fabric(devices=1, precision="bf16-true")
     fabric.launch()
@@ -138,8 +141,9 @@ def main(
 
     print(f"Instantiating model...")
     t0 = time.perf_counter()
+    breakpoint()
     with fabric.init_module():
-        model: GPT = GPT(model_config, device)
+        model: GPT = GPT(config, device)
     model = fabric.setup_module(model)  # type: ignore
     model.eval()
     print(f"Time to instantiate model: {time.perf_counter() - t0:.02f} seconds.")
@@ -154,7 +158,7 @@ def main(
     message_history: List[Dict] = []
 
     tokenizer = AutoTokenizer.from_pretrained(
-        "pansophic/rocket-3B", trust_remote_code=True
+        config.hf_path, trust_remote_code=True
     )
 
     with fabric.init_tensor():

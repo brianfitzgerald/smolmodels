@@ -1,7 +1,6 @@
 import gc
 import json
 import sys
-from dataclasses import asdict
 from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -237,19 +236,19 @@ def load_param(
 @torch.inference_mode()
 def convert_hf_checkpoint(
     checkpoint_dir: str,
-    model_name: Optional[str] = None,
+    config: Config,
 ) -> None:
-    if model_name is None:
-        model_name = checkpoint_dir.split("/")[-1]
 
     dtype = torch.bfloat16
 
-    print(f"Converting model: {model_name}")
-    config = Config.from_name(model_name)
-    config_dict = asdict(config)
+    print(f"Converting model: {config.name}")
+    config_dict = config.model_dump()
     print(f"Using model config: {config_dict}")
 
-    if config.model_family == ModelFamily.LLAMA.value or config.model_family == ModelFamily.MISTRAL.value:
+    if (
+        config.model_family == ModelFamily.LLAMA.value
+        or config.model_family == ModelFamily.MISTRAL.value
+    ):
         # holder to reconstitute the split q, k, v
         qkv_weights = {}
         copy_fn = partial(copy_weights_hf_llama, config, qkv_weights)
@@ -266,19 +265,27 @@ def convert_hf_checkpoint(
     pytorch_bin_map_json_path = os.path.join(
         checkpoint_dir, "pytorch_model.bin.index.json"
     )
-    checkpoint_path = Path(checkpoint_dir)
+    checkpoint_dir_path = Path(checkpoint_dir)
+    checkpoint_path = checkpoint_dir_path / "lit_model.pth"
+    if checkpoint_path.exists():
+        print(f"Checkpoint {checkpoint_path} already exists. Skipping conversion.")
+        return
+
     if os.path.exists(pytorch_bin_map_json_path):  # not all checkpoints have this file
         with open(pytorch_bin_map_json_path) as json_map:
             bin_index = json.load(json_map)
-        bin_files = {os.path.join(checkpoint_dir, bin_path) for bin_path in bin_index["weight_map"].values()}
+        bin_files = {
+            os.path.join(checkpoint_dir, bin_path)
+            for bin_path in bin_index["weight_map"].values()
+        }
     else:
-        bin_files = set(checkpoint_path.glob("*.bin"))
+        bin_files = set(checkpoint_dir_path.glob("*.bin"))
         # some checkpoints serialize the training arguments
         bin_files = {f for f in bin_files if f.name != "training_args.bin"}
     if not bin_files:
-        raise ValueError(f"Expected {str(checkpoint_path)!r} to contain .bin files")
+        raise ValueError(f"Expected {str(checkpoint_dir_path)!r} to contain .bin files")
 
-    with incremental_save(checkpoint_path / "lit_model.pth") as saver:
+    with incremental_save(checkpoint_path) as saver:
         # for checkpoints that split the QKV across several files, we need to keep all the bin files
         # open, so we use `ExitStack` to close them all together at the end
         for bin_file in sorted(bin_files):

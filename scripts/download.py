@@ -37,6 +37,7 @@ def download_from_hub(
         local_dir_use_symlinks=False,
         resume_download=True,
         token=access_token,
+        allow_patterns=["*.safetensors", "*.json", "*.txt", "*.bin", "*.model"],
     )
 
     # convert safetensors to PyTorch binaries
