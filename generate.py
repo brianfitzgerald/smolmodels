@@ -190,7 +190,7 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        # full_model_output = tokenizer.decode(y)
+        full_model_output = tokenizer.decode(y)
         new_model_output = tokenizer.decode(y[encoded_context_length:])
         print(
             f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}"
