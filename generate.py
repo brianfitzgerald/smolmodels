@@ -87,7 +87,7 @@ def generate(
 
         # if <eos> token is triggered, return the output (stop generation)
         # if the token was generated in the first few indices, then continue
-        if next_token_idx == eos_id and i > 10:
+        if next_token_idx == eos_id:
             return encoded_prompt[:input_pos]  # include the EOS token
 
     return encoded_prompt
@@ -95,7 +95,7 @@ def generate(
 
 def main(
     model_name: str = "TinyLlama-1.1B-Chat-v0.6",
-    max_new_tokens: int = 128,
+    max_new_tokens: int = 64,
     top_k: int = 64,
     temperature: float = 0.8,
 ) -> None:
@@ -141,7 +141,6 @@ def main(
 
     print(f"Instantiating model...")
     t0 = time.perf_counter()
-    breakpoint()
     with fabric.init_module():
         model: GPT = GPT(config, device)
     model = fabric.setup_module(model)  # type: ignore
@@ -173,7 +172,6 @@ def main(
 
         full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
-        print(f"Formatted prompt str:\n{full_formatted_prompt_str}")
         encoded: Tensor = tokenizer.encode(full_formatted_prompt_str, return_tensors="pt")[0].to(device)  # type: ignore
         encoded_context_length = encoded.shape[0]
         max_returned_tokens = encoded_context_length + max_new_tokens
@@ -192,13 +190,13 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        full_model_output = tokenizer.decode(y)
-        new_model_output = tokenizer.decode(y[encoded_context_length:max_new_tokens])
+        # full_model_output = tokenizer.decode(y)
+        new_model_output = tokenizer.decode(y[encoded_context_length:])
         print(
             f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}"
         )
         new_model_output = extract_text_from_generated_message(new_model_output)
-        print(f"Full output:\n{full_model_output}")
+        # print(f"Full output:\n{full_model_output}")
         print(f"New output:\n{new_model_output}")
         message_history.append({"role": "assistant", "content": new_model_output})
 
