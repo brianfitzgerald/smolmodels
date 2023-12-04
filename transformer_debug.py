@@ -3,15 +3,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
 model_path = "pansophic/rocket-3B"
 
-print("Loading state dict")
-model_sd = torch.load(f"checkpoints/{model_path}/pytorch_model.bin")
 print("Loading pipeline")
 model = AutoModelForCausalLM.from_pretrained(
-    pretrained_model_name_or_path=model_path,
-    state_dict=model_sd,
+    pretrained_model_name_or_path=f"checkpoints/{model_path}",
     trust_remote_code=True,
     torch_dtype=torch.bfloat16,
-    from_pt=True,
 ).to("cuda")
 tokenizer = AutoTokenizer.from_pretrained(
     model_path, trust_remote_code=True, torch_dtype=torch.bfloat16
