@@ -46,7 +46,7 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.hidden_size),
-                h=nn.ModuleList(Block(config) for _ in range(config.n_layer)),
+                h=nn.ModuleList(Block(config) for _ in range(config.num_hidden_layers)),
                 norm=transformer_norm,
             )
         )
@@ -244,8 +244,8 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
         # size of all q,k,v projections of all heads
-        assert config.n_query_groups
-        shape = (config.n_head + 2 * config.n_query_groups) * config.head_size
+        assert config.num_key_value_heads
+        shape = (config.num_attention_heads + 2 * config.num_key_value_heads) * config.head_size
         # n_embd is the size of the input embedding for a token
         # key, query, value projections for all heads, but in a batch
         self.attn = nn.Linear(config.hidden_size, shape, bias=config.bias)
@@ -272,14 +272,14 @@ class CausalSelfAttention(nn.Module):
 
         qkv = self.attn(x)
 
-        assert self.config.n_query_groups
+        assert self.config.num_key_value_heads
 
         # get the number of query groups for MHA, GQA
         # if this value is 1, then we are using standard multi-head attention
-        q_per_kv = self.config.n_head // self.config.n_query_groups
+        q_per_kv = self.config.num_attention_heads // self.config.num_key_value_heads
         total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
         qkv = qkv.view(
-            B, T, self.config.n_query_groups, total_qkv, self.config.head_size
+            B, T, self.config.num_key_value_heads, total_qkv, self.config.head_size
         )
         qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, hs)
 
@@ -288,14 +288,14 @@ class CausalSelfAttention(nn.Module):
 
         # repeat k and v for non multi-head attention
         # flash attention also requires this
-        if self.config.n_query_groups != self.config.n_head and (
-            input_pos is None or self.config.n_query_groups != 1
+        if self.config.num_key_value_heads != self.config.num_attention_heads and (
+            input_pos is None or self.config.num_key_value_heads != 1
         ):
             k = k.expand(
-                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+                B, self.config.num_key_value_heads, q_per_kv, T, self.config.head_size
             )
             v = v.expand(
-                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+                B, self.config.num_key_value_heads, q_per_kv, T, self.config.head_size
             )
 
         # Reshape to (B, nh_q, T, hs)
@@ -341,7 +341,7 @@ class CausalSelfAttention(nn.Module):
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> KVCache:
-        heads = 1 if self.config.n_query_groups == 1 else self.config.n_head
+        heads = 1 if self.config.num_key_value_heads == 1 else self.config.num_attention_heads
         v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
         if rope_cache_length is None:
             if self.config.rotary_percentage != 1.0:

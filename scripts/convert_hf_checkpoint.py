@@ -78,8 +78,8 @@ def copy_weights_stablelm(
             q = load_param(q, f"layer {i} q", dtype)
             k = load_param(k, f"layer {i} k", dtype)
             v = load_param(v, f"layer {i} v", dtype)
-            assert config.n_query_groups
-            q_per_kv = config.n_head // config.n_query_groups
+            assert config.num_key_value_heads
+            q_per_kv = config.num_attention_heads // config.num_key_value_heads
             qs = torch.split(q, config.head_size * q_per_kv)
             ks = torch.split(k, config.head_size)
             vs = torch.split(v, config.head_size)
@@ -141,8 +141,8 @@ def copy_weights_hf_llama(
         q = load_param(q, f"layer {i} q", dtype)
         k = load_param(k, f"layer {i} k", dtype)
         v = load_param(v, f"layer {i} v", dtype)
-        assert config.n_query_groups
-        q_per_kv = config.n_head // config.n_query_groups
+        assert config.num_key_value_heads
+        q_per_kv = config.num_attention_heads // config.num_key_value_heads
         qs = torch.split(q, config.head_size * q_per_kv)
         ks = torch.split(k, config.head_size)
         vs = torch.split(v, config.head_size)
@@ -172,16 +172,16 @@ def copy_weights_phi(
         "layers.{}.mlp.fc_1.weight": "transformer.h.{}.mlp.fc.weight",
         "layers.{}.mlp.fc2.bias": "transformer.h.{}.mlp.proj.bias",
         "layers.{}.mlp.fc2.weight": "transformer.h.{}.mlp.proj.weight",
-        f"layers.{config.n_layer + 1}.ln.bias": "transformer.ln_f.bias",
-        f"layers.{config.n_layer + 1}.ln.weight": "transformer.ln_f.weight",
-        f"layers.{config.n_layer + 1}.linear.weight": "lm_head.weight",
-        f"layers.{config.n_layer + 1}.linear.bias": "lm_head.bias",
+        f"layers.{config.num_hidden_layers + 1}.ln.bias": "transformer.ln_f.bias",
+        f"layers.{config.num_hidden_layers + 1}.ln.weight": "transformer.ln_f.weight",
+        f"layers.{config.num_hidden_layers + 1}.linear.weight": "lm_head.weight",
+        f"layers.{config.num_hidden_layers + 1}.linear.bias": "lm_head.bias",
     }
 
     for name, param in hf_weights.items():
         if "layers" in name:
             from_name, number = layer_template(name, 1)
-            if number in (0, config.n_layer + 1):
+            if number in (0, config.num_hidden_layers + 1):
                 # these are part of the layers in phi, but not in our implementation
                 to_name = weight_map[name]
             else:
@@ -194,10 +194,10 @@ def copy_weights_phi(
             to_name = weight_map[name]
         param = load_param(param, name, dtype)
         if "Wqkv" in name:
-            assert config.n_query_groups
-            q_per_kv = config.n_head // config.n_query_groups
+            assert config.num_key_value_heads
+            q_per_kv = config.num_attention_heads // config.num_key_value_heads
             total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
-            param = param.view(total_qkv, config.n_query_groups, -1).transpose(0, 1)
+            param = param.view(total_qkv, config.num_key_value_heads, -1).transpose(0, 1)
             param = param.reshape(config.hidden_size * 3, -1)
             if "bias" in name:
                 param = param.squeeze()

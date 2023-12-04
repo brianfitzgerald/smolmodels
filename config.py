@@ -19,29 +19,28 @@ class Config(BaseModel):
     model_family: str = ModelFamily.LLAMA.value
     # aka sliding_window in transformers
     block_size: int = 2048
-    vocab_size: int = 32000
+    vocab_size: int = 50304
     padding_multiple: int = 64
     padded_vocab_size: Optional[int] = None
-    n_layer: int = 16
-    n_head: int = 32
+    num_hidden_layers: int = 16
+    num_attention_heads: int = 32
     hidden_size: int = 4096
     rotary_percentage: float = 1
-    parallel_residual: bool = True
-    bias: bool = True
+    parallel_residual: bool = False
+    bias: bool = False
     lm_head_bias: bool = False
     norm_eps: float = 1e-6
     # determines whether to share the attention norm per block
     # only used for phi-1.5
     shared_attention_norm: bool = False
-    # no. of query groups for MHA, GQA
-    # aka num_key_value_heads
+    # rope_scaling in transformers
     rope_condense_ratio: int = 1
     rope_base: int = 10000
     intermediate_size: int = 5632
     extra_tokens: int = 0
     gelu_approximate: str = "none"
 
-    n_query_groups: int = 0
+    num_key_value_heads: Optional[int] = 32
     head_size: int = 0
     rope_n_elem: int = 0
 
@@ -54,8 +53,8 @@ class Config(BaseModel):
         return f"{self.organization}/{self.name}"
 
     def model_post_init(self, __context) -> None:
-        assert self.hidden_size % self.n_head == 0
-        self.head_size = self.hidden_size // self.n_head
+        assert self.hidden_size % self.num_attention_heads == 0
+        self.head_size = self.hidden_size // self.num_attention_heads
 
         # vocab size should be a power of 2 to be optimal on hardware. compute the closest value
         if self.padded_vocab_size is None:
@@ -68,10 +67,10 @@ class Config(BaseModel):
             self.vocab_size = min(self.vocab_size, self.padded_vocab_size)
 
         # compute the number of query groups
-        if self.n_query_groups is not None:
-            assert self.n_head % self.n_query_groups == 0
+        if self.num_key_value_heads is not None:
+            assert self.num_attention_heads % self.num_key_value_heads == 0
         else:
-            self.n_query_groups = self.n_head
+            self.num_key_value_heads = self.num_attention_heads
 
         # compute the intermediate size for MLP if not set
         if self.intermediate_size is None:
@@ -84,14 +83,12 @@ tiny_llama_config = Config(
     name="TinyLlama-1.1B-intermediate-step-480k-1T",
     organization="TinyLlama",
     model_family=ModelFamily.LLAMA.value,
-    n_layer=22,
-    n_head=32,
+    num_hidden_layers=22,
+    num_attention_heads=32,
     hidden_size=2048,
-    parallel_residual=False,
-    bias=False,
     intermediate_size=5632,
     norm_eps=1e-5,
-    n_query_groups=4,
+    num_key_value_heads=4,
 )
 
 tiny_llama_chat_config = tiny_llama_config.model_copy(
@@ -102,17 +99,45 @@ capybara_config = Config(
     name="Nous-Capybara-3B-V1.9",
     organization="NousResearch",
     model_family=ModelFamily.STABLE_LM.value,
-    vocab_size=50304,
-    n_layer=32,
-    n_head=32,
+    num_hidden_layers=32,
+    num_attention_heads=32,
     hidden_size=2560,
-    parallel_residual=False,
-    bias=False,
     norm_eps=1e-5,
     intermediate_size=6912,
-    n_query_groups=4,
+    num_key_value_heads=4,
 )
 
-model_configs = [tiny_llama_config, tiny_llama_chat_config, capybara_config]
+rocket_config = Config(
+    name="rocket-3B",
+    organization="pansophic",
+    model_family=ModelFamily.STABLE_LM.value,
+    num_hidden_layers=32,
+    num_attention_heads=32,
+    hidden_size=2560,
+    norm_eps=1e-5,
+    intermediate_size=6912,
+    rotary_percentage=0.25,
+)
+
+open_hermes_config = Config(
+    name="OpenHermes-2.5-Mistral-7B",
+    organization="OpenHermes",
+    model_family=ModelFamily.MISTRAL.value,
+    num_hidden_layers=32,
+    num_attention_heads=32,
+    hidden_size=4096,
+    norm_eps=1e-5,
+    intermediate_size=14336,
+    num_key_value_heads=8,
+    vocab_size=32002
+)
+
+model_configs = [
+    tiny_llama_config,
+    tiny_llama_chat_config,
+    capybara_config,
+    rocket_config,
+    open_hermes_config
+]
 
 name_to_config = {c.name: c for c in model_configs}

@@ -94,7 +94,7 @@ def generate(
 
 
 def main(
-    model_name: str = "TinyLlama-1.1B-Chat-v0.6",
+    model_name: str = "rocket-3B",
     max_new_tokens: int = 64,
     top_k: int = 64,
     temperature: float = 0.8,
