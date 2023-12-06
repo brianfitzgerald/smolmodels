@@ -34,18 +34,6 @@ def generate(
     top_k: Optional[int] = None,
     eos_id: Optional[int] = None,
 ) -> torch.Tensor:
-    """Takes a conditioning sequence (prompt) as input and continues to generate as many tokens as requested.
-
-    The implementation of this function is modified from A. Karpathy's nanoGPT.
-
-    Args:
-        model: The model to use.
-        idx: Tensor of shape (T) with indices of the prompt sequence.
-        max_returned_tokens: The maximum number of tokens to return (given plus generated).
-        temperature: Scales the predicted logits by 1 / temperature.
-        top_k: If specified, only sample among the tokens with the k highest probabilities.
-        eos_id: If specified, stop generating any more token once the <eos> token is triggered.
-    """
     T = encoded_prompt.size(0)
     assert max_returned_tokens > T
     if model.max_seq_length < max_returned_tokens - 1:
@@ -95,7 +83,7 @@ def generate(
 
 def main(
     model_name: str = "rocket-3B",
-    max_new_tokens: int = 64,
+    max_new_tokens: int = 1024,
     top_k: int = 64,
     temperature: float = 0.8,
 ) -> None:
@@ -156,9 +144,7 @@ def main(
 
     message_history: List[Dict] = []
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        config.hf_path, trust_remote_code=True
-    )
+    tokenizer = AutoTokenizer.from_pretrained(config.hf_path, trust_remote_code=True)
 
     with fabric.init_tensor():
         model.set_kv_cache(batch_size=1, device=device)
@@ -172,7 +158,20 @@ def main(
 
         full_formatted_prompt_str = "\n".join(full_formatted_prompt)
 
-        encoded: Tensor = tokenizer.encode(full_formatted_prompt_str, return_tensors="pt")[0].to(device)  # type: ignore
+        prompt = """<|im_start|>system
+        {system}<|im_end|>
+        <|im_start|>user
+        {user}<|im_end|>
+        <|im_start|>assistant
+        """
+
+        system = "You are a helpful assistant."
+        user = "How are you?"
+
+        # Apply the ChatML format
+        prompt = prompt.format(system=system, user=user)
+
+        encoded: Tensor = tokenizer.encode(prompt, return_attention_mask=False, return_tensors="pt")[0].to(device)  # type: ignore
         encoded_context_length = encoded.shape[0]
         max_returned_tokens = encoded_context_length + max_new_tokens
 
@@ -190,13 +189,11 @@ def main(
         )
         t = time.perf_counter() - t0
 
-        full_model_output = tokenizer.decode(y)
         new_model_output = tokenizer.decode(y[encoded_context_length:])
         print(
             f"encoded_context_length: {encoded_context_length} total generation length: {y.size(0)}"
         )
         new_model_output = extract_text_from_generated_message(new_model_output)
-        # print(f"Full output:\n{full_model_output}")
         print(f"New output:\n{new_model_output}")
         message_history.append({"role": "assistant", "content": new_model_output})
 

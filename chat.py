@@ -1,7 +1,7 @@
 from typing import Dict, List
 import re
 from transformers import PreTrainedTokenizer
-
+from torch import Tensor
 
 def dalle_conversation(user_input: str):
     """
@@ -82,7 +82,7 @@ def clip_message_history_to_max_tokens(
     """
     total_tokens = 0
     for i in range(len(message_history)):
-        encoded_msg = tokenizer.encode(message_history[i], return_tensors="pt")
+        encoded_msg: Tensor = tokenizer.encode(message_history[i], return_tensors="pt") # type: ignore
         token_count = encoded_msg.shape[0]
         if total_tokens + token_count > max_tokens:
             print(f"Clipping message history to last {i} messages.")

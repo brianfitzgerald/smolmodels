@@ -1,13 +1,8 @@
-print("Loading dependencies")
-import os
 import torch
 from torch import nn
-import torch.nn.functional as F
 from einops import rearrange
 import math
-from scripts.download import download_from_hub
-from typing import Dict
-import re
+import torch
 
 
 class T5LayerNorm(nn.Module):
@@ -438,66 +433,35 @@ class T5(nn.Module):
         return x
 
 
-model = T5(
-    dim=256,
-    enc_n_positions=32128,
-    dec_n_positions=32128,
-    num_encoder_layers=4,
-    enc_heads=4,
-    enc_dim_head=64,
-    enc_mlp_mult=4,
-    num_decoder_layers=4,
-    dec_heads=4,
-    dec_dim_head=64,
-    dec_mlp_mult=4,
-    dropout=0.0,
-    tie_token_emb=True,
-)
+def remap_state_dict(state_dict):
+    """
+    remap from HF checkpoint
+    """
+    for k, v in list(state_dict.items()):
+        ln = k.split(".")
+        if len(ln) < 4:
+            continue
+        model_module = ln[0]
+        layer_idx = ln[2]
+        new_key = None
+        # self attn layer
+        block_sub_idx = int(ln[4])
+        if ln[5] == "SelfAttention" or ln[5] == "EncDecAttention":
+            attn_layer = ln[6]
+            task = ln[7]
+            new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.to_{attn_layer}.{task}"
+            state_dict[new_key] = v
+        elif ln[5] == "layer_norm":
+            task = ln[6]
+            new_key = (
+                f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
+            )
+        elif ln[5] == "DenseReluDense":
+            sub_layer = ln[6]
+            task = ln[7]
+            new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
 
-
-model_org = "google"
-model_name = "t5-efficient-tiny"
-
-download_from_hub(f"{model_org}/{model_name}")
-
-print("Loading state dict")
-model_state_dict: Dict[str, torch.Tensor] = torch.load(
-    os.path.join("checkpoints", model_org, model_name, "pytorch_model.bin")
-)
-
-# remap state dict
-for k, v in list(model_state_dict.items()):
-    ln = k.split(".")
-    if len(ln) < 4:
-        continue
-    model_module = ln[0]
-    layer_idx = ln[2]
-    new_key = None
-    print(ln)
-    # self attn layer
-    block_sub_idx = int(ln[4])
-    if ln[5] == "SelfAttention" or ln[5] == "EncDecAttention":
-        attn_layer = ln[6]
-        task = ln[7]
-        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.to_{attn_layer}.{task}"
-        model_state_dict[new_key] = v
-    elif ln[5] == "layer_norm":
-        task = ln[6]
-        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
-    elif ln[5] == "net":
-        task = ln[6]
-        new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
-    elif ln[5] == "DenseReluDense":
-        sub_layer = ln[6]
-        task = ln[7]
-        new_key = (
-            f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
-        )
-
-    if new_key:
-        print(f"remapping {k} to {new_key}")
-        model_state_dict[new_key] = v
-        del model_state_dict[k]
-
-
-model.load_state_dict(model_state_dict)
+        if new_key:
+            state_dict[new_key] = v
+            del state_dict[k]
+    return state_dict
