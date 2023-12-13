@@ -138,6 +138,7 @@ class T5SelfAttention(nn.Module):
             self.to_relative_attention_bias = nn.Embedding(num_buckets, heads)
 
     def forward(self, x, mask=None):
+        print(x.shape)
         b, n, _, h = *x.shape, self.heads
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
@@ -145,16 +146,16 @@ class T5SelfAttention(nn.Module):
 
         q = q * self.scale
 
-        sim = torch.einsum("b h i d, b h j d -> b h i j", q, k)
+        sim = torch.einsum("b h i d, b h j d -> b h i j", q, k)  # (b, h, n, n)
 
         # sim = self.relative_position_bias(sim)
 
-        # mask
+        # mask (b, n)
 
         mask_value = -torch.finfo(sim.dtype).max
 
         if mask is not None:
-            sim = sim.masked_fill_(~mask, mask_value)
+            sim = sim.masked_fill_(~mask[:, None, :, None], mask_value)
 
         if self.causal:
             i, j = sim.shape[-2:]
@@ -378,22 +379,22 @@ class T5(nn.Module):
         *,
         dim,
         # max_seq_len,
-        enc_n_positions,
-        num_encoder_layers,
-        enc_heads,
-        enc_dim_head,
-        enc_mlp_mult,
-        dec_n_positions,
-        num_decoder_layers,
-        dec_heads,
-        dec_dim_head,
-        dec_mlp_mult,
-        dropout=0.0,
-        tie_token_emb=True,
+        enc_n_positions: int,
+        num_encoder_layers: int,
+        enc_heads: int,
+        enc_dim_head: int,
+        enc_mlp_mult: int,
+        vocab_size: int,
+        num_decoder_layers: int,
+        dec_heads: int,
+        dec_dim_head: int,
+        dec_mlp_mult: int,
+        dropout: float = 0.0,
+        tie_token_emb: bool = True,
     ):
         super().__init__()
 
-        self.shared = nn.Embedding(enc_n_positions, dim)
+        self.shared = nn.Embedding(vocab_size, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.encoder = T5Encoder(
@@ -410,7 +411,7 @@ class T5(nn.Module):
         self.decoder = T5Decoder(
             dim=dim,
             # max_seq_len= max_seq_len,
-            num_tokens=dec_n_positions,
+            num_tokens=vocab_size,
             depth=num_decoder_layers,
             heads=dec_heads,
             dim_head=dec_dim_head,
@@ -418,7 +419,7 @@ class T5(nn.Module):
             dropout=dropout,
         )
 
-        self.lm_head = nn.Linear(dim, dec_n_positions, bias=False)
+        self.lm_head = nn.Linear(dim, vocab_size, bias=False)
 
         # tie weights
         if tie_token_emb:
