@@ -61,6 +61,7 @@ class T5RelativePositionBias(nn.Module):
         self.causal = causal
         self.num_buckets = num_buckets
         self.max_distance = max_distance
+        self.relative_attention_bias = nn.Embedding(num_buckets, heads)
 
     @staticmethod
     def _relative_position_bucket(
@@ -138,7 +139,6 @@ class T5SelfAttention(nn.Module):
             self.to_relative_attention_bias = nn.Embedding(num_buckets, heads)
 
     def forward(self, x, mask=None):
-        print(x.shape)
         b, n, _, h = *x.shape, self.heads
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
