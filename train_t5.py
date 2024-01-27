@@ -1,47 +1,36 @@
-from pprint import pprint
-from typing import Dict
 from torch.utils.data import DataLoader
 import torch
-from dataclasses import dataclass
+from torch.optim import AdamW
 import torch.nn.functional as F
-import os
-import torch.nn as nn
 
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-os.environ["LD_LIBRARY_PATH"] = "/usr/lib/x86_64-linux-gnu/"
+from dataclasses import dataclass
+import pytorch_lightning as pl
+import pytorch_lightning.callbacks as pl_callbacks
 
-from transformers import (
-    GPTNeoConfig,
-    get_scheduler,
-    AutoTokenizer,
-    AdamW,
-    GPTNeoForCausalLM,
-)
+from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
+from transformers.models.t5.tokenization_t5 import T5Tokenizer
+from transformers.optimization import get_linear_schedule_with_warmup
 from datasets import load_dataset
-from utils import *
-from tqdm.auto import tqdm
-import wandb
 
-IGNORE_INDEX = -100
 
 @dataclass
-class TrainingArgs:
-    num_epochs = 6
-    batch_size = 256
-    eval_interval_epoch = 1
-    save_interval = 1000
-    eval_interval_batch = 500
-    use_wandb = False
-    push_model = False
-    model_name = "smolmodels-finetune-33m-state-changes"
-    use_peft = False
-    seq_max_length = 60
-    max_eval_batches = 5
-
-
-if TrainingArgs.use_wandb:
-    wandb.login()
-    wandb_run = wandb.init(project=TrainingArgs.model_name)
+class HyperParams:
+    model_name = "google/t5-efficient-base"
+    max_seq_length = 512
+    learning_rate = 3e-4
+    adam_epsilon = 1e-8
+    warmup_steps = 0
+    train_batch_size = 8
+    eval_batch_size = 8
+    num_train_epochs = 2
+    gradient_accumulation_steps = 16
+    n_gpus = 1
+    early_stop_callback = False
+    fp_16 = False
+    opt_level = "O1"
+    max_grad_norm = 1.0
+    seed = 42
+    weight_decay = 0.0
 
 
 def calculate_bpc(model, evaluation_data):
@@ -68,171 +57,171 @@ def calculate_bpc(model, evaluation_data):
     return bpc.item()
 
 
-tokenize_fn = None
+class T5FineTuner(pl.LightningModule):
+    def __init__(self, hparams: HyperParams):
+        super(T5FineTuner, self).__init__()
+        self.hparams: HyperParams = hparams
 
-train_dataset = load_dataset("roneneldan/TinyStories")
-
-tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-125M")
-tokenizer.add_special_tokens({"pad_token": "[PAD]"})
-tokenize_fn = lambda x: tokenizer(x["text"])
-train_dataset = train_dataset.train_test_split(test_size=0.1)
-
-train_dataloader = DataLoader(
-    train_dataset["train"], batch_size=TrainingArgs.batch_size
-)
-eval_dataloader = DataLoader(
-    train_dataset["test"], batch_size=TrainingArgs.batch_size
-)
-
-train_dataset = load_dataset(
-    "Fraser/python-state-changes", split="train", data_dir="mini", streaming=True
-)
-tokenizer = AutoTokenizer.from_pretrained("Salesforce/codet5-base")
-
-def format_state_changes(input_dict: dict, is_eval: bool = False):
-    template = (
-        PROMPT_DICT["prompt_input"]
-        if input_dict.get("code", "") != ""
-        else PROMPT_DICT["prompt_no_input"]
-    )
-    formatted_prompt = template.format_map(input_dict)
-    output = f"{input_dict['end']}{tokenizer.eos_token}"
-    if is_eval:
-        output = formatted_prompt
-    else:
-        output = f"{formatted_prompt}{output}"
-    return {"prompt": output, "input_length": len(formatted_prompt)}
-
-def tokenize_state_changes(batch: dict) -> dict:
-    tokenized = tokenizer(
-        batch["prompt"],
-        return_tensors="pt",
-        padding="longest",
-        max_length=TrainingArgs.seq_max_length,
-        truncation=True,
-    )
-    tokenized["labels"] = tokenized["input_ids"]
-    return tokenized
-
-train_dataset = train_dataset.map(
-    lambda x: format_state_changes(x, False),
-    remove_columns=["start", "code", "end"],
-)
-
-seed, buffer_size = 42, 10_000
-train_dataset = train_dataset.shuffle(seed, buffer_size=buffer_size)
-
-train_dataset = train_dataset.with_format("torch")
-train_dataset = train_dataset.map(
-    tokenize_state_changes,
-    batched=True,
-    batch_size=TrainingArgs.batch_size,
-    remove_columns=["prompt"],
-)
-
-eval_dataset = load_dataset("json", data_files="eval.jsonl")
-eval_dataset = eval_dataset.map(
-    lambda x: format_state_changes(x, True), remove_columns=["start", "code", "end"]
-)
-eval_dataset = eval_dataset.with_format("torch")
-eval_dataset = eval_dataset.map(
-    tokenize_state_changes,
-    batched=True,
-    batch_size=TrainingArgs.batch_size,
-    remove_columns=["prompt"],
-)
-eval_dataset = eval_dataset["train"]
-
-train_dataloader = DataLoader(train_dataset, batch_size=TrainingArgs.batch_size)
-eval_dataloader = DataLoader(eval_dataset, batch_size=TrainingArgs.batch_size)
-
-
-config = GPTNeoConfig(
-    hidden_size=768,
-    embed_dropout=0,
-    attention_dropout=0,
-    resid_dropout=0,
-    max_position_embeddings=1024,
-    num_heads=12,
-    num_layers=6,
-    attention_types=[[["global", "local"], 3]],
-    window_size=256,
-    layer_norm_epsilon=1e-5,
-)
-
-model = GPTNeoForCausalLM(config)
-model.generation_config.max_new_tokens = TrainingArgs.seq_max_length
-optimizer = AdamW(model.parameters(), lr=5e-5)
-
-if TrainingArgs.use_wandb:
-    wandb.watch(model)
-
-num_training_steps = TrainingArgs.num_epochs * buffer_size
-lr_scheduler = get_scheduler(
-    "linear",
-    optimizer=optimizer,
-    num_warmup_steps=0,
-    num_training_steps=num_training_steps,
-)
-
-device = get_available_device()
-model = model.to(device)
-
-loss_fn = nn.CrossEntropyLoss()
-
-progress_bar = tqdm(range(num_training_steps))
-
-model.train()
-
-
-def run_eval():
-    model.eval()
-    print("Running eval..")
-    # eval is not batched, dataloader loads one sample at a time.
-    for i, sample in enumerate(eval_dataloader):
-        attention_mask = sample["attention_mask"].to(device)
-        input_ids = sample["input_ids"].to(device)
-        with torch.no_grad():
-            outputs = model(attention_mask=attention_mask, input_ids=input_ids)
-        
-        logits = outputs.logits
-        completion_samples = get_completion_samples(logits, tokenizer, input_ids)
-        perplexity_score = get_perplexity(logits, input_ids)
-        log_dict = {
-            "completion_samples": completion_samples,
-            "perplexity": perplexity_score
-        }
-        if TrainingArgs.use_wandb:
-            wandb.log(log_dict)
-    model.train()
-
-
-for epoch in range(TrainingArgs.num_epochs):
-    for j, batch in enumerate(train_dataloader):
-        attention_mask = batch["attention_mask"].to(device)
-        input_ids = batch["input_ids"].to(device)
-        outputs = model(
-            attention_mask=attention_mask, input_ids=input_ids, labels=input_ids
+        self.model: T5ForConditionalGeneration = (
+            T5ForConditionalGeneration.from_pretrained(self.hparams.model_name)
         )
-        loss = outputs.loss
-        loss.backward()
+        self.tokenizer = T5Tokenizer.from_pretrained(self.hparams.model_name)
+        self.dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.1)  # type: ignore
+        self.train_dataset, self.val_dataset = (
+            self.dataset["train"],
+            self.dataset["test"],
+        )
 
-        progress_bar.set_postfix_str(round(loss.item(), 3))
-        if TrainingArgs.use_wandb:
-            wandb.log({"loss": outputs.loss.item()})
+    def forward(
+        self,
+        input_ids,
+        attention_mask=None,
+        decoder_input_ids=None,
+        decoder_attention_mask=None,
+        lm_labels=None,
+    ):
+        return self.model(
+            input_ids,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            lm_labels=lm_labels,
+        )  # type: ignore
 
+    def _step(self, batch):
+        lm_labels = batch["target_ids"]
+        lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
+
+        outputs = self(
+            input_ids=batch["source_ids"],
+            attention_mask=batch["source_mask"],
+            lm_labels=lm_labels,
+            decoder_attention_mask=batch["target_mask"],
+        )
+
+        loss = outputs[0]
+
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self._step(batch)
+
+        tensorboard_logs = {"train_loss": loss}
+        return {"loss": loss, "log": tensorboard_logs}
+
+    def training_epoch_end(self, outputs):
+        avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
+        tensorboard_logs = {"avg_train_loss": avg_train_loss}
+        return {
+            "avg_train_loss": avg_train_loss,
+            "log": tensorboard_logs,
+            "progress_bar": tensorboard_logs,
+        }
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._step(batch)
+        # perplexity_score = get_perplexity(logits, input_ids)
+        return {"val_loss": loss}
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
+        tensorboard_logs = {"val_loss": avg_loss}
+        return {
+            "avg_val_loss": avg_loss,
+            "log": tensorboard_logs,
+            "progress_bar": tensorboard_logs,
+        }
+
+    def configure_optimizers(self):
+        "Prepare optimizer and schedule (linear warmup and decay)"
+
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": self.hparams.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+        optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=self.hparams.learning_rate,
+            eps=self.hparams.adam_epsilon,
+        )
+        self.opt = optimizer
+        return [optimizer]
+
+    def optimizer_step(
+        self, epoch, batch_idx, optimizer, optimizer_idx, second_order_closure=None
+    ):
         optimizer.step()
-        lr_scheduler.step()
         optimizer.zero_grad()
-        progress_bar.update(1)
+        self.lr_scheduler.step()
 
-        if j % TrainingArgs.eval_interval_batch == 0:
-            run_eval()
+    def get_tqdm_dict(self):
+        tqdm_dict = {
+            "loss": "{:.3f}".format(self.avg_loss),
+            "lr": self.lr_scheduler.get_last_lr()[-1],
+        }
 
-        if j % TrainingArgs.save_interval == 0:
-            save_file_path = os.path.join(
-                "checkpoints", f"model_epoch_{epoch}_batch_{j}"
+        return tqdm_dict
+
+    def train_dataloader(self):
+        train_dataset = load_dataset("roborovski/upsampled-prompts-parti")
+        dataloader = DataLoader(
+            train_dataset,  # type: ignore
+            batch_size=self.hparams.train_batch_size,
+            drop_last=True,
+            shuffle=True,
+            num_workers=4,
+        )
+        t_total = (
+            (
+                len(train_dataset) # type: ignore
+                // (self.hparams.train_batch_size * max(1, self.hparams.n_gpus))
             )
-            model.save_pretrained(save_file_path, safe_serialization=True)
-            if TrainingArgs.push_model:
-                model.push_to_hub(TrainingArgs.model_name)
+            // self.hparams.gradient_accumulation_steps
+            * float(self.hparams.num_train_epochs)
+        )
+        scheduler = get_linear_schedule_with_warmup(
+            self.opt,
+            num_warmup_steps=self.hparams.warmup_steps,
+            num_training_steps=t_total,
+        )
+        self.lr_scheduler = scheduler
+        return dataloader
+
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, batch_size=self.hparams.eval_batch_size, num_workers=4 # type: ignore
+        )
+
+
+if __name__ == "__main__":
+    params = HyperParams()
+    checkpoint_callback = pl_callbacks.ModelCheckpoint(
+        monitor="val_loss", mode="min", save_top_k=3
+    )
+
+    train_params = dict(
+        accumulate_grad_batches=params.gradient_accumulation_steps,
+        gpus=params.n_gpus,
+        max_epochs=params.num_train_epochs,
+        early_stop_callback=False,
+        precision=16 if params.fp_16 else 32,
+        amp_level=params.opt_level,
+        gradient_clip_val=params.max_grad_norm,
+        checkpoint_callback=checkpoint_callback,
+    )
+    trainer = pl.Trainer(**train_params)  # type: ignore
