@@ -60,6 +60,7 @@ def calculate_bpc(model, evaluation_data):
 
     return bpc.item()
 
+
 class T5FineTuner(pl.LightningModule):
     def __init__(self, params: HyperParams):
         super(T5FineTuner, self).__init__()
@@ -71,18 +72,13 @@ class T5FineTuner(pl.LightningModule):
         )
         self.tokenizer = T5Tokenizer.from_pretrained(self.params.model_name)
 
-    def forward(
-        self,
-        input_ids,
-        labels=None
-    ):
+    def forward(self, input_ids, labels=None):
         return self.model(
             input_ids,
             labels=labels,
         )
 
     def _step(self, batch):
-
         outputs = self(
             input_ids=batch["input_ids"],
             labels=batch["label_input_ids"],
@@ -149,50 +145,12 @@ class T5FineTuner(pl.LightningModule):
         self.opt = optimizer
         return [optimizer]
 
-    def optimizer_step(
-        self, epoch, batch_idx, optimizer, optimizer_idx, second_order_closure=None
-    ):
-        optimizer.step()
-        optimizer.zero_grad()
-        self.lr_scheduler.step()
-
     def get_tqdm_dict(self):
         tqdm_dict = {
             "loss": "{:.3f}".format(self.avg_loss),
-            "lr": self.lr_scheduler.get_last_lr()[-1],
         }
 
         return tqdm_dict
-
-    def train_dataloader(self):
-        dataloader = DataLoader(
-            self.train_dataset,  # type: ignore
-            batch_size=self.params.train_batch_size,
-            drop_last=True,
-            shuffle=True,
-            num_workers=4,
-        )
-        t_total = (
-            (
-                len(train_dataset)  # type: ignore
-                // (self.params.train_batch_size * max(1, self.params.n_gpus))
-            )
-            // self.params.gradient_accumulation_steps
-            * float(self.params.num_train_epochs)
-        )
-        scheduler = get_linear_schedule_with_warmup(
-            self.opt,
-            num_warmup_steps=self.params.warmup_steps,
-            num_training_steps=t_total,
-        )
-        self.lr_scheduler = scheduler
-        return dataloader
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset, batch_size=self.params.eval_batch_size, num_workers=4  # type: ignore
-        )
-
 
 
 if __name__ == "__main__":
