@@ -6,7 +6,7 @@ from typing import Optional
 
 
 class PromptUpsampleDataModule(pl.LightningDataModule):
-    def __init__(self, model_name, batch_size=8, max_token_length=512):
+    def __init__(self, model_name, batch_size, max_token_length):
         super().__init__()
         self.model_name = model_name
         self.batch_size = batch_size
@@ -19,7 +19,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
         # Load dataset and split
-        dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.1)  # type: ignore
+        dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.01)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
         # Tokenization
@@ -39,17 +39,14 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
     def tokenize_fn(self, examples):
         inputs = [self.prefix + doc for doc in examples["Prompt"]]
         model_inputs = self.tokenizer(
-            inputs,
-            max_length=self.max_token_length,
-            truncation=True,
-            padding="max_length",
+            inputs, max_length=self.max_token_length, truncation=True, padding='max_length'
         )
 
         labels = self.tokenizer(
             text_target=examples["Upsampled"],
             max_length=self.max_token_length,
-            padding="max_length",
             truncation=True,
+            padding='max_length',
         )
 
         model_inputs["label_input_ids"] = labels["input_ids"]

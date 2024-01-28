@@ -163,3 +163,4 @@ quantized/
 typings
 lightning_logs
 wandb/
+wandb/latest-run

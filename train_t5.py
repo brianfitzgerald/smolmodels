@@ -21,7 +21,7 @@ from datasets import Dataset
 
 class HyperParams:
     model_name: str = "google/flan-t5-small"
-    max_seq_length: int = 512
+    max_seq_length: int = 128
     learning_rate: float = 1e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 10
@@ -73,9 +73,10 @@ class T5FineTuner(pl.LightningModule):
         )
         self.tokenizer = T5Tokenizer.from_pretrained(self.params.model_name)
 
-    def forward(self, input_ids, labels=None):
+    def forward(self, input_ids, attention_mask, labels):
         out = self.model(
             input_ids,
+            attention_mask=attention_mask,
             labels=labels,
         )
         return out
@@ -83,6 +84,7 @@ class T5FineTuner(pl.LightningModule):
     def _step(self, batch):
         outputs = self(
             input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
             labels=batch["label_input_ids"],
         )
 
@@ -185,9 +187,9 @@ class LogPredictionSamplesCallback(pl.Callback):
             self.wandb_logger.log_table(
                 "Prediction Samples",
             )
-        else:
+        if batch_idx % 10 == 0:
             table_rows = [list(row) for row in zip(*table_columns)]
-            print(tabulate(table_rows, headers=columns))
+            print(tabulate(table_rows, headers=columns, maxcolwidths=[50, 50, 50]))
 
 
 def main(wandb: bool = False):
@@ -203,7 +205,9 @@ def main(wandb: bool = False):
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
-    dm = PromptUpsampleDataModule(params.model_name, batch_size=8, max_token_length=512)
+    dm = PromptUpsampleDataModule(
+        params.model_name, batch_size=8, max_token_length=params.max_seq_length
+    )
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
