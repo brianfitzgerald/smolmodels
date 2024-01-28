@@ -74,29 +74,21 @@ class T5FineTuner(pl.LightningModule):
     def forward(
         self,
         input_ids,
-        attention_mask=None,
-        decoder_input_ids=None,
-        decoder_attention_mask=None,
+        labels=None
     ):
         return self.model(
             input_ids,
-            attention_mask=attention_mask,
-            decoder_input_ids=decoder_input_ids,
-            decoder_attention_mask=decoder_attention_mask,
+            labels=labels,
         )
 
     def _step(self, batch):
 
         outputs = self(
             input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            decoder_input_ids=batch["label_input_ids"],
-            decoder_attention_mask=batch["label_attention_mask"],
+            labels=batch["label_input_ids"],
         )
 
-        loss = outputs[0]
-
-        return loss
+        return outputs.loss
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
