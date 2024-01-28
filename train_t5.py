@@ -91,11 +91,10 @@ class T5FineTuner(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
 
-        tensorboard_logs = {"train_loss": loss}
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
-        return {"loss": loss, "log": tensorboard_logs}
+        return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
         loss = self._step(batch)
@@ -163,12 +162,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.wandb_logger = wandb_logger
 
     def on_validation_batch_end(
-        self, trainer , pl_module, outputs, batch, batch_idx: int
-    ) -> None:
-        self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
-
-    def on_train_batch_end(
-        self, trainer , pl_module, outputs, batch, batch_idx: int
+        self, trainer, pl_module, outputs, batch, batch_idx: int
     ) -> None:
         self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
 
@@ -177,11 +171,10 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         input_ids = batch["input_ids"]
         target_ids = batch["label_input_ids"]
-        out = outputs
+        out = pl_module.model.generate(input_ids)
 
         columns = ["Input", "Output", "Target"]
         table_columns = []
-        breakpoint()
         for feature in [input_ids, out, target_ids]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
