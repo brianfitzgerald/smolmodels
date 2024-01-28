@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from typing import Optional
 import fire
 from torch import Tensor
+from tabulate import tabulate
 
 print("Loading lightning")
 import pytorch_lightning as pl
@@ -15,6 +16,7 @@ from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from transformers.optimization import get_inverse_sqrt_schedule
 from t5_data import PromptUpsampleDataModule
+from datasets import Dataset
 
 
 class HyperParams:
@@ -155,45 +157,44 @@ class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
         self,
         tokenizer: T5Tokenizer,
-        input_ids: Tensor,
-        target_ids: Tensor,
         wandb_logger: Optional[WandbLogger] = None,
     ):
         self.tokenizer = tokenizer
-        self.input_ids = input_ids
-        self.target_ids = target_ids
         self.wandb_logger = wandb_logger
 
-    def on_epoch_end(self, trainer, pl_module):
-        model = pl_module.model
-        input_ids = self.input_ids
-        target_ids = self.target_ids
+    def on_validation_batch_end(
+        self, trainer , pl_module, outputs, batch, batch_idx: int
+    ) -> None:
+        self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
 
-        out = model.generate(
-            input_ids=input_ids,
-            max_length=128,
-            num_beams=2,
-            early_stopping=True,
-        )
+    def on_train_batch_end(
+        self, trainer , pl_module, outputs, batch, batch_idx: int
+    ) -> None:
+        self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
 
-        for i, (inp, out, tar) in enumerate(zip(input_ids, out, target_ids)):
-            inp_text = self.tokenizer.decode(inp, skip_special_tokens=True)
-            out_text = self.tokenizer.decode(out, skip_special_tokens=True)
-            tar_text = self.tokenizer.decode(tar, skip_special_tokens=True)
-            print(f"Input: {inp_text}")
-            print(f"Output: {out_text}")
-            print(f"Target: {tar_text}")
-            print()
+    def log_prediction_samples(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+    ):
+        input_ids = batch["input_ids"]
+        target_ids = batch["label_input_ids"]
+        out = outputs
+
+        columns = ["Input", "Output", "Target"]
+        table_columns = []
+        breakpoint()
+        for feature in [input_ids, out, target_ids]:
+            decoded = self.tokenizer.batch_decode(
+                feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
+            )
+            table_columns.append(decoded)
+
         if self.wandb_logger:
             self.wandb_logger.log_table(
                 "Prediction Samples",
             )
-
-    def on_train_epoch_end(self, trainer, pl_module, outputs):
-        self.on_epoch_end(trainer, pl_module)
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        self.on_epoch_end(trainer, pl_module)
+        else:
+            table_rows = [list(row) for row in zip(*table_columns)]
+            print(tabulate(table_rows, headers=columns))
 
 
 def main(wandb: bool = False):
@@ -215,11 +216,10 @@ def main(wandb: bool = False):
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
+        val_check_interval=0.25,
         callbacks=[
             LogPredictionSamplesCallback(
                 model.tokenizer,
-                dm.val_dataset[0]["input_ids"],
-                dm.val_dataset[0]["label_input_ids"],
                 wandb_logger,
             )
         ],

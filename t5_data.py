@@ -13,6 +13,8 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.max_token_length = max_token_length
         self.tokenizer = T5Tokenizer.from_pretrained(model_name)
         self.prefix = "Expand: "
+        self.train_dataset = None
+        self.val_dataset = None
 
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
