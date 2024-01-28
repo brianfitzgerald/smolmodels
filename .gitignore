@@ -161,3 +161,4 @@ checkpoints/
 *.bin
 quantized/
 typings
+lightning_logs

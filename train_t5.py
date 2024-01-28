@@ -1,36 +1,40 @@
+print("Loading torch")
 from torch.utils.data import DataLoader
 import torch
 from torch.optim import AdamW
 import torch.nn.functional as F
-
 from dataclasses import dataclass
+from typing import TypedDict
+
+print("Loading lightning")
 import pytorch_lightning as pl
 import pytorch_lightning.callbacks as pl_callbacks
 
+print("Loading HF")
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from transformers.optimization import get_linear_schedule_with_warmup
 from datasets import load_dataset
+from t5_data import PromptUpsampleDataModule
 
 
-@dataclass
 class HyperParams:
-    model_name = "google/t5-efficient-base"
-    max_seq_length = 512
-    learning_rate = 3e-4
-    adam_epsilon = 1e-8
-    warmup_steps = 0
-    train_batch_size = 8
-    eval_batch_size = 8
-    num_train_epochs = 2
-    gradient_accumulation_steps = 16
-    n_gpus = 1
-    early_stop_callback = False
-    fp_16 = False
-    opt_level = "O1"
-    max_grad_norm = 1.0
-    seed = 42
-    weight_decay = 0.0
+    model_name: str = "google/flan-t5-small"
+    max_seq_length: int = 512
+    learning_rate: float = 3e-4
+    adam_epsilon: float = 1e-8
+    warmup_steps: int = 0
+    train_batch_size: int = 8
+    eval_batch_size: int = 8
+    num_train_epochs: int = 2
+    gradient_accumulation_steps: int = 16
+    n_gpus: int = 1
+    early_stop_callback: bool = False
+    fp_16: bool = False
+    opt_level: str = "O1"
+    max_grad_norm: float = 1.0
+    seed: int = 42
+    weight_decay: float = 0.0
 
 
 def calculate_bpc(model, evaluation_data):
@@ -56,21 +60,16 @@ def calculate_bpc(model, evaluation_data):
 
     return bpc.item()
 
-
 class T5FineTuner(pl.LightningModule):
-    def __init__(self, hparams: HyperParams):
+    def __init__(self, params: HyperParams):
         super(T5FineTuner, self).__init__()
-        self.hparams: HyperParams = hparams
+        self.params = params
+        self.hparams.update(vars(params))
 
         self.model: T5ForConditionalGeneration = (
-            T5ForConditionalGeneration.from_pretrained(self.hparams.model_name)
+            T5ForConditionalGeneration.from_pretrained(self.params.model_name)
         )
-        self.tokenizer = T5Tokenizer.from_pretrained(self.hparams.model_name)
-        self.dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.1)  # type: ignore
-        self.train_dataset, self.val_dataset = (
-            self.dataset["train"],
-            self.dataset["test"],
-        )
+        self.tokenizer = T5Tokenizer.from_pretrained(self.params.model_name)
 
     def forward(
         self,
@@ -109,7 +108,7 @@ class T5FineTuner(pl.LightningModule):
         tensorboard_logs = {"train_loss": loss}
         return {"loss": loss, "log": tensorboard_logs}
 
-    def training_epoch_end(self, outputs):
+    def on_train_epoch_end(self, outputs):
         avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
         tensorboard_logs = {"avg_train_loss": avg_train_loss}
         return {
@@ -123,7 +122,7 @@ class T5FineTuner(pl.LightningModule):
         # perplexity_score = get_perplexity(logits, input_ids)
         return {"val_loss": loss}
 
-    def validation_epoch_end(self, outputs):
+    def on_valiation_epoch_end(self, outputs):
         avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
         tensorboard_logs = {"val_loss": avg_loss}
         return {
@@ -143,7 +142,7 @@ class T5FineTuner(pl.LightningModule):
                     for n, p in self.model.named_parameters()
                     if not any(nd in n for nd in no_decay)
                 ],
-                "weight_decay": self.hparams.weight_decay,
+                "weight_decay": self.params.weight_decay,
             },
             {
                 "params": [
@@ -156,8 +155,8 @@ class T5FineTuner(pl.LightningModule):
         ]
         optimizer = AdamW(
             optimizer_grouped_parameters,
-            lr=self.hparams.learning_rate,
-            eps=self.hparams.adam_epsilon,
+            lr=self.params.learning_rate,
+            eps=self.params.adam_epsilon,
         )
         self.opt = optimizer
         return [optimizer]
@@ -178,25 +177,24 @@ class T5FineTuner(pl.LightningModule):
         return tqdm_dict
 
     def train_dataloader(self):
-        train_dataset = load_dataset("roborovski/upsampled-prompts-parti")
         dataloader = DataLoader(
-            train_dataset,  # type: ignore
-            batch_size=self.hparams.train_batch_size,
+            self.train_dataset,  # type: ignore
+            batch_size=self.params.train_batch_size,
             drop_last=True,
             shuffle=True,
             num_workers=4,
         )
         t_total = (
             (
-                len(train_dataset) # type: ignore
-                // (self.hparams.train_batch_size * max(1, self.hparams.n_gpus))
+                len(train_dataset)  # type: ignore
+                // (self.params.train_batch_size * max(1, self.params.n_gpus))
             )
-            // self.hparams.gradient_accumulation_steps
-            * float(self.hparams.num_train_epochs)
+            // self.params.gradient_accumulation_steps
+            * float(self.params.num_train_epochs)
         )
         scheduler = get_linear_schedule_with_warmup(
             self.opt,
-            num_warmup_steps=self.hparams.warmup_steps,
+            num_warmup_steps=self.params.warmup_steps,
             num_training_steps=t_total,
         )
         self.lr_scheduler = scheduler
@@ -204,8 +202,9 @@ class T5FineTuner(pl.LightningModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset, batch_size=self.hparams.eval_batch_size, num_workers=4 # type: ignore
+            self.val_dataset, batch_size=self.params.eval_batch_size, num_workers=4  # type: ignore
         )
+
 
 
 if __name__ == "__main__":
@@ -214,14 +213,12 @@ if __name__ == "__main__":
         monitor="val_loss", mode="min", save_top_k=3
     )
 
-    train_params = dict(
+    model = T5FineTuner(params)
+    dm = PromptUpsampleDataModule(params.model_name, batch_size=8, max_token_length=512)
+    trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
-        gpus=params.n_gpus,
         max_epochs=params.num_train_epochs,
-        early_stop_callback=False,
         precision=16 if params.fp_16 else 32,
-        amp_level=params.opt_level,
         gradient_clip_val=params.max_grad_norm,
-        checkpoint_callback=checkpoint_callback,
     )
-    trainer = pl.Trainer(**train_params)  # type: ignore
+    trainer.fit(model, datamodule=dm)
