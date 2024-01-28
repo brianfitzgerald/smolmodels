@@ -1,20 +1,8 @@
-print("Loading torch")
-from torch.utils.data import DataLoader
-import torch
-from torch.optim import AdamW
-import torch.nn.functional as F
-from dataclasses import dataclass
-from typing import TypedDict
-
-print("Loading lightning")
 import pytorch_lightning as pl
-import pytorch_lightning.callbacks as pl_callbacks
-
-print("Loading HF")
-from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
-from transformers.models.t5.tokenization_t5 import T5Tokenizer
-from transformers.optimization import get_linear_schedule_with_warmup
 from datasets import load_dataset
+from torch.utils.data import DataLoader
+from transformers.models.t5.tokenization_t5 import T5Tokenizer
+from typing import Optional
 
 
 class PromptUpsampleDataModule(pl.LightningDataModule):
@@ -26,7 +14,8 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.tokenizer = T5Tokenizer.from_pretrained(model_name)
         self.prefix = "Expand: "
 
-    def setup(self, stage=None):
+    def setup(self, stage: Optional[str] = None):
+        print(f"Loading dataset for stage {stage}")
         # Load dataset and split
         dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = dataset["train"]
@@ -35,25 +24,29 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = self.train_dataset.map(self.tokenize_fn, batched=True)
         self.val_dataset = self.val_dataset.map(self.tokenize_fn, batched=True)
 
-        columns = ["input_ids", "attention_mask", "label_input_ids", "label_attention_mask"]
+        columns = [
+            "input_ids",
+            "attention_mask",
+            "label_input_ids",
+            "label_attention_mask",
+        ]
         # Set format for PyTorch
-        self.train_dataset.set_format(
-            type="torch", columns=columns
-        )
-        self.val_dataset.set_format(
-            type="torch", columns=columns
-        )
+        self.train_dataset.set_format(type="torch", columns=columns)
+        self.val_dataset.set_format(type="torch", columns=columns)
 
     def tokenize_fn(self, examples):
         inputs = [self.prefix + doc for doc in examples["Prompt"]]
         model_inputs = self.tokenizer(
-            inputs, max_length=self.max_token_length, truncation=True, padding='max_length'
+            inputs,
+            max_length=self.max_token_length,
+            truncation=True,
+            padding="max_length",
         )
 
         labels = self.tokenizer(
             text_target=examples["Upsampled"],
             max_length=self.max_token_length,
-            padding='max_length',
+            padding="max_length",
             truncation=True,
         )
 

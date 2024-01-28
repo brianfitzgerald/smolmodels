@@ -1,37 +1,35 @@
 print("Loading torch")
-from torch.utils.data import DataLoader
 import torch
 from torch.optim import AdamW
 import torch.nn.functional as F
-from dataclasses import dataclass
-from typing import TypedDict
+from typing import Optional
+import fire
+from torch import Tensor
 
 print("Loading lightning")
 import pytorch_lightning as pl
-import pytorch_lightning.callbacks as pl_callbacks
+from pytorch_lightning.loggers import WandbLogger
 
 print("Loading HF")
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
-from transformers.optimization import get_linear_schedule_with_warmup
-from datasets import load_dataset
+from transformers.optimization import get_inverse_sqrt_schedule
 from t5_data import PromptUpsampleDataModule
 
 
 class HyperParams:
     model_name: str = "google/flan-t5-small"
     max_seq_length: int = 512
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     adam_epsilon: float = 1e-8
-    warmup_steps: int = 0
+    warmup_steps: int = 10
     train_batch_size: int = 8
     eval_batch_size: int = 8
     num_train_epochs: int = 2
-    gradient_accumulation_steps: int = 16
+    gradient_accumulation_steps: int = 4
     n_gpus: int = 1
     early_stop_callback: bool = False
     fp_16: bool = False
-    opt_level: str = "O1"
     max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
@@ -66,6 +64,7 @@ class T5FineTuner(pl.LightningModule):
         super(T5FineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
+        self.save_hyperparameters()
 
         self.model: T5ForConditionalGeneration = (
             T5ForConditionalGeneration.from_pretrained(self.params.model_name)
@@ -73,10 +72,11 @@ class T5FineTuner(pl.LightningModule):
         self.tokenizer = T5Tokenizer.from_pretrained(self.params.model_name)
 
     def forward(self, input_ids, labels=None):
-        return self.model(
+        out = self.model(
             input_ids,
             labels=labels,
         )
+        return out
 
     def _step(self, batch):
         outputs = self(
@@ -90,20 +90,17 @@ class T5FineTuner(pl.LightningModule):
         loss = self._step(batch)
 
         tensorboard_logs = {"train_loss": loss}
+        self.log(
+            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
         return {"loss": loss, "log": tensorboard_logs}
-
-    def on_train_epoch_end(self, outputs):
-        avg_train_loss = torch.stack([x["loss"] for x in outputs]).mean()
-        tensorboard_logs = {"avg_train_loss": avg_train_loss}
-        return {
-            "avg_train_loss": avg_train_loss,
-            "log": tensorboard_logs,
-            "progress_bar": tensorboard_logs,
-        }
 
     def validation_step(self, batch, batch_idx):
         loss = self._step(batch)
         # perplexity_score = get_perplexity(logits, input_ids)
+        self.log(
+            "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
         return {"val_loss": loss}
 
     def on_valiation_epoch_end(self, outputs):
@@ -118,6 +115,7 @@ class T5FineTuner(pl.LightningModule):
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
 
+        # emulates the original optimizer in https://github.com/google-research/bert/blob/master/optimization.py#L65
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
@@ -142,29 +140,92 @@ class T5FineTuner(pl.LightningModule):
             lr=self.params.learning_rate,
             eps=self.params.adam_epsilon,
         )
-        self.opt = optimizer
-        return [optimizer]
-
-    def get_tqdm_dict(self):
-        tqdm_dict = {
-            "loss": "{:.3f}".format(self.avg_loss),
+        scheduler = get_inverse_sqrt_schedule(
+            optimizer, num_warmup_steps=self.params.warmup_steps
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+            },
         }
 
-        return tqdm_dict
+
+class LogPredictionSamplesCallback(pl.Callback):
+    def __init__(
+        self,
+        tokenizer: T5Tokenizer,
+        input_ids: Tensor,
+        target_ids: Tensor,
+        wandb_logger: Optional[WandbLogger] = None,
+    ):
+        self.tokenizer = tokenizer
+        self.input_ids = input_ids
+        self.target_ids = target_ids
+        self.wandb_logger = wandb_logger
+
+    def on_epoch_end(self, trainer, pl_module):
+        model = pl_module.model
+        input_ids = self.input_ids
+        target_ids = self.target_ids
+
+        out = model.generate(
+            input_ids=input_ids,
+            max_length=128,
+            num_beams=2,
+            early_stopping=True,
+        )
+
+        for i, (inp, out, tar) in enumerate(zip(input_ids, out, target_ids)):
+            inp_text = self.tokenizer.decode(inp, skip_special_tokens=True)
+            out_text = self.tokenizer.decode(out, skip_special_tokens=True)
+            tar_text = self.tokenizer.decode(tar, skip_special_tokens=True)
+            print(f"Input: {inp_text}")
+            print(f"Output: {out_text}")
+            print(f"Target: {tar_text}")
+            print()
+        if self.wandb_logger:
+            self.wandb_logger.log_table(
+                "Prediction Samples",
+            )
+
+    def on_train_epoch_end(self, trainer, pl_module, outputs):
+        self.on_epoch_end(trainer, pl_module)
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        self.on_epoch_end(trainer, pl_module)
 
 
-if __name__ == "__main__":
+def main(wandb: bool = False):
     params = HyperParams()
-    checkpoint_callback = pl_callbacks.ModelCheckpoint(
-        monitor="val_loss", mode="min", save_top_k=3
-    )
+    loggers = []
 
     model = T5FineTuner(params)
+
+    wandb_logger = None
+
+    if wandb:
+        wandb_logger = WandbLogger(project="t5-upsampled-prompts")
+        loggers.append(wandb_logger)
+        wandb_logger.watch(model)
+
     dm = PromptUpsampleDataModule(params.model_name, batch_size=8, max_token_length=512)
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
+        callbacks=[
+            LogPredictionSamplesCallback(
+                model.tokenizer,
+                dm.val_dataset[0]["input_ids"],
+                dm.val_dataset[0]["label_input_ids"],
+                wandb_logger,
+            )
+        ],
+        logger=loggers,
     )
     trainer.fit(model, datamodule=dm)
+
+
+fire.Fire(main)
