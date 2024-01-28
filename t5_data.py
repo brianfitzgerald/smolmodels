@@ -35,27 +35,30 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = self.train_dataset.map(self.tokenize_fn, batched=True)
         self.val_dataset = self.val_dataset.map(self.tokenize_fn, batched=True)
 
+        columns = ["input_ids", "attention_mask", "label_input_ids", "label_attention_mask"]
         # Set format for PyTorch
         self.train_dataset.set_format(
-            type="torch", columns=["input_ids", "attention_mask", "labels"]
+            type="torch", columns=columns
         )
         self.val_dataset.set_format(
-            type="torch", columns=["input_ids", "attention_mask", "labels"]
+            type="torch", columns=columns
         )
 
     def tokenize_fn(self, examples):
-        model_inputs = [self.prefix + doc for doc in examples["Prompt"]]
+        inputs = [self.prefix + doc for doc in examples["Prompt"]]
         model_inputs = self.tokenizer(
-            model_inputs, max_length=self.max_token_length, truncation=True
+            inputs, max_length=self.max_token_length, truncation=True, padding='max_length'
         )
 
         labels = self.tokenizer(
             text_target=examples["Upsampled"],
             max_length=self.max_token_length,
+            padding='max_length',
             truncation=True,
         )
 
-        model_inputs["labels"] = labels["input_ids"]
+        model_inputs["label_input_ids"] = labels["input_ids"]
+        model_inputs["label_attention_mask"] = labels["attention_mask"]
         return model_inputs
 
     def train_dataloader(self):
