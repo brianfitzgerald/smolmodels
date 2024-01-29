@@ -20,15 +20,15 @@ from datasets import Dataset
 
 
 class HyperParams:
-    model_name: str = "google/flan-t5-small"
+    model_name: str = "google/flan-t5-base"
     max_seq_length: int = 128
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-5
     adam_epsilon: float = 1e-8
     warmup_steps: int = 10
     train_batch_size: int = 8
     eval_batch_size: int = 8
-    num_train_epochs: int = 2
-    gradient_accumulation_steps: int = 4
+    num_train_epochs: int = 5
+    gradient_accumulation_steps: int = 2
     n_gpus: int = 1
     early_stop_callback: bool = False
     fp_16: bool = False
