@@ -21,23 +21,25 @@ from datasets import Dataset
 
 class HyperParams:
     model_name: str = "google/flan-t5-base"
-    max_seq_length: int = 128
-    learning_rate: float = 1e-5
+    max_seq_length: int = 256
+    learning_rate: float = 5e-6
     adam_epsilon: float = 1e-8
-    warmup_steps: int = 10
+    warmup_steps: int = 50
     train_batch_size: int = 8
     eval_batch_size: int = 8
-    num_train_epochs: int = 5
-    gradient_accumulation_steps: int = 2
+    num_train_epochs: int = 25
+    gradient_accumulation_steps: int = 1
     n_gpus: int = 1
-    early_stop_callback: bool = False
     fp_16: bool = False
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 10.0
     seed: int = 42
     weight_decay: float = 0.0
 
 
 def calculate_bpc(model, evaluation_data):
+    """
+    Bits per character
+    """
     total_loss = 0.0
     total_characters = 0
 
@@ -92,28 +94,14 @@ class T5FineTuner(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
-
-        self.log(
-            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
-        )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
         loss = self._step(batch)
-        # perplexity_score = get_perplexity(logits, input_ids)
         self.log(
             "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
         return {"val_loss": loss}
-
-    def on_valiation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
-        tensorboard_logs = {"val_loss": avg_loss}
-        return {
-            "avg_val_loss": avg_loss,
-            "log": tensorboard_logs,
-            "progress_bar": tensorboard_logs,
-        }
 
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
@@ -162,6 +150,7 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
+        self.validation_sample_rows = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx: int
@@ -175,21 +164,22 @@ class LogPredictionSamplesCallback(pl.Callback):
         target_ids = batch["label_input_ids"]
         out = pl_module.model.generate(input_ids)
 
-        columns = ["Input", "Output", "Target"]
+        columns = ["Epoch", "Input", "Output", "Target"]
         table_columns = []
+        table_columns.append([trainer.current_epoch] * len(input_ids))
         for feature in [input_ids, out, target_ids]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
             table_columns.append(decoded)
 
-        if self.wandb_logger:
-            self.wandb_logger.log_table(
-                "Prediction Samples",
-            )
-        if batch_idx % 10 == 0:
-            table_rows = [list(row) for row in zip(*table_columns)]
-            print(tabulate(table_rows, headers=columns, maxcolwidths=[50, 50, 50]))
+        new_rows = [list(row) for row in zip(*table_columns)]
+
+        self.validation_sample_rows.extend(new_rows)
+
+        if self.wandb_logger and batch_idx == 0:
+            self.wandb_logger.log_table("Validation Samples", columns, self.validation_sample_rows)
+            print(tabulate(new_rows, headers=columns, maxcolwidths=[50, 50, 50]))
 
 
 def main(wandb: bool = False):
@@ -213,7 +203,7 @@ def main(wandb: bool = False):
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
-        val_check_interval=0.25,
+        # val_check_interval=0.1,
         callbacks=[
             LogPredictionSamplesCallback(
                 model.tokenizer,
