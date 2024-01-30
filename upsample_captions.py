@@ -2,24 +2,11 @@ import os
 from typing import Dict, List, Tuple
 
 import pandas as pd
-import torch
 from datasets import Dataset, load_dataset, concatenate_datasets
-from transformers import pipeline, Pipeline
 import fire
 from huggingface_hub import login
 from dotenv import load_dotenv
-from vllm import LLM, SamplingParams, RequestOutput
-
-
-def load_chat_pipeline_hf():
-    """Loads the HuggingFaceH4/zephyr-7b-alpha model and wraps into a handy text-generation pipeline."""
-    pipe = pipeline(
-        "text-generation",
-        model="HuggingFaceH4/zephyr-7b-alpha",
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-    )
-    return pipe
+from vllm import LLM, SamplingParams
 
 
 def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
@@ -68,19 +55,6 @@ def get_messages_for_chat() -> Tuple[Dict, List[Dict]]:
     return system_message, user_conversation
 
 
-def upsample_caption_hf(pipeline: Pipeline, message: list[Dict[str, str]]):
-    """Performs inference on a single prompt."""
-    outputs = pipeline(
-        message,
-        max_new_tokens=256,
-        do_sample=True,
-        temperature=0.7,
-        top_k=50,
-        top_p=0.95,
-    )
-    return outputs
-
-
 def upload_dataset(
     hf_dataset: Dataset, hf_dataset_name: str, new_dataset_rows: List[Dict]
 ):
@@ -93,16 +67,14 @@ def upload_dataset(
     concat_dataset.push_to_hub(hf_dataset_name)
 
 
-def main():
+def main(upload_every: int = 500, batch_size: int = 16):
     hf_dataset_name = "roborovski/upsampled-prompts-parti"
 
     print("Loading existing prompts...")
     hf_dataset: Dataset = load_dataset(hf_dataset_name, split="train")  # type: ignore
 
     print("Loading new prompts...")
-    parti_prompts: pd.DataFrame = pd.read_csv("PartiPrompts.tsv", sep="\t")
-
-    source_prompts_list = parti_prompts
+    parti_prompts: pd.DataFrame = pd.read_csv("data/PartiPrompts.tsv", sep="\t")
 
     new_dataset_rows: List[Dict] = []
 
@@ -127,35 +99,42 @@ def main():
 
     print("Upsampling captions...")
     for epoch in range(n_epochs):
-        for i, row in enumerate(source_prompts_list.itertuples()):
-            original_prompt, category = row.Prompt, row.Category
+        for i in range(0, len(parti_prompts), batch_size):
+            batch = parti_prompts.iloc[i : i + batch_size]
+            prompts, categories_batch = batch["Prompt"], batch["Category"]
             system_message, user_conversation = get_messages_for_chat()
-            updated_prompt = user_conversation[-1]["content"].format(
-                prompt=original_prompt
-            )
-            user_conversation[-1]["content"] = updated_prompt
+            full_conversations_batch = []
 
-            final_message = [system_message, *user_conversation]
-            full_conversation_formatted: str = tokenizer.apply_chat_template(  # type: ignore
-                final_message, tokenize=False, add_generation_prompt=True
-            )
+            for prompt in prompts:
+            
+                updated_prompt = user_conversation[-1]["content"].format(
+                    prompt=prompt
+                )
+                user_conversation[-1]["content"] = updated_prompt
 
-            outputs = model.generate(full_conversation_formatted, sampling_params)
+                final_message = [system_message, *user_conversation]
+                full_conversation_formatted: str = tokenizer.apply_chat_template(  # type: ignore
+                    final_message, tokenize=False, add_generation_prompt=True
+                )
+                full_conversations_batch.append(full_conversation_formatted)
 
-            upsampled_caption = outputs[0].outputs[0].text
-            new_dataset_rows.append(
-                {
-                    "Prompt": original_prompt,
-                    "Category": category,
-                    "Upsampled": upsampled_caption,
-                }
-            )
+            outputs = model.generate(full_conversations_batch, sampling_params)
 
-            print(
-                f"Upsampled prompt {epoch} {i} ({category}): {original_prompt} -> {upsampled_caption}"
-            )
+            for category, original_prompt, output in zip(categories_batch, prompts, outputs):
+                upsampled = output.outputs[0].text
+                new_dataset_rows.append(
+                    {
+                        "Prompt": original_prompt,
+                        "Category": category,
+                        "Upsampled": upsampled,
+                    }
+                )
 
-            if i % 500 == 0:
+                print(
+                    f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {upsampled}"
+                )
+
+            if i % upload_every == 0:
                 print(f"Upsampled {i} prompts")
                 upload_dataset(hf_dataset, hf_dataset_name, new_dataset_rows)
 

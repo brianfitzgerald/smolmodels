@@ -14,7 +14,7 @@ from lightning.fabric.utilities.load import _NotYetLoadedTensor as NotYetLoadedT
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
 
-from model import Config, ModelFamily
+from models.gpt import Config, ModelFamily
 from utils import incremental_save, lazy_load
 
 

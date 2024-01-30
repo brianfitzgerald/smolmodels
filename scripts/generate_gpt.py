@@ -18,7 +18,7 @@ from scripts.convert_hf_checkpoint import convert_hf_checkpoint
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
 from lightning.fabric.utilities.load import _lazy_load as lazy_load
-from model import GPT, Config
+from models.gpt import GPT, Config
 from scripts.chat_gpt import (
     extract_text_from_generated_message,
     model_conversation_input,
