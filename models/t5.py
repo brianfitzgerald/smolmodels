@@ -3,6 +3,29 @@ from torch import nn
 from einops import rearrange
 import math
 import torch
+from typing import Dict, Optional
+from dataclasses import dataclass
+
+@dataclass
+class T5Config:
+    vocab_size: int
+    d_model: int
+    d_kv: int
+    d_ff: int
+    num_layers: int
+    num_decoder_layers: Optional[int]
+    num_heads: int
+    relative_attention_num_buckets: int
+    relative_attention_max_distance: int
+    dropout_rate: float
+    layer_norm_epsilon: float
+    initializer_factor: float
+    feed_forward_proj: str
+    is_encoder_decoder: bool
+    use_cache: bool
+    pad_token_id: int
+    eos_token_id: int
+    classifier_dropout: float
 
 
 class T5LayerNorm(nn.Module):
@@ -22,16 +45,6 @@ class T5LayerNorm(nn.Module):
             hidden_states = hidden_states.to(self.weight.dtype)
 
         return self.weight * hidden_states
-
-
-class WrapperBlock(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.fn = fn
-        self.layer_norm = T5LayerNorm(dim)
-
-    def forward(self, x, **kwargs):
-        return self.fn(x, **kwargs) + x
 
 
 class FeedForward(nn.Module):
@@ -111,7 +124,7 @@ class T5RelativePositionBias(nn.Module):
 
 
 # TODO use scaled dot product attention
-class T5SelfAttention(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(
         self,
         *,
@@ -247,19 +260,20 @@ class T5CrossAttention(nn.Module):
         return self.to_o(out)
 
 
+class T5Block(nn.Module):
+    def __init__(self, dim: int, self_attn: SelfAttention, mlp: FeedForward, cross_attn: Optional[T5CrossAttention] = None):
+        super().__init__()
+        self.attn = self_attn
+        self.layer_norm = T5LayerNorm(dim)
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
+
+
 class T5Encoder(nn.Module):
     def __init__(
         self,
-        *,
-        dim,
-        num_tokens,
-        # max_seq_len,
-        depth,
-        heads=12,
-        dim_head=64,
-        causal=False,
-        mlp_mult=4,
-        dropout=0.0,
+        config: T5Config,
     ):
         super().__init__()
         self.embed_tokens = nn.Embedding(num_tokens, dim)
@@ -270,9 +284,9 @@ class T5Encoder(nn.Module):
             self.block.append(
                 nn.ModuleList(
                     [
-                        WrapperBlock(
+                        T5Block(
                             dim,
-                            T5SelfAttention(
+                            SelfAttention(
                                 relative_attn_bias=i == 0,
                                 dim=dim,
                                 heads=heads,
@@ -280,9 +294,6 @@ class T5Encoder(nn.Module):
                                 causal=causal,
                                 dropout=dropout,
                             ),
-                        ),
-                        WrapperBlock(
-                            dim,
                             FeedForward(dim=dim, mult=mlp_mult, dropout=dropout),
                         ),
                     ]
@@ -310,29 +321,20 @@ class T5Encoder(nn.Module):
 class T5Decoder(nn.Module):
     def __init__(
         self,
-        *,
-        dim,
-        num_tokens,
-        # max_seq_len,
-        depth,
-        heads=12,
-        dim_head=64,
-        causal=True,
-        mlp_mult=4,
-        dropout=0.0,
+        config: T5Config
     ):
         super().__init__()
         self.embed_tokens = nn.Embedding(num_tokens, dim)
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.block = nn.ModuleList([])
-        for i in range(depth):
+        for i in range(config.d_model):
             self.block.append(
                 nn.ModuleList(
                     [
-                        WrapperBlock(
+                        T5Block(
                             dim,
-                            T5SelfAttention(
+                            SelfAttention(
                                 relative_attn_bias=i == 0,
                                 dim=dim,
                                 heads=heads,
@@ -341,13 +343,13 @@ class T5Decoder(nn.Module):
                                 dropout=dropout,
                             ),
                         ),
-                        WrapperBlock(
+                        T5Block(
                             dim,
                             T5CrossAttention(
                                 dim=dim, heads=heads, dim_head=dim_head, dropout=dropout
                             ),
                         ),
-                        WrapperBlock(
+                        T5Block(
                             dim, FeedForward(dim=dim, mult=mlp_mult, dropout=dropout)
                         ),
                     ]
@@ -376,21 +378,7 @@ class T5Decoder(nn.Module):
 class T5(nn.Module):
     def __init__(
         self,
-        *,
-        dim,
-        # max_seq_len,
-        enc_n_positions: int,
-        num_encoder_layers: int,
-        enc_heads: int,
-        enc_dim_head: int,
-        enc_mlp_mult: int,
-        vocab_size: int,
-        num_decoder_layers: int,
-        dec_heads: int,
-        dec_dim_head: int,
-        dec_mlp_mult: int,
-        dropout: float = 0.0,
-        tie_token_emb: bool = True,
+        config: T5Config,
     ):
         super().__init__()
 
@@ -398,25 +386,11 @@ class T5(nn.Module):
         # self.pos_emb = nn.Embedding(max_seq_len, dim)
 
         self.encoder = T5Encoder(
-            dim=dim,
-            # max_seq_len = max_seq_len,
-            num_tokens=enc_n_positions,
-            depth=num_encoder_layers,
-            heads=enc_heads,
-            dim_head=enc_dim_head,
-            mlp_mult=enc_mlp_mult,
-            dropout=dropout,
+            config
         )
 
         self.decoder = T5Decoder(
-            dim=dim,
-            # max_seq_len= max_seq_len,
-            num_tokens=vocab_size,
-            depth=num_decoder_layers,
-            heads=dec_heads,
-            dim_head=dec_dim_head,
-            mlp_mult=dec_mlp_mult,
-            dropout=dropout,
+            config
         )
 
         self.lm_head = nn.Linear(dim, vocab_size, bias=False)
@@ -433,36 +407,3 @@ class T5(nn.Module):
         x = self.lm_head(x)
         return x
 
-
-def remap_state_dict(state_dict):
-    """
-    remap from HF checkpoint
-    """
-    for k, v in list(state_dict.items()):
-        ln = k.split(".")
-        if len(ln) < 4:
-            continue
-        model_module = ln[0]
-        layer_idx = ln[2]
-        new_key = None
-        # self attn layer
-        block_sub_idx = int(ln[4])
-        if ln[5] == "SelfAttention" or ln[5] == "EncDecAttention":
-            attn_layer = ln[6]
-            task = ln[7]
-            new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.to_{attn_layer}.{task}"
-            state_dict[new_key] = v
-        elif ln[5] == "layer_norm":
-            task = ln[6]
-            new_key = (
-                f"{model_module}.block.{layer_idx}.{block_sub_idx}.layer_norm.{task}"
-            )
-        elif ln[5] == "DenseReluDense":
-            sub_layer = ln[6]
-            task = ln[7]
-            new_key = f"{model_module}.block.{layer_idx}.{block_sub_idx}.fn.{sub_layer}.{task}"
-
-        if new_key:
-            state_dict[new_key] = v
-            del state_dict[k]
-    return state_dict
