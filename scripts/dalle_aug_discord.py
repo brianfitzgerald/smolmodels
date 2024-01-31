@@ -22,7 +22,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 import os
-from chat import dalle_conversation, extract_text_from_generated_message
+from scripts.chat_gpt import dalle_conversation, extract_text_from_generated_message
 
 
 # https://github.com/vllm-project/vllm/pull/1235/files
