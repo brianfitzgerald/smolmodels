@@ -23,8 +23,18 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
         # Tokenization
-        self.train_dataset = self.train_dataset.map(self.tokenize_fn, batched=True)
-        self.val_dataset = self.val_dataset.map(self.tokenize_fn, batched=True)
+        self.train_dataset = self.train_dataset.map(
+            self.tokenize_fn,
+            batched=True,
+            load_from_cache_file=True,
+            cache_file_name="train_cache",
+        )
+        self.val_dataset = self.val_dataset.map(
+            self.tokenize_fn,
+            batched=True,
+            load_from_cache_file=True,
+            cache_file_name="val_cache",
+        )
 
         columns = [
             "input_ids",
@@ -39,14 +49,17 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
     def tokenize_fn(self, examples):
         inputs = [self.prefix + doc for doc in examples["Prompt"]]
         model_inputs = self.tokenizer(
-            inputs, max_length=self.max_token_length, truncation=True, padding='max_length'
+            inputs,
+            max_length=self.max_token_length,
+            truncation=True,
+            padding="max_length",
         )
 
         labels = self.tokenizer(
             text_target=examples["Upsampled"],
             max_length=self.max_token_length,
             truncation=True,
-            padding='max_length',
+            padding="max_length",
         )
 
         model_inputs["label_input_ids"] = labels["input_ids"]
@@ -54,7 +67,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         return model_inputs
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)  # type: ignore
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=35)  # type: ignore
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size)  # type: ignore
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=35)  # type: ignore

@@ -169,3 +169,5 @@ submit_upsample_captions.sh
 *.out.*
 latest-run
 upsampled_new_prompts.csv
+train_cache
+val_cache

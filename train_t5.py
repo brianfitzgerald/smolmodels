@@ -94,6 +94,9 @@ class T5FineTuner(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
+        self.log(
+            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
@@ -164,9 +167,12 @@ class LogPredictionSamplesCallback(pl.Callback):
         target_ids = batch["label_input_ids"]
         out = pl_module.model.generate(input_ids)
 
-        columns = ["Epoch", "Input", "Output", "Target"]
+        n = len(input_ids)
+        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
         table_columns = []
-        table_columns.append([trainer.current_epoch] * len(input_ids))
+        table_columns.append([trainer.current_epoch] * n)
+        table_columns.append(list(range(n)))
+
         for feature in [input_ids, out, target_ids]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
@@ -178,7 +184,9 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.validation_sample_rows.extend(new_rows)
 
         if self.wandb_logger and batch_idx == 0:
-            self.wandb_logger.log_table("Validation Samples", columns, self.validation_sample_rows)
+            self.wandb_logger.log_table(
+                "Validation Samples", columns, self.validation_sample_rows
+            )
             print(tabulate(new_rows, headers=columns, maxcolwidths=[50, 50, 50]))
 
 
@@ -203,7 +211,7 @@ def main(wandb: bool = False):
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
-        # val_check_interval=0.1,
+        val_check_interval=0.1,
         callbacks=[
             LogPredictionSamplesCallback(
                 model.tokenizer,
