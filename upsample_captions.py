@@ -1,5 +1,6 @@
 import os
 from typing import Dict, List, Tuple
+import copy
 
 import pandas as pd
 from datasets import Dataset, load_dataset, concatenate_datasets
@@ -67,11 +68,14 @@ def upload_dataset(
     concat_dataset.push_to_hub(hf_dataset_name)
 
 
-def main(upload_every: int = 500, batch_size: int = 16):
+def main(upload_every: int = 500, batch_size: int = 16, restart: bool = False):
     hf_dataset_name = "roborovski/upsampled-prompts-parti"
 
     print("Loading existing prompts...")
-    hf_dataset: Dataset = load_dataset(hf_dataset_name, split="train")  # type: ignore
+    if restart:
+        hf_dataset = Dataset.from_dict({"Prompt": [], "Category": [], "Upsampled": []})
+    else:
+        hf_dataset: Dataset = load_dataset(hf_dataset_name, split="train")  # type: ignore
 
     print("Loading new prompts...")
     parti_prompts: pd.DataFrame = pd.read_csv("data/PartiPrompts.tsv", sep="\t")
@@ -102,15 +106,14 @@ def main(upload_every: int = 500, batch_size: int = 16):
         for i in range(0, len(parti_prompts), batch_size):
             batch = parti_prompts.iloc[i : i + batch_size]
             prompts, categories_batch = batch["Prompt"], batch["Category"]
-            system_message, user_conversation = get_messages_for_chat()
             full_conversations_batch = []
 
-            for prompt in prompts:
+            for prompt in prompts.to_list():
+                system_message, user_conversation = get_messages_for_chat()
             
-                updated_prompt = user_conversation[-1]["content"].format(
+                user_conversation[-1]["content"] = user_conversation[-1]["content"].format(
                     prompt=prompt
                 )
-                user_conversation[-1]["content"] = updated_prompt
 
                 final_message = [system_message, *user_conversation]
                 full_conversation_formatted: str = tokenizer.apply_chat_template(  # type: ignore
