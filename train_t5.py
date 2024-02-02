@@ -184,9 +184,6 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.validation_sample_rows.extend(new_rows)
 
         if self.wandb_logger and batch_idx == 0:
-            self.wandb_logger.log_table(
-                "Validation Samples", columns, self.validation_sample_rows
-            )
             print(tabulate(new_rows, headers=columns, maxcolwidths=[50, 50, 50]))
 
 
