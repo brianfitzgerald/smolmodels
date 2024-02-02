@@ -6,6 +6,7 @@ from typing import Optional
 import fire
 from torch import Tensor
 from tabulate import tabulate
+import pandas as pd
 
 print("Loading lightning")
 import pytorch_lightning as pl
@@ -20,9 +21,9 @@ from datasets import Dataset
 
 
 class HyperParams:
-    model_name: str = "google/flan-t5-base"
+    model_name: str = "google-t5/t5-base"
     max_seq_length: int = 256
-    learning_rate: float = 5e-6
+    learning_rate: float = 1e-6
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
     train_batch_size: int = 8
@@ -153,7 +154,6 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
-        self.validation_sample_rows = []
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx: int
@@ -179,12 +179,23 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
             table_columns.append(decoded)
 
-        new_rows = [list(row) for row in zip(*table_columns)]
+        run_name = self.wandb_logger.experiment.name if self.wandb_logger else "latest"
 
-        self.validation_sample_rows.extend(new_rows)
+        rows = [list(row) for row in zip(*table_columns)]
+        rows_df = pd.DataFrame(rows, columns=columns)
+        rows_df.to_csv(
+            f"run_{run_name}_samples.csv", mode="a", header=False, index=False
+        )
 
-        if self.wandb_logger and batch_idx == 0:
-            print(tabulate(new_rows, headers=columns, maxcolwidths=[50, 50, 50]))
+        if batch_idx == 0:
+            new_rows = tabulate(
+                rows,
+                headers=columns,
+                tablefmt="simple_outline",
+            )
+            with open(f"run_{run_name}_samples.txt", "a") as f:
+                f.write(new_rows)
+                f.write("\n")
 
 
 def main(wandb: bool = False):
