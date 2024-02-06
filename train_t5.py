@@ -21,15 +21,15 @@ from datasets import Dataset
 
 
 class HyperParams:
-    model_name: str = "google-t5/t5-base"
+    model_name: str = "google/flan-t5-base"
     max_seq_length: int = 256
-    learning_rate: float = 1e-6
+    learning_rate: float = 2e-5
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
     train_batch_size: int = 8
     eval_batch_size: int = 8
     num_train_epochs: int = 25
-    gradient_accumulation_steps: int = 1
+    gradient_accumulation_steps: int = 2
     n_gpus: int = 1
     fp_16: bool = False
     max_grad_norm: float = 10.0
@@ -85,6 +85,8 @@ class T5FineTuner(pl.LightningModule):
         return out
 
     def _step(self, batch):
+        # print(f"input tokens: {self.tokenizer.decode(batch['input_ids'][0])}")
+        # print(f"labels: {self.tokenizer.decode(batch['label_input_ids'][0])}")
         outputs = self(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
@@ -151,9 +153,13 @@ class LogPredictionSamplesCallback(pl.Callback):
         self,
         tokenizer: T5Tokenizer,
         wandb_logger: Optional[WandbLogger] = None,
+        max_new_tokens: int = 100,
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
+        self.max_new_tokens = max_new_tokens
+
+        # TODO clear existing log files
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx: int
@@ -165,7 +171,11 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         input_ids = batch["input_ids"]
         target_ids = batch["label_input_ids"]
-        out = pl_module.model.generate(input_ids)
+        out = pl_module.model.generate(
+            input_ids,
+            max_length=self.max_new_tokens,
+            max_new_tokens=self.max_new_tokens,
+        )
 
         n = len(input_ids)
         columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
@@ -222,8 +232,7 @@ def main(wandb: bool = False):
         val_check_interval=0.1,
         callbacks=[
             LogPredictionSamplesCallback(
-                model.tokenizer,
-                wandb_logger,
+                model.tokenizer, wandb_logger, params.max_seq_length
             )
         ],
         logger=loggers,
