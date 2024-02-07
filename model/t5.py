@@ -19,6 +19,7 @@ class T5FineTuner(pl.LightningModule):
         )
         self.tokenizer = T5Tokenizer.from_pretrained(ckpt_name)
         self.ckpt_name = ckpt_name
+        self.train_steps = 0
         self.save_hyperparameters()
 
     def forward(self, input_ids, attention_mask, labels):
