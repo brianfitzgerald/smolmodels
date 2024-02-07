@@ -1,6 +1,5 @@
 
 class HyperParams:
-    model_name: str = "google/flan-t5-base"
     max_seq_length: int = 256
     learning_rate: float = 2e-5
     adam_epsilon: float = 1e-8

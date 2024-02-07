@@ -12,16 +12,17 @@ from transformers.models.t5.tokenization_t5 import T5Tokenizer
 
 
 class T5FineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams):
+    def __init__(self, params: HyperParams, ckpt_name: str):
         super(T5FineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
         self.save_hyperparameters()
 
         self.model: T5ForConditionalGeneration = (
-            T5ForConditionalGeneration.from_pretrained(self.params.model_name)
+            T5ForConditionalGeneration.from_pretrained(ckpt_name)
         )
-        self.tokenizer = T5Tokenizer.from_pretrained(self.params.model_name)
+        self.tokenizer = T5Tokenizer.from_pretrained(ckpt_name)
+        self.ckpt_name = ckpt_name
 
     def forward(self, input_ids, attention_mask, labels):
         out = self.model(

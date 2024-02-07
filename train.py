@@ -1,4 +1,4 @@
-print("Loading torch")
+print("Loading dependencies - torch...")
 import torch
 import torch.nn.functional as F
 from typing import Optional
@@ -6,14 +6,16 @@ import fire
 from tabulate import tabulate
 import pandas as pd
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
+from enum import Enum
 
 from model.t5 import T5FineTuner
+from model.llama import LlamaFineTuner
 
-print("Loading lightning")
+print("Loading dependencies - lightning...")
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 
-print("Loading HF")
+print("Loading dependencies - project...")
 from model.data import PromptUpsampleDataModule
 from model.params import HyperParams
 
@@ -105,11 +107,21 @@ class LogPredictionSamplesCallback(pl.Callback):
                 f.write("\n")
 
 
-def main(wandb: bool = False):
+class ModelChoice(Enum):
+    T5 = "t5"
+    LLAMA = "llama"
+
+
+def main(wandb: bool = False, model_choice: str = ModelChoice.LLAMA.value):
     params = HyperParams()
     loggers = []
 
-    model = T5FineTuner(params)
+    model = None
+    if model_choice == ModelChoice.LLAMA.value:
+        model = LlamaFineTuner(params, "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    elif model_choice == ModelChoice.T5.value:
+        model = T5FineTuner(params, "google/flan-t5-base")
+    assert model
 
     wandb_logger = None
 
@@ -119,7 +131,7 @@ def main(wandb: bool = False):
         wandb_logger.watch(model)
 
     dm = PromptUpsampleDataModule(
-        params.model_name, batch_size=8, max_token_length=params.max_seq_length
+        model.ckpt_name, batch_size=8, max_token_length=params.max_seq_length
     )
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
