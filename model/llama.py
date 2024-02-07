@@ -1,12 +1,9 @@
-print("Loading torch")
 from transformers.optimization import get_cosine_schedule_with_warmup
 from model.params import HyperParams
 from torch.optim import AdamW
 
-print("Loading lightning")
 import pytorch_lightning as pl
 
-print("Loading HF")
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.tokenization_llama import LlamaTokenizer
 
@@ -16,13 +13,11 @@ class LlamaFineTuner(pl.LightningModule):
         super(LlamaFineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
-        self.save_hyperparameters()
 
-        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(
-            ckpt_name
-        )
+        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(ckpt_name)
         self.tokenizer = LlamaTokenizer.from_pretrained(ckpt_name)
         self.ckpt_name = ckpt_name
+        self.save_hyperparameters()
 
     def forward(self, input_ids, attention_mask, labels):
         out = self.model(
@@ -62,7 +57,9 @@ class LlamaFineTuner(pl.LightningModule):
             eps=self.params.adam_epsilon,
             weight_decay=self.params.weight_decay,
         )
-        scheduler = get_cosine_schedule_with_warmup(optimizer, self.params.warmup_steps, self.params.num_train_epochs * 1000)
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, self.params.warmup_steps, self.params.num_train_epochs * 1000
+        )
 
         return {
             "optimizer": optimizer,

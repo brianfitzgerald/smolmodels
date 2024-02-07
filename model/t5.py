@@ -1,12 +1,9 @@
-print("Loading torch")
 from transformers.optimization import get_inverse_sqrt_schedule
 from model.params import HyperParams
 from torch.optim import AdamW
 
-print("Loading lightning")
 import pytorch_lightning as pl
 
-print("Loading HF")
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 
@@ -16,13 +13,13 @@ class T5FineTuner(pl.LightningModule):
         super(T5FineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
-        self.save_hyperparameters()
 
         self.model: T5ForConditionalGeneration = (
             T5ForConditionalGeneration.from_pretrained(ckpt_name)
         )
         self.tokenizer = T5Tokenizer.from_pretrained(ckpt_name)
         self.ckpt_name = ckpt_name
+        self.save_hyperparameters()
 
     def forward(self, input_ids, attention_mask, labels):
         out = self.model(

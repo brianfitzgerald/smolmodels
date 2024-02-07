@@ -3,15 +3,15 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from typing import Optional
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 
 class PromptUpsampleDataModule(pl.LightningDataModule):
-    def __init__(self, model_name, batch_size, max_token_length):
+    def __init__(self, tokenizer: PreTrainedTokenizer, batch_size, max_token_length):
         super().__init__()
-        self.model_name = model_name
+        self.tokenizer = tokenizer
         self.batch_size = batch_size
         self.max_token_length = max_token_length
-        self.tokenizer = T5Tokenizer.from_pretrained(model_name)
         self.prefix = "Expand: "
         self.train_dataset = None
         self.val_dataset = None
@@ -42,6 +42,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
             "label_input_ids",
             "label_attention_mask",
         ]
+
         # Set format for PyTorch
         self.train_dataset.set_format(type="torch", columns=columns)
         self.val_dataset.set_format(type="torch", columns=columns)
