@@ -131,8 +131,11 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.LLAMA.value):
         wandb_logger.watch(model)
 
     dm = PromptUpsampleDataModule(
-        model.ckpt_name, batch_size=8, max_token_length=params.max_seq_length
+        model.tokenizer,
+        batch_size=params.train_batch_size,
+        max_token_length=params.max_seq_length,
     )
+
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
