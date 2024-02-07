@@ -72,7 +72,6 @@ class LogPredictionSamplesCallback(pl.Callback):
         target_ids = batch["label_input_ids"]
         out = pl_module.model.generate(
             input_ids,
-            max_length=self.max_new_tokens,
             max_new_tokens=self.max_new_tokens,
         )
 

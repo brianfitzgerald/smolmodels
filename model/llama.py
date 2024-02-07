@@ -17,6 +17,7 @@ class LlamaFineTuner(pl.LightningModule):
         self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(ckpt_name)
         self.tokenizer = LlamaTokenizer.from_pretrained(ckpt_name)
         self.ckpt_name = ckpt_name
+        self.train_steps = 0
         self.save_hyperparameters()
 
     def forward(self, input_ids, attention_mask, labels):
@@ -57,8 +58,10 @@ class LlamaFineTuner(pl.LightningModule):
             eps=self.params.adam_epsilon,
             weight_decay=self.params.weight_decay,
         )
+        print(f"Configuring optimizers: {self.train_steps}")
+        total_training_steps = self.params.num_train_epochs * self.train_steps
         scheduler = get_cosine_schedule_with_warmup(
-            optimizer, self.params.warmup_steps, self.params.num_train_epochs * 1000
+            optimizer, self.params.warmup_steps, total_training_steps
         )
 
         return {
