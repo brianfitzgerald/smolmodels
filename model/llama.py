@@ -12,16 +12,17 @@ from transformers.models.llama.tokenization_llama import LlamaTokenizer
 
 
 class LlamaFineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams):
+    def __init__(self, params: HyperParams, ckpt_name: str):
         super(LlamaFineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
         self.save_hyperparameters()
 
         self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(
-            self.params.model_name
+            ckpt_name
         )
-        self.tokenizer = LlamaTokenizer.from_pretrained(self.params.model_name)
+        self.tokenizer = LlamaTokenizer.from_pretrained(ckpt_name)
+        self.ckpt_name = ckpt_name
 
     def forward(self, input_ids, attention_mask, labels):
         out = self.model(
