@@ -32,7 +32,7 @@ class LlamaFineTuner(pl.LightningModule):
         outputs = self(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
-            labels=batch["label_input_ids"],
+            labels=batch["labels"],
         )
 
         return outputs.loss

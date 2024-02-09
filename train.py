@@ -69,7 +69,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
         input_ids = batch["input_ids"]
-        target_ids = batch["label_input_ids"]
+        labels = batch["input_ids"]
         out = pl_module.model.generate(
             input_ids,
             max_new_tokens=self.max_new_tokens,
@@ -81,7 +81,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         table_columns.append([trainer.current_epoch] * n)
         table_columns.append(list(range(n)))
 
-        for feature in [input_ids, out, target_ids]:
+        for feature in [input_ids, out, labels]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
