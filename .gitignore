@@ -171,3 +171,4 @@ upsampled_new_prompts.csv
 *.txt
 submit.sh
 dataset_cache/*
+*.parquet

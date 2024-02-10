@@ -35,12 +35,17 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.val_dataset = None
         self.sequence_to_sequence = sequence_to_sequence
         self.mask_inputs = True
+        self.load_local = True
 
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
 
         # Load dataset and split
-        dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.01)  # type: ignore
+        if self.load_local:
+            dataset = load_dataset("parquet", data_files={"train": "parti_prompts.parquet"})["train"].train_test_split(test_size=0.01)  # type: ignore
+        else:
+
+            dataset = load_dataset("roborovski/upsampled-prompts-parti")["train"].train_test_split(test_size=0.01)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
@@ -141,7 +146,9 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
             return {
                 "input_ids": input_ids,
                 "attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
-                "decoder_attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
+                "decoder_attention_mask": full_prompts_and_outputs_encoded[
+                    "attention_mask"
+                ],
                 "labels": labels,
             }
 
