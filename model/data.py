@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytorch_lightning as pl
 from datasets import load_dataset
 from torch.utils.data import DataLoader
@@ -43,19 +44,22 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
+        cache_dir = "dataset_cache"
+        Path(cache_dir).mkdir(exist_ok=True)
+
         # Tokenization
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,
             batched=True,
             load_from_cache_file=True,
-            cache_file_name="train_cache",
+            cache_file_name=f"{cache_dir}/training",
         )
 
         self.val_dataset = self.val_dataset.map(
             self.prepare_sample,
             batched=True,
             load_from_cache_file=True,
-            cache_file_name="val_cache",
+            cache_file_name=f"{cache_dir}/validation",
         )
 
         columns = [
@@ -72,24 +76,28 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         processed_batch = {}
 
         if self.sequence_to_sequence:
-            inputs = ["Expand: " + doc for doc in examples["Prompt"]]
-            model_inputs = self.tokenizer(
+            inputs = ["Expand the following prompt to add more detail: " + doc for doc in examples["Prompt"]]
+
+            inputs_tokenized = self.tokenizer(
                 inputs,
                 max_length=self.max_token_length,
                 truncation=True,
                 padding="max_length",
             )
 
-            model_labels = self.tokenizer(
+            labels_tokenized = self.tokenizer(
                 text_target=examples["Upsampled"],
                 max_length=self.max_token_length,
                 truncation=True,
                 padding="max_length",
             )
 
-            processed_batch["input_ids"] = model_inputs["input_ids"]
-            processed_batch["attention_mask"] = model_inputs["attention_mask"]
-            processed_batch["labels"] = model_labels["input_ids"]
+            return {
+                "input_ids": inputs_tokenized["input_ids"],
+                "attention_mask": inputs_tokenized["attention_mask"],
+                "labels": labels_tokenized["input_ids"],
+            }
+
         else:
             prompts, outputs = examples["Prompt"], examples["Upsampled"]
 
