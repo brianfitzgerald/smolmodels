@@ -100,7 +100,8 @@ class LogPredictionSamplesCallback(pl.Callback):
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
-            self.wandb_logger.log_table("Validation Samples", columns, table_columns)
+            table_rows = list(zip(*table_columns))
+            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
