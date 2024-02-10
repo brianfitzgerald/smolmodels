@@ -40,7 +40,6 @@ class T5FineTuner(pl.LightningModule):
         return out
 
     def _step(self, batch):
-        print(self.tokenizer.eos_token_id, self.tokenizer.eos_token)
         outputs = self(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
