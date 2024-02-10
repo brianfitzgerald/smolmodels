@@ -23,19 +23,28 @@ class T5FineTuner(pl.LightningModule):
         self.train_steps = 0
         self.save_hyperparameters()
 
-    def forward(self, input_ids: Tensor, attention_mask: Tensor, labels: Tensor):
+    def forward(
+        self,
+        input_ids: Tensor,
+        attention_mask: Tensor,
+        decoder_attention_mask: Tensor,
+        labels: Tensor,
+    ):
         labels[labels[:, :] == self.tokenizer.pad_token_id] = -100
         out = self.model(
             input_ids,
             attention_mask=attention_mask,
+            decoder_attention_mask=decoder_attention_mask,
             labels=labels,
         )
         return out
 
     def _step(self, batch):
+        print(self.tokenizer.eos_token_id, self.tokenizer.eos_token)
         outputs = self(
             input_ids=batch["input_ids"],
             attention_mask=batch["attention_mask"],
+            decoder_attention_mask=batch["decoder_attention_mask"],
             labels=batch["labels"],
         )
 
