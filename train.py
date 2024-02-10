@@ -122,7 +122,7 @@ class ModelChoice(Enum):
     LLAMA = "llama"
 
 
-def main(wandb: bool = False, model_choice: str = ModelChoice.LLAMA.value):
+def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
     params = HyperParams()
     loggers = []
 
@@ -130,20 +130,24 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.LLAMA.value):
     if model_choice == ModelChoice.LLAMA.value:
         model = LlamaFineTuner(params, "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
     elif model_choice == ModelChoice.T5.value:
-        model = T5FineTuner(params, "google/flan-t5-base")
+        model = T5FineTuner(params, "google/flan-t5-small")
     assert model
 
     wandb_logger = None
 
     if wandb:
-        wandb_logger = WandbLogger(project="t5-upsampled-prompts")
+        project_name = f"{model_choice}_prompt_upsample"
+        wandb_logger = WandbLogger(project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
+
+    is_sequence_to_sequence = model_choice == ModelChoice.T5.value
 
     dm = PromptUpsampleDataModule(
         model.tokenizer,
         batch_size=params.train_batch_size,
         max_token_length=params.max_seq_length,
+        sequence_to_sequence=is_sequence_to_sequence
     )
 
     trainer = pl.Trainer(
