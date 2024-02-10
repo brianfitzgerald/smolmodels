@@ -78,7 +78,6 @@ class LogPredictionSamplesCallback(pl.Callback):
             return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-        breakpoint()
         labels[labels[:, :] == -100] = pl_module.model.config.pad_token_id
         out = pl_module.model.generate(
             input_ids,
