@@ -76,13 +76,17 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         processed_batch = {}
 
         if self.sequence_to_sequence:
-            inputs = ["Expand the following prompt to add more detail: " + doc for doc in examples["Prompt"]]
+            inputs = [
+                "Expand the following prompt to add more detail: " + doc
+                for doc in examples["Prompt"]
+            ]
 
             inputs_tokenized = self.tokenizer(
                 inputs,
                 max_length=self.max_token_length,
                 truncation=True,
                 padding="max_length",
+                return_tensors="pt",
             )
 
             labels_tokenized = self.tokenizer(
@@ -90,6 +94,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
                 max_length=self.max_token_length,
                 truncation=True,
                 padding="max_length",
+                return_tensors="pt",
             )
 
             return {
@@ -102,7 +107,9 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
             prompts, outputs = examples["Prompt"], examples["Upsampled"]
 
             instruction = "Expand the following description:"
-            full_prompts = [generate_full_prompt(instruction, prompt) for prompt in prompts]
+            full_prompts = [
+                generate_full_prompt(instruction, prompt) for prompt in prompts
+            ]
 
             full_prompts_and_outputs = [
                 f"{prompt}\n\n{upsampled}"
@@ -125,16 +132,15 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
                 return_tensors="pt",
             )
 
-            labels: Tensor = full_prompts_and_outputs_encoded["input_ids"] # type: ignore
-            input_ids: Tensor = full_prompts_and_outputs_encoded["input_ids"].clone() # type: ignore
+            labels: Tensor = full_prompts_and_outputs_encoded["input_ids"]  # type: ignore
+            input_ids: Tensor = full_prompts_and_outputs_encoded["input_ids"].clone()  # type: ignore
             if self.mask_inputs:
-                labels.masked_fill_(full_prompts_encoded["attention_mask"] == 1, -100) # type: ignore
+                labels.masked_fill_(full_prompts_encoded["attention_mask"] == 1, -100)  # type: ignore
             return {
                 "input_ids": input_ids,
                 "attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
                 "labels": labels,
             }
-
 
         return processed_batch
 
