@@ -1,6 +1,7 @@
 from transformers.optimization import get_inverse_sqrt_schedule
 from model.params import HyperParams
 from torch.optim import AdamW
+from torch import Tensor
 
 import pytorch_lightning as pl
 
@@ -17,12 +18,13 @@ class T5FineTuner(pl.LightningModule):
         self.model: T5ForConditionalGeneration = (
             T5ForConditionalGeneration.from_pretrained(ckpt_name)
         )
-        self.tokenizer = T5Tokenizer.from_pretrained(ckpt_name)
+        self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(ckpt_name)
         self.ckpt_name = ckpt_name
         self.train_steps = 0
         self.save_hyperparameters()
 
-    def forward(self, input_ids, attention_mask, labels):
+    def forward(self, input_ids: Tensor, attention_mask: Tensor, labels: Tensor):
+        labels[labels[:, :] == self.tokenizer.pad_token_id] = -100
         out = self.model(
             input_ids,
             attention_mask=attention_mask,

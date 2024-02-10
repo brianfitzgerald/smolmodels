@@ -1,7 +1,7 @@
 
 class HyperParams:
     max_seq_length: int = 256
-    learning_rate: float = 2e-5
+    learning_rate: float = 1e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
     train_batch_size: int = 8
