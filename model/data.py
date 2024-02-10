@@ -65,6 +65,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         columns = [
             "input_ids",
             "attention_mask",
+            "decoder_attention_mask",
             "labels",
         ]
 
@@ -100,6 +101,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
             return {
                 "input_ids": inputs_tokenized["input_ids"],
                 "attention_mask": inputs_tokenized["attention_mask"],
+                "decoder_attention_mask": labels_tokenized["attention_mask"],
                 "labels": labels_tokenized["input_ids"],
             }
 
@@ -139,6 +141,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
             return {
                 "input_ids": input_ids,
                 "attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
+                "decoder_attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
                 "labels": labels,
             }
 

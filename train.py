@@ -77,7 +77,9 @@ class LogPredictionSamplesCallback(pl.Callback):
         if batch_idx > 0:
             return
         input_ids = batch["input_ids"]
-        labels = batch["input_ids"]
+        labels = batch["labels"]
+        breakpoint()
+        labels[labels[:, :] == -100] = pl_module.model.config.pad_token_id
         out = pl_module.model.generate(
             input_ids,
             max_new_tokens=self.max_new_tokens,
@@ -85,6 +87,7 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         n = len(input_ids)
         columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
+
         table_columns = []
         table_columns.append([trainer.current_epoch] * n)
         table_columns.append(list(range(n)))
@@ -109,7 +112,6 @@ class LogPredictionSamplesCallback(pl.Callback):
         new_rows = tabulate(
             rows,
             headers=columns,
-            tablefmt="simple_outline",
             maxcolwidths=[10, 10, 100, 100, 100],
         )
         with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
