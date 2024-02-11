@@ -2,7 +2,7 @@ print("Loading dependencies - torch...")
 import torch
 import torch.nn.functional as F
 from typing import Optional
-import fire
+from fire import Fire
 from tabulate import tabulate
 import pandas as pd
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
@@ -168,4 +168,5 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
     trainer.fit(model, datamodule=dm)
 
 
-fire.Fire(main)
+if __name__ == "__main__":
+    Fire(main)
