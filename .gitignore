@@ -164,12 +164,11 @@ typings
 lightning_logs
 wandb/
 wandb/latest-run
-submit_train_t5.sh
-submit_upsample_captions.sh
 *.out.*
 latest-run
 upsampled_new_prompts.csv
-train_cache
-val_cache
 *.csv
 *.txt
+submit.sh
+dataset_cache/*
+*.parquet
