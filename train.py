@@ -9,13 +9,15 @@ from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from enum import Enum
 from pathlib import Path
 import shutil
+from fsspec.core import url_to_fs
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
 
 print("Loading dependencies - lightning...")
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+import lightning.pytorch as pl
 
 print("Loading dependencies - project...")
 from model.data import PromptUpsampleDataModule
@@ -106,7 +108,10 @@ class LogPredictionSamplesCallback(pl.Callback):
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
         rows_df.to_csv(
-            self.log_dir / f"{run_name}_samples.csv", mode="a", header=False, index=False
+            self.log_dir / f"{run_name}_samples.csv",
+            mode="a",
+            header=False,
+            index=False,
         )
 
         new_rows = tabulate(
@@ -122,6 +127,24 @@ class LogPredictionSamplesCallback(pl.Callback):
 class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
+
+
+class HfModelCheckpoint(ModelCheckpoint):
+    def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._save_checkpoint(trainer, filepath)
+        hf_save_dir = filepath + ".dir"
+        if trainer.is_global_zero:
+            trainer.lightning_module.model.save_pretrained(hf_save_dir)
+            trainer.lightning_module.tokenizer.save_pretrained(hf_save_dir)
+
+    # https://github.com/Lightning-AI/lightning/pull/16067
+    def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._remove_checkpoint(trainer, filepath)
+        hf_save_dir = filepath + ".dir"
+        if trainer.is_global_zero:
+            fs, _ = url_to_fs(hf_save_dir)
+            if fs.exists(hf_save_dir):
+                fs.rm(hf_save_dir, recursive=True)
 
 
 def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
@@ -149,7 +172,18 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         model.tokenizer,
         batch_size=params.train_batch_size,
         max_token_length=params.max_seq_length,
-        sequence_to_sequence=is_sequence_to_sequence
+        sequence_to_sequence=is_sequence_to_sequence,
+    )
+
+    sample_callback = LogPredictionSamplesCallback(
+        model.tokenizer, wandb_logger, params.max_seq_length
+    )
+
+    checkpoint_callback = HfModelCheckpoint(
+        dirpath="checkpoints",
+        filename="best_model",
+        monitor="val_loss",
+        mode="min",
     )
 
     trainer = pl.Trainer(
@@ -158,11 +192,7 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
         val_check_interval=0.1,
-        callbacks=[
-            LogPredictionSamplesCallback(
-                model.tokenizer, wandb_logger, params.max_seq_length
-            )
-        ],
+        callbacks=[sample_callback, checkpoint_callback],
         logger=loggers,
     )
     trainer.fit(model, datamodule=dm)
