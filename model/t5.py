@@ -1,9 +1,10 @@
+from typing import Any, Dict
 from transformers.optimization import get_inverse_sqrt_schedule
 from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer

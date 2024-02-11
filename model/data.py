@@ -1,10 +1,10 @@
 from pathlib import Path
-import pytorch_lightning as pl
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from typing import Optional
 from transformers.tokenization_utils import PreTrainedTokenizer
 from torch import Tensor
+import lightning.pytorch as pl
 
 from model.utils import TASK_PREFIX
 
