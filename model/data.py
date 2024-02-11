@@ -6,6 +6,8 @@ from typing import Optional
 from transformers.tokenization_utils import PreTrainedTokenizer
 from torch import Tensor
 
+from model.utils import TASK_PREFIX
+
 
 def generate_full_prompt(instruction: str, prompt: str) -> str:
     """
@@ -83,7 +85,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
 
         if self.sequence_to_sequence:
             inputs = [
-                "Expand the following prompt to add more detail: " + doc
+                TASK_PREFIX + doc
                 for doc in examples["Prompt"]
             ]
 

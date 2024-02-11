@@ -1,5 +1,5 @@
 from transformers.optimization import get_inverse_sqrt_schedule
-from model.params import HyperParams
+from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
 

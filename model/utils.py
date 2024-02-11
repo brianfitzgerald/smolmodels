@@ -1,3 +1,4 @@
+TASK_PREFIX = "Expand the following prompt to add more detail: "
 
 class HyperParams:
     max_seq_length: int = 256
