@@ -4,7 +4,6 @@ import os
 import platform
 import requests
 import torch.nn.functional as F
-from transformers import AutoTokenizer
 from pathlib import Path
 import sys
 import pickle
@@ -76,25 +75,6 @@ def get_perplexity(logits: torch.Tensor, input_ids: torch.Tensor):
     loss = F.cross_entropy(logits.view(-1, logits.size(-1)), input_ids.view(-1))
     perp = torch.exp(loss)
     return perp.item()
-
-
-def get_completion_samples(
-    logits: torch.Tensor,
-    tokenizer: AutoTokenizer,
-    input_ids: torch.Tensor,
-):
-    probs = F.softmax(logits, dim=1)
-    token_index = torch.argmax(probs, dim=2)
-    # iterate over batch
-    completions = []
-    for i in range(token_index.shape[0]):
-        sample_completion = tokenizer.decode(token_index[i])  # type: ignore
-        sample_prompt = tokenizer.decode(input_ids[i])  # type: ignore
-        print("prompt:\n", sample_prompt, "\ncompletion:\n", sample_completion)
-        completions.append((sample_prompt, sample_completion))
-
-    log_dict = {"completions": completions}
-    return log_dict
 
 
 def print_trainable_parameters(model):
@@ -311,7 +291,6 @@ class incremental_save:
 
     def __exit__(self, type, value, traceback):
         self.zipfile.write_end_of_file()
-
 
 
 def weight_sum(model: nn.Module, name: Optional[str] = None):
