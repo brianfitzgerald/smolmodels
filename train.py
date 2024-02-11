@@ -18,37 +18,12 @@ print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
+from lightning.pytorch.callbacks import TQDMProgressBar
+
 
 print("Loading dependencies - project...")
 from model.data import PromptUpsampleDataModule
-from model.utils import HyperParams
-
-
-def calculate_bpc(model, evaluation_data):
-    """
-    Bits per character
-    """
-    total_loss = 0.0
-    total_characters = 0
-
-    model.eval()
-
-    with torch.no_grad():
-        for input_seq, target_seq in evaluation_data:
-            input_seq = torch.tensor(input_seq).unsqueeze(0)
-            target_seq = torch.tensor(target_seq).unsqueeze(0)
-
-            output_seq = model(input_seq)
-            output_seq = output_seq.squeeze(0)
-
-            loss = F.cross_entropy(output_seq, target_seq)
-            total_loss += loss.item()
-            total_characters += target_seq.size(1)
-
-    average_loss = total_loss / total_characters
-    bpc = average_loss / torch.log(torch.tensor(2.0))
-
-    return bpc.item()
+from model.utils import HyperParams, compute_metrics
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -99,11 +74,14 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
             table_columns.append(decoded)
 
+        metrics = compute_metrics(table_columns[3], table_columns[4])
+
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
             self.wandb_logger.log_table("Validation Samples", columns, table_rows)
+            self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
@@ -131,23 +109,26 @@ class ModelChoice(Enum):
 
 # https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
 class HfModelCheckpoint(ModelCheckpoint):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.FILE_EXTENSION = ""
+
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         super()._save_checkpoint(trainer, filepath)
-        hf_save_dir = filepath + ".dir"
-        print(f"Saving model to {hf_save_dir}")
+        print(f"Saving checkpoint at {filepath}")
         if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pretrained(hf_save_dir)
-            trainer.lightning_module.tokenizer.save_pretrained(hf_save_dir)
+            trainer.lightning_module.model.save_pretrained(filepath)
+            trainer.lightning_module.tokenizer.save_pretrained(filepath)
 
     # https://github.com/Lightning-AI/lightning/pull/16067
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         super()._remove_checkpoint(trainer, filepath)
-        print(f"Removing model from {filepath}")
-        hf_save_dir = filepath + ".dir"
+        print(f"Removing checkpoint at {filepath}")
         if trainer.is_global_zero:
-            fs, _ = url_to_fs(hf_save_dir)
-            if fs.exists(hf_save_dir):
-                fs.rm(hf_save_dir, recursive=True)
+            fs, _ = url_to_fs(filepath)
+            if fs.exists(filepath):
+                fs.rm(filepath, recursive=True)
 
 
 def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
@@ -189,13 +170,15 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         mode="min",
     )
 
+    progress_bar_callback = TQDMProgressBar(refresh_rate=10)
+
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
         val_check_interval=0.1,
-        callbacks=[sample_callback, checkpoint_callback],
+        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
     )
     trainer.fit(model, datamodule=dm)
