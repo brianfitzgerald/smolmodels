@@ -19,7 +19,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 print("Loading dependencies - project...")
 from model.data import PromptUpsampleDataModule
-from model.params import HyperParams
+from model.utils import HyperParams
 
 
 def calculate_bpc(model, evaluation_data):
