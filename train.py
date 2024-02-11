@@ -129,10 +129,12 @@ class ModelChoice(Enum):
     LLAMA = "llama"
 
 
+# https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
 class HfModelCheckpoint(ModelCheckpoint):
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         super()._save_checkpoint(trainer, filepath)
         hf_save_dir = filepath + ".dir"
+        print(f"Saving model to {hf_save_dir}")
         if trainer.is_global_zero:
             trainer.lightning_module.model.save_pretrained(hf_save_dir)
             trainer.lightning_module.tokenizer.save_pretrained(hf_save_dir)
@@ -140,6 +142,7 @@ class HfModelCheckpoint(ModelCheckpoint):
     # https://github.com/Lightning-AI/lightning/pull/16067
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         super()._remove_checkpoint(trainer, filepath)
+        print(f"Removing model from {filepath}")
         hf_save_dir = filepath + ".dir"
         if trainer.is_global_zero:
             fs, _ = url_to_fs(hf_save_dir)
