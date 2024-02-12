@@ -177,7 +177,7 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
-        val_check_interval=0.1,
+        # val_check_interval=0.1,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
     )
