@@ -1,9 +1,11 @@
+from typing import Any, Dict
 from transformers.optimization import get_inverse_sqrt_schedule
-from model.params import HyperParams
+from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
+from torchmetrics.text.perplexity import Perplexity
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
@@ -22,6 +24,7 @@ class T5FineTuner(pl.LightningModule):
         self.ckpt_name = ckpt_name
         self.train_steps = 0
         self.save_hyperparameters()
+        self.perplexity = Perplexity(ignore_index=self.tokenizer.pad_token_id)
 
     def forward(
         self,
@@ -31,13 +34,12 @@ class T5FineTuner(pl.LightningModule):
         labels: Tensor,
     ):
         labels[labels[:, :] == self.tokenizer.pad_token_id] = -100
-        out = self.model(
+        return self.model(
             input_ids,
             attention_mask=attention_mask,
             decoder_attention_mask=decoder_attention_mask,
             labels=labels,
         )
-        return out
 
     def _step(self, batch):
         outputs = self(
@@ -46,20 +48,40 @@ class T5FineTuner(pl.LightningModule):
             decoder_attention_mask=batch["decoder_attention_mask"],
             labels=batch["labels"],
         )
+        perplexity = self.perplexity(outputs.logits, batch["labels"])
 
-        return outputs.loss
+        return outputs.loss, perplexity
 
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        loss, perplexity = self._step(batch)
+        self.log(
+            "train_ppl",
+            perplexity,
+            on_step=True,
+            on_epoch=True,
+            logger=True,
+        )
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        loss, perplexity = self._step(batch)
         self.log(
-            "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+            "val_ppl",
+            perplexity,
+            on_step=True,
+            on_epoch=True,
+            logger=True,
+        )
+        self.log(
+            "val_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
         )
         return {"val_loss": loss}
 

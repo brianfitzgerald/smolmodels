@@ -1,8 +1,8 @@
 from transformers.optimization import get_cosine_schedule_with_warmup
-from model.params import HyperParams
+from model.utils import HyperParams
 from torch.optim import AdamW
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.tokenization_llama import LlamaTokenizer

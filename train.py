@@ -2,51 +2,28 @@ print("Loading dependencies - torch...")
 import torch
 import torch.nn.functional as F
 from typing import Optional
-import fire
+from fire import Fire
 from tabulate import tabulate
 import pandas as pd
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from enum import Enum
 from pathlib import Path
 import shutil
+from fsspec.core import url_to_fs
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
 
 print("Loading dependencies - lightning...")
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+import lightning.pytorch as pl
+from lightning.pytorch.callbacks import TQDMProgressBar
+
 
 print("Loading dependencies - project...")
 from model.data import PromptUpsampleDataModule
-from model.params import HyperParams
-
-
-def calculate_bpc(model, evaluation_data):
-    """
-    Bits per character
-    """
-    total_loss = 0.0
-    total_characters = 0
-
-    model.eval()
-
-    with torch.no_grad():
-        for input_seq, target_seq in evaluation_data:
-            input_seq = torch.tensor(input_seq).unsqueeze(0)
-            target_seq = torch.tensor(target_seq).unsqueeze(0)
-
-            output_seq = model(input_seq)
-            output_seq = output_seq.squeeze(0)
-
-            loss = F.cross_entropy(output_seq, target_seq)
-            total_loss += loss.item()
-            total_characters += target_seq.size(1)
-
-    average_loss = total_loss / total_characters
-    bpc = average_loss / torch.log(torch.tensor(2.0))
-
-    return bpc.item()
+from model.utils import HyperParams, compute_metrics
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -97,16 +74,22 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
             table_columns.append(decoded)
 
+        metrics = compute_metrics(table_columns[3], table_columns[4])
+
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
             self.wandb_logger.log_table("Validation Samples", columns, table_rows)
+            self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
         rows_df.to_csv(
-            self.log_dir / f"{run_name}_samples.csv", mode="a", header=False, index=False
+            self.log_dir / f"{run_name}_samples.csv",
+            mode="a",
+            header=False,
+            index=False,
         )
 
         new_rows = tabulate(
@@ -122,6 +105,30 @@ class LogPredictionSamplesCallback(pl.Callback):
 class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
+
+
+# https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
+class HfModelCheckpoint(ModelCheckpoint):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.FILE_EXTENSION = ""
+
+    def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._save_checkpoint(trainer, filepath)
+        print(f"Saving checkpoint at {filepath}")
+        if trainer.is_global_zero:
+            trainer.lightning_module.model.save_pretrained(filepath)
+            trainer.lightning_module.tokenizer.save_pretrained(filepath)
+
+    # https://github.com/Lightning-AI/lightning/pull/16067
+    def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._remove_checkpoint(trainer, filepath)
+        print(f"Removing checkpoint at {filepath}")
+        if trainer.is_global_zero:
+            fs, _ = url_to_fs(filepath)
+            if fs.exists(filepath):
+                fs.rm(filepath, recursive=True)
 
 
 def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
@@ -149,23 +156,33 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         model.tokenizer,
         batch_size=params.train_batch_size,
         max_token_length=params.max_seq_length,
-        sequence_to_sequence=is_sequence_to_sequence
+        sequence_to_sequence=is_sequence_to_sequence,
     )
+
+    sample_callback = LogPredictionSamplesCallback(
+        model.tokenizer, wandb_logger, params.max_seq_length
+    )
+
+    checkpoint_callback = HfModelCheckpoint(
+        dirpath="checkpoints",
+        filename="best_model",
+        monitor="val_loss",
+        mode="min",
+    )
+
+    progress_bar_callback = TQDMProgressBar(refresh_rate=10)
 
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
         precision=16 if params.fp_16 else 32,
         gradient_clip_val=params.max_grad_norm,
-        val_check_interval=0.1,
-        callbacks=[
-            LogPredictionSamplesCallback(
-                model.tokenizer, wandb_logger, params.max_seq_length
-            )
-        ],
+        # val_check_interval=0.1,
+        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
     )
     trainer.fit(model, datamodule=dm)
 
 
-fire.Fire(main)
+if __name__ == "__main__":
+    Fire(main)
