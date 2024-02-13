@@ -6,7 +6,7 @@ wandb
 fire
 tensorboard
 safetensors
-huggingface_hub
+huggingface_hub==0.19.4
 sentencepiece
 lightning==2.2.0
 torchmetrics==1.2.1

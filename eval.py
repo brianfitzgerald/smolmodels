@@ -1,7 +1,7 @@
 print("Loading dependencies...")
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
-from huggingface_hub import login
+from huggingface_hub import login, HfApi
 import os
 from dotenv import load_dotenv
 
@@ -30,8 +30,16 @@ def main(
         token = os.getenv("HF_TOKEN")
         print(f"Logging in with token: {token}")
         login(token=token, add_to_git_credential=True)
+        hf_api = HfApi(token=token)
+        print("Uploading model card...")
+        hf_api.upload_file(
+            path_or_fileobj="MODEL_CARD.md",
+            path_in_repo="README.md",
+            repo_id="roborovski/superprompt-v1",
+            repo_type="model"
+        )
 
-        print("Uploading to HuggingFace...")
+        print("Uploading model...")
         model.push_to_hub("superprompt-v1")
         return
 
