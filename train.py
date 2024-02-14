@@ -74,14 +74,14 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
             table_columns.append(decoded)
 
-        metrics = compute_metrics(table_columns[3], table_columns[4])
+        # metrics = compute_metrics(table_columns[3], table_columns[4])
 
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
             self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-            self.wandb_logger.log_metrics(metrics)
+            # self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
@@ -139,7 +139,7 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
     if model_choice == ModelChoice.LLAMA.value:
         model = LlamaFineTuner(params, "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
     elif model_choice == ModelChoice.T5.value:
-        model = T5FineTuner(params, "google/flan-t5-small")
+        model = T5FineTuner(params, "google/t5-efficient-tiny")
     assert model
 
     wandb_logger = None
