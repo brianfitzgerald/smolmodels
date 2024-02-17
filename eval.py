@@ -8,6 +8,7 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 import torch
 from PIL import Image
 from pathlib import Path
+import shutil
 
 
 from model.utils import TASK_PREFIX
@@ -15,7 +16,7 @@ import pandas as pd
 from fire import Fire
 
 
-def format_filename(string, limit=50):
+def format_filename(string, limit=20):
     result = string.lower().replace(" ", "_")
     result = "".join(char if char.isalnum() or char == "_" else "" for char in result)
     result = result[:limit]
@@ -36,15 +37,18 @@ def main(
     )
 
     Path("samples").mkdir(exist_ok=True)
+    shutil.rmtree("samples")
+    Path("samples").mkdir(exist_ok=True)
 
     drawbench_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
     if generate_samples:
-        pipe = DiffusionPipeline.from_pretrained(
+        pipe: DiffusionPipeline = DiffusionPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0",
             torch_dtype=torch.float16,
             use_safetensors=True,
             variant="fp16",
         )
+        pipe = pipe.to("cuda")
 
     if upload_to_hf:
         file_dir = os.path.dirname(os.path.abspath(__file__))
@@ -90,7 +94,7 @@ def main(
                     image: Image.Image = pipe(txt).images[0]  # type: ignore
                     prompt_fmt = format_filename(txt)
                     label = "prompt" if k == 0 else "upsampled"
-                    image.save(f"samples/{i}_{j}_{prompt_fmt}_{label}.png")
+                    image.save(f"samples/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
 
 
 if __name__ == "__main__":
