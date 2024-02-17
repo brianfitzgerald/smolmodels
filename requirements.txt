@@ -18,3 +18,4 @@ vllm==0.2.7
 fsspec==2023.10.0
 nltk==3.8.1
 diffusers==0.26.3
+accelerate
