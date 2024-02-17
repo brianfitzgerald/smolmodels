@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from typing import Optional, List, Dict
 from transformers.tokenization_utils import PreTrainedTokenizer
 import lightning.pytorch as pl
-from model.utils import IGNORE_TOKEN_INDEX, create_and_clear_directory
+from model.utils import IGNORE_TOKEN_INDEX, create_and_clear_directory, FineTunerDataset
 import os
 import re
 import torch
@@ -43,20 +43,14 @@ def chatml_to_conversation(conversation: str) -> List[Dict]:
     return conversation_steps
 
 
-class FunctionCallingDataModule(pl.LightningDataModule):
+class FunctionCallingDataModule(FineTunerDataset):
     def __init__(
         self,
         batch_size: int,
         tokenizer: PreTrainedTokenizer,
         max_token_length: int,
     ):
-        super().__init__()
-
-        self.train_dataset = None
-        self.val_dataset = None
-        self.batch_size = batch_size
-        self.tokenizer = tokenizer
-        self.max_token_length = max_token_length
+        super().__init__(batch_size, tokenizer, max_token_length)
 
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
@@ -123,9 +117,3 @@ class FunctionCallingDataModule(pl.LightningDataModule):
             "attention_mask": attention_mask,
             "labels": labels,
         }
-
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=35)  # type: ignore
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=35)  # type: ignore

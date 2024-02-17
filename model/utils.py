@@ -3,6 +3,9 @@ from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
 import shutil
+import lightning.pytorch as pl
+from transformers.tokenization_utils import PreTrainedTokenizer
+from torch.utils.data import DataLoader
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 IGNORE_TOKEN_INDEX = -100
@@ -23,6 +26,27 @@ class HyperParams:
     seed: int = 42
     weight_decay: float = 0.0
 
+
+class FineTunerDataset(pl.LightningDataModule):
+    def __init__(
+        self,
+        batch_size: int,
+        tokenizer: PreTrainedTokenizer,
+        max_token_length: int,
+    ):
+        super().__init__()
+
+        self.train_dataset = None
+        self.val_dataset = None
+        self.batch_size = batch_size
+        self.tokenizer = tokenizer
+        self.max_token_length = max_token_length
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=35)  # type: ignore
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=35)  # type: ignore
 
 def compute_metrics(inputs: List[str], generated: List[str]):
     rouge = ROUGEScore()
