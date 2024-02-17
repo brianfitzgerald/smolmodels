@@ -1,10 +1,11 @@
 from typing import List
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
+from pathlib import Path
+import shutil
 
-from torch import Tensor
-
-TASK_PREFIX = "Expand the following prompt to add more detail: "
+PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
+IGNORE_TOKEN_INDEX = -100
 
 
 class HyperParams:
@@ -36,3 +37,12 @@ def compute_metrics(inputs: List[str], generated: List[str]):
         "rougeL": rouge_score["rougeL"].item(),
         "bleu": blue_score["bleu"].item(),
     }
+
+
+def create_and_clear_directory(directory: str):
+    """
+    Create a directory and parents if it doesn't exist, and clear it if it does.
+    """
+    Path(directory).mkdir(exist_ok=True)
+    shutil.rmtree(directory)
+    Path(directory).mkdir(exist_ok=True)

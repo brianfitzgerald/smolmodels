@@ -6,7 +6,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from torch import Tensor
 import lightning.pytorch as pl
 
-from model.utils import TASK_PREFIX
+from model.utils import PROMPT_EXPANSION_TASK_PREFIX, create_and_clear_directory
 
 
 def generate_full_prompt(instruction: str, prompt: str) -> str:
@@ -51,10 +51,9 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
-        cache_dir = "dataset_cache_parti"
-        Path(cache_dir).mkdir(exist_ok=True)
+        cache_dir = "dataset_caches/parti"
+        create_and_clear_directory(cache_dir)
 
-        # Tokenization
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,
             batched=True,
@@ -85,7 +84,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
 
         if self.sequence_to_sequence:
             inputs = [
-                TASK_PREFIX + doc
+                PROMPT_EXPANSION_TASK_PREFIX + doc
                 for doc in examples["Prompt"]
             ]
 
