@@ -1,12 +1,11 @@
 from pathlib import Path
 from datasets import load_dataset
-from torch.utils.data import DataLoader
 from typing import Optional
 from transformers.tokenization_utils import PreTrainedTokenizer
 from torch import Tensor
 import lightning.pytorch as pl
 
-from model.utils import PROMPT_EXPANSION_TASK_PREFIX, create_and_clear_directory
+from model.utils import PROMPT_EXPANSION_TASK_PREFIX, create_and_clear_directory, FineTunerDataset
 
 
 def generate_full_prompt(instruction: str, prompt: str) -> str:
@@ -21,23 +20,17 @@ def generate_full_prompt(instruction: str, prompt: str) -> str:
     )
 
 
-class PromptUpsampleDataModule(pl.LightningDataModule):
+class PromptUpsampleDataModule(FineTunerDataset):
     def __init__(
         self,
         tokenizer: PreTrainedTokenizer,
         batch_size: int,
         max_token_length: int,
-        sequence_to_sequence: bool = False,
     ):
-        super().__init__()
-        self.tokenizer = tokenizer
-        self.batch_size = batch_size
-        self.max_token_length = max_token_length
-        self.train_dataset = None
-        self.val_dataset = None
-        self.sequence_to_sequence = sequence_to_sequence
+        super().__init__(batch_size, tokenizer, max_token_length)
+        self.sequence_to_sequence = True
+        self.load_local = False
         self.mask_inputs = True
-        self.load_local = True
 
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
@@ -82,81 +75,31 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
     def prepare_sample(self, examples: dict):
         processed_batch = {}
 
-        if self.sequence_to_sequence:
-            inputs = [
-                PROMPT_EXPANSION_TASK_PREFIX + doc
-                for doc in examples["Prompt"]
-            ]
+        inputs = [
+            PROMPT_EXPANSION_TASK_PREFIX + doc
+            for doc in examples["Prompt"]
+        ]
 
-            inputs_tokenized = self.tokenizer(
-                inputs,
-                max_length=self.max_token_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            )
+        inputs_tokenized = self.tokenizer(
+            inputs,
+            max_length=self.max_token_length,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt",
+        )
 
-            labels_tokenized = self.tokenizer(
-                text_target=examples["Upsampled"],
-                max_length=self.max_token_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            )
+        labels_tokenized = self.tokenizer(
+            text_target=examples["Upsampled"],
+            max_length=self.max_token_length,
+            truncation=True,
+            padding="max_length",
+            return_tensors="pt",
+        )
 
-            return {
-                "input_ids": inputs_tokenized["input_ids"],
-                "attention_mask": inputs_tokenized["attention_mask"],
-                "decoder_attention_mask": labels_tokenized["attention_mask"],
-                "labels": labels_tokenized["input_ids"],
-            }
-
-        else:
-            prompts, outputs = examples["Prompt"], examples["Upsampled"]
-
-            instruction = "Expand the following description:"
-            full_prompts = [
-                generate_full_prompt(instruction, prompt) for prompt in prompts
-            ]
-
-            full_prompts_and_outputs = [
-                f"{prompt}\n\n{upsampled}"
-                for prompt, upsampled in zip(full_prompts, outputs)
-            ]
-
-            full_prompts_encoded = self.tokenizer(
-                full_prompts,
-                max_length=self.max_token_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            )
-
-            full_prompts_and_outputs_encoded = self.tokenizer(
-                full_prompts_and_outputs,
-                max_length=self.max_token_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            )
-
-            labels: Tensor = full_prompts_and_outputs_encoded["input_ids"]  # type: ignore
-            input_ids: Tensor = full_prompts_and_outputs_encoded["input_ids"].clone()  # type: ignore
-            if self.mask_inputs:
-                labels.masked_fill_(full_prompts_encoded["attention_mask"] == 1, -100)  # type: ignore
-            return {
-                "input_ids": input_ids,
-                "attention_mask": full_prompts_and_outputs_encoded["attention_mask"],
-                "decoder_attention_mask": full_prompts_and_outputs_encoded[
-                    "attention_mask"
-                ],
-                "labels": labels,
-            }
-
+        return {
+            "input_ids": inputs_tokenized["input_ids"],
+            "attention_mask": inputs_tokenized["attention_mask"],
+            "decoder_attention_mask": labels_tokenized["attention_mask"],
+            "labels": labels_tokenized["input_ids"],
+        }
         return processed_batch
-
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=35)  # type: ignore
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=35)  # type: ignore

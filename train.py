@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 import shutil
 from fsspec.core import url_to_fs
+from dataclasses import dataclass
+from dataset.function_calling import FunctionCallingDataModule
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
@@ -21,7 +23,7 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
-from model.utils import HyperParams
+from model.utils import HyperParams, FineTunerDataset
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -129,33 +131,35 @@ class HfModelCheckpoint(ModelCheckpoint):
                 fs.rm(filepath, recursive=True)
 
 
-def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
+@dataclass
+class ModelConfig:
+    model: type[pl.LightningModule]
+    data_module: type[FineTunerDataset]
+
+
+CONFIGS = {
+    "fn_calling": ModelConfig(LlamaFineTuner, FunctionCallingDataModule),
+    "prompt_to_prompt": ModelConfig(T5FineTuner, PromptUpsampleDataModule),
+}
+
+
+def main(wandb: bool = False, config: str = "fn_calling"):
     params = HyperParams()
     loggers = []
 
-    model = None
-    if model_choice == ModelChoice.LLAMA.value:
-        model = LlamaFineTuner(params, "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-    elif model_choice == ModelChoice.T5.value:
-        model = T5FineTuner(params, "google/t5-efficient-tiny")
-    assert model
+    model_config = CONFIGS[config]
+    model = model_config.model(params)
+    data_module = model_config.data_module(
+        params.train_batch_size, model.tokenizer, params.max_seq_length
+    )
 
     wandb_logger = None
 
     if wandb:
-        project_name = f"{model_choice}_prompt_upsample"
+        project_name = f"{config}_prompt_upsample"
         wandb_logger = WandbLogger(project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
-
-    is_sequence_to_sequence = model_choice == ModelChoice.T5.value
-
-    dm = PromptUpsampleDataModule(
-        model.tokenizer,
-        batch_size=params.train_batch_size,
-        max_token_length=params.max_seq_length,
-        sequence_to_sequence=is_sequence_to_sequence,
-    )
 
     sample_callback = LogPredictionSamplesCallback(
         model.tokenizer, wandb_logger, params.max_seq_length
@@ -179,7 +183,7 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
     )
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=data_module)
 
 
 if __name__ == "__main__":
