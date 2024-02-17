@@ -51,7 +51,7 @@ class PromptUpsampleDataModule(pl.LightningDataModule):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
-        cache_dir = "dataset_cache"
+        cache_dir = "dataset_cache_parti"
         Path(cache_dir).mkdir(exist_ok=True)
 
         # Tokenization

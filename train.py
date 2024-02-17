@@ -1,6 +1,4 @@
 print("Loading dependencies - torch...")
-import torch
-import torch.nn.functional as F
 from typing import Optional
 from fire import Fire
 from tabulate import tabulate
@@ -22,8 +20,8 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 
 print("Loading dependencies - project...")
-from model.data import PromptUpsampleDataModule
-from model.utils import HyperParams, compute_metrics
+from dataset.parti import PromptUpsampleDataModule
+from model.utils import HyperParams
 
 
 class LogPredictionSamplesCallback(pl.Callback):
