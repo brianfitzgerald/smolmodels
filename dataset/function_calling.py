@@ -59,7 +59,7 @@ class FunctionCallingDataModule(FineTunerDataset):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
-        cache_dir = "dataset_cache_function_calling"
+        cache_dir = "dataset_cache/function_calling"
         create_and_clear_directory(cache_dir)
         cpu_count = os.cpu_count() or 16
 
@@ -72,7 +72,7 @@ class FunctionCallingDataModule(FineTunerDataset):
             batched=True,
             load_from_cache_file=True,
             num_proc=cpu_count,
-            cache_file_name=f"{cache_dir}/training",
+            cache_file_name=f"{cache_dir}/training.parquet",
         )
 
         self.val_dataset = self.val_dataset.map(
@@ -80,7 +80,7 @@ class FunctionCallingDataModule(FineTunerDataset):
             batched=True,
             load_from_cache_file=True,
             num_proc=cpu_count,
-            cache_file_name=f"{cache_dir}/training",
+            cache_file_name=f"{cache_dir}/validation.parquet",
         )
 
     def prepare_sample(self, examples: dict):
