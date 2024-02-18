@@ -23,7 +23,7 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
-from model.utils import HyperParams, FineTunerDataset
+from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID, HyperParams, FineTunerDataset
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -55,10 +55,10 @@ class LogPredictionSamplesCallback(pl.Callback):
             return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-        labels[labels[:, :] == -100] = pl_module.model.config.pad_token_id
+        labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
         out = pl_module.model.generate(
             input_ids,
-            max_new_tokens=self.max_new_tokens,
+            max_length=self.max_new_tokens,
         )
 
         n = len(input_ids)
