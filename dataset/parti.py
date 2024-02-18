@@ -5,7 +5,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from torch import Tensor
 import lightning.pytorch as pl
 
-from model.utils import PROMPT_EXPANSION_TASK_PREFIX, create_and_clear_directory, FineTunerDataset
+from model.utils import PROMPT_EXPANSION_TASK_PREFIX, ensure_directory, FineTunerDataset
 
 
 def generate_full_prompt(instruction: str, prompt: str) -> str:
@@ -45,7 +45,7 @@ class PromptUpsampleDataModule(FineTunerDataset):
         self.val_dataset = dataset["test"]
 
         cache_dir = "dataset_caches/parti"
-        create_and_clear_directory(cache_dir)
+        ensure_directory(cache_dir)
 
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,

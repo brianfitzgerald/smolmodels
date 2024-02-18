@@ -1,7 +1,7 @@
 from datasets import load_dataset
 from typing import Optional, List, Dict
 from transformers.tokenization_utils import PreTrainedTokenizer
-from model.utils import IGNORE_TOKEN_INDEX, create_and_clear_directory, FineTunerDataset
+from model.utils import IGNORE_TOKEN_INDEX, ensure_directory, FineTunerDataset
 import os
 import re
 import torch
@@ -59,7 +59,7 @@ class FunctionCallingDataModule(FineTunerDataset):
         self.val_dataset = dataset["test"]
 
         cache_dir = "dataset_cache/function_calling"
-        create_and_clear_directory(cache_dir)
+        ensure_directory(cache_dir, clear=False)
         cpu_count = min(len(os.sched_getaffinity(0)), 16)
         # cpu_count = 1
 
