@@ -67,6 +67,6 @@ def create_and_clear_directory(directory: str):
     """
     Create a directory and parents if it doesn't exist, and clear it if it does.
     """
-    Path(directory).mkdir(exist_ok=True)
+    Path(directory).mkdir(exist_ok=True, parents=True)
     shutil.rmtree(directory)
-    Path(directory).mkdir(exist_ok=True)
+    Path(directory).mkdir(exist_ok=True, parents=True)
