@@ -1,13 +1,12 @@
 from datasets import load_dataset
-from torch.utils.data import DataLoader
 from typing import Optional, List, Dict
 from transformers.tokenization_utils import PreTrainedTokenizer
-import lightning.pytorch as pl
 from model.utils import IGNORE_TOKEN_INDEX, create_and_clear_directory, FineTunerDataset
 import os
 import re
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 
 ROLE_DICT = {
     "ASSISTANT": "assistant",
@@ -62,7 +61,7 @@ class FunctionCallingDataModule(FineTunerDataset):
         cache_dir = "dataset_cache/function_calling"
         create_and_clear_directory(cache_dir)
         cpu_count = min(len(os.sched_getaffinity(0)), 16)
-        cpu_count = 1
+        # cpu_count = 1
 
         # Set format for PyTorch
         self.train_dataset.set_format(type="torch")
@@ -106,22 +105,39 @@ class FunctionCallingDataModule(FineTunerDataset):
 
             prompt_tokenized = self.tokenizer(
                 prompt_str,
+                max_length=self.max_token_length,
+                truncation=True,
                 return_tensors="pt",
             )
 
             expected_output_tokenized = self.tokenizer(
                 expected_output_str,
+                max_length=self.max_token_length,
+                truncation=True,
                 return_tensors="pt",
             )
 
-            prompt_input_ids: Tensor = prompt_tokenized["input_ids"].squeeze() # type: ignore
-            expected_output_input_ids: Tensor = expected_output_tokenized["input_ids"].squeeze() # type: ignore
+            prompt_input_ids: Tensor = prompt_tokenized["input_ids"].squeeze()  # type: ignore
+            pad_amt = max(0, self.max_token_length - prompt_input_ids.shape[0])
+
+            attention_mask: Tensor = prompt_tokenized["attention_mask"].squeeze()  # type: ignore
+            attention_mask = F.pad(attention_mask, (0, pad_amt), value=0)
+
+            expected_output_input_ids: Tensor = expected_output_tokenized["input_ids"].squeeze()  # type: ignore
+
             tokenized_prompt_len = prompt_input_ids.shape[0]
             ignore_labels = torch.full((tokenized_prompt_len,), IGNORE_TOKEN_INDEX)
+            label = torch.cat([ignore_labels, expected_output_input_ids], dim=0)
+            label_pad_amt = max(0, self.max_token_length - label.shape[0])
+            label = F.pad(label, (0, label_pad_amt), value=0)
+            label = label[: self.max_token_length]
+
+            # pad after concatting to the labels
+            prompt_input_ids = F.pad(prompt_input_ids, (0, pad_amt), value=0)
 
             input_ids.append(prompt_input_ids)
-            attention_masks.append(prompt_tokenized["attention_mask"])
-            labels.append(torch.cat([ignore_labels, expected_output_input_ids], dim=0))  # type: ignore
+            attention_masks.append(attention_mask)
+            labels.append(label)  # type: ignore
 
         labels_t = torch.stack(labels)
         input_ids_t = torch.stack(input_ids)

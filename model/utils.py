@@ -12,7 +12,7 @@ IGNORE_TOKEN_INDEX = -100
 
 
 class HyperParams:
-    max_seq_length: int = 256
+    max_seq_length: int = 2048
     learning_rate: float = 1e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
