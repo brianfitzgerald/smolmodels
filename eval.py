@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 
 
-from model.utils import TASK_PREFIX
+from model.utils import PROMPT_EXPANSION_TASK_PREFIX
 import pandas as pd
 from fire import Fire
 
@@ -36,9 +36,6 @@ def main(
         checkpoint_dir
     )
 
-    Path("samples").mkdir(exist_ok=True)
-    shutil.rmtree("samples")
-    Path("samples").mkdir(exist_ok=True)
 
     drawbench_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
     if generate_samples:
@@ -73,7 +70,7 @@ def main(
 
         chunk = drawbench_df[i : i + batch_size]
 
-        prompts_with_prefix = [TASK_PREFIX + sentence for sentence in chunk["Prompt"]]
+        prompts_with_prefix = [PROMPT_EXPANSION_TASK_PREFIX + sentence for sentence in chunk["Prompt"]]
 
         inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True)
 
