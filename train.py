@@ -1,6 +1,4 @@
 print("Loading dependencies - torch...")
-import torch
-import torch.nn.functional as F
 from typing import Optional
 from fire import Fire
 from tabulate import tabulate
@@ -10,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 import shutil
 from fsspec.core import url_to_fs
+from dataclasses import dataclass
+from dataset.function_calling import FunctionCallingDataModule
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
@@ -22,8 +22,8 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 
 print("Loading dependencies - project...")
-from model.data import PromptUpsampleDataModule
-from model.utils import HyperParams, compute_metrics
+from dataset.parti import PromptUpsampleDataModule
+from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID, HyperParams, FineTunerDataset
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -55,10 +55,10 @@ class LogPredictionSamplesCallback(pl.Callback):
             return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-        labels[labels[:, :] == -100] = pl_module.model.config.pad_token_id
+        labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
         out = pl_module.model.generate(
             input_ids,
-            max_new_tokens=self.max_new_tokens,
+            max_length=self.max_new_tokens,
         )
 
         n = len(input_ids)
@@ -131,33 +131,35 @@ class HfModelCheckpoint(ModelCheckpoint):
                 fs.rm(filepath, recursive=True)
 
 
-def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
+@dataclass
+class ModelConfig:
+    model: type[pl.LightningModule]
+    data_module: type[FineTunerDataset]
+
+
+CONFIGS = {
+    "fn_calling": ModelConfig(LlamaFineTuner, FunctionCallingDataModule),
+    "prompt_to_prompt": ModelConfig(T5FineTuner, PromptUpsampleDataModule),
+}
+
+
+def main(wandb: bool = False, config: str = "fn_calling"):
     params = HyperParams()
     loggers = []
 
-    model = None
-    if model_choice == ModelChoice.LLAMA.value:
-        model = LlamaFineTuner(params, "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-    elif model_choice == ModelChoice.T5.value:
-        model = T5FineTuner(params, "google/t5-efficient-tiny")
-    assert model
+    model_config = CONFIGS[config]
+    model = model_config.model(params)
+    data_module = model_config.data_module(
+        params.train_batch_size, model.tokenizer, params.max_seq_length
+    )
 
     wandb_logger = None
 
     if wandb:
-        project_name = f"{model_choice}_prompt_upsample"
+        project_name = f"{config}_prompt_upsample"
         wandb_logger = WandbLogger(project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
-
-    is_sequence_to_sequence = model_choice == ModelChoice.T5.value
-
-    dm = PromptUpsampleDataModule(
-        model.tokenizer,
-        batch_size=params.train_batch_size,
-        max_token_length=params.max_seq_length,
-        sequence_to_sequence=is_sequence_to_sequence,
-    )
 
     sample_callback = LogPredictionSamplesCallback(
         model.tokenizer, wandb_logger, params.max_seq_length
@@ -175,13 +177,13 @@ def main(wandb: bool = False, model_choice: str = ModelChoice.T5.value):
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
-        precision=16 if params.fp_16 else 32,
+        precision="16",
         gradient_clip_val=params.max_grad_norm,
         # val_check_interval=0.1,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
     )
-    trainer.fit(model, datamodule=dm)
+    trainer.fit(model, datamodule=data_module)
 
 
 if __name__ == "__main__":

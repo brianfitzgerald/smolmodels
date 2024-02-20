@@ -9,7 +9,7 @@ from transformers.models.llama.tokenization_llama import LlamaTokenizer
 
 
 class LlamaFineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams, ckpt_name: str):
+    def __init__(self, params: HyperParams, ckpt_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"):
         super(LlamaFineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
@@ -34,6 +34,7 @@ class LlamaFineTuner(pl.LightningModule):
             attention_mask=batch["attention_mask"],
             labels=batch["labels"],
         )
+        print(f"Loss: {outputs.loss}")
 
         return outputs.loss
 
