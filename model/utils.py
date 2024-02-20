@@ -14,16 +14,15 @@ PAD_TOKEN_ID = 0
 
 class HyperParams:
     max_seq_length: int = 2048
-    learning_rate: float = 1e-4
+    learning_rate: float = 2e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
     train_batch_size: int = 2
     eval_batch_size: int = 2
     num_train_epochs: int = 25
-    gradient_accumulation_steps: int = 2
+    gradient_accumulation_steps: int = 4
     n_gpus: int = 1
-    fp_16: bool = True
-    max_grad_norm: float = 10.0
+    max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
 

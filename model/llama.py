@@ -34,6 +34,7 @@ class LlamaFineTuner(pl.LightningModule):
             attention_mask=batch["attention_mask"],
             labels=batch["labels"],
         )
+        print(f"Loss: {outputs.loss}")
 
         return outputs.loss
 

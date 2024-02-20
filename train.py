@@ -177,7 +177,7 @@ def main(wandb: bool = False, config: str = "fn_calling"):
     trainer = pl.Trainer(
         accumulate_grad_batches=params.gradient_accumulation_steps,
         max_epochs=params.num_train_epochs,
-        precision=16 if params.fp_16 else 32,
+        precision="16",
         gradient_clip_val=params.max_grad_norm,
         # val_check_interval=0.1,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
