@@ -21,7 +21,7 @@ def chatml_to_conversation(conversation: str) -> List[Dict]:
     """
     message_regex = r"(SYSTEM|USER|ASSISTANT):"
 
-    conversation = conversation.replace("<|endoftext|>", "").replace("\n", " ")
+    conversation = conversation.replace("<|endoftext|>", "").replace("\n", " ").replace("</s>", "").strip()
 
     conversation_steps = []
     user_and_assistant_messages = re.split(message_regex, conversation)
