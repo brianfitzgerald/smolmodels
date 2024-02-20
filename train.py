@@ -135,15 +135,23 @@ class HfModelCheckpoint(ModelCheckpoint):
 class ModelConfig:
     model: type[pl.LightningModule]
     data_module: type[FineTunerDataset]
+    wandb_project_name: str
 
 
 CONFIGS = {
-    "fn_calling": ModelConfig(LlamaFineTuner, FunctionCallingDataModule),
-    "prompt_to_prompt": ModelConfig(T5FineTuner, PromptUpsampleDataModule),
+    "fn_calling": ModelConfig(
+        LlamaFineTuner, FunctionCallingDataModule, "llama-function-calling"
+    ),
+    "prompt_upsample": ModelConfig(
+        T5FineTuner, PromptUpsampleDataModule, "t5-prompt-upsampling"
+    ),
+    "prompt_safety": ModelConfig(
+        T5FineTuner, PromptUpsampleDataModule, "t5-prompt-safety"
+    ),
 }
 
 
-def main(wandb: bool = False, config: str = "fn_calling"):
+def main(wandb: bool = False, config: str = "prompt_safety"):
     params = HyperParams()
     loggers = []
 
@@ -156,7 +164,7 @@ def main(wandb: bool = False, config: str = "fn_calling"):
     wandb_logger = None
 
     if wandb:
-        project_name = f"{config}_prompt_upsample"
+        project_name = model_config.wandb_project_name
         wandb_logger = WandbLogger(project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
