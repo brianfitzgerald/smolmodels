@@ -104,11 +104,11 @@ class PromptUpsampleDataModule(FineTunerDataset):
         }
 
 
-class SafetyFilterDataModule(PromptUpsampleDataModule):
+class PromptSafetyDataModule(PromptUpsampleDataModule):
     def __init__(
         self,
-        tokenizer: PreTrainedTokenizer,
         batch_size: int,
+        tokenizer: PreTrainedTokenizer,
         max_token_length: int,
     ):
         super().__init__(batch_size, tokenizer, max_token_length)
