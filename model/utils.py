@@ -54,14 +54,12 @@ def compute_metrics(inputs: List[str], generated: List[str]):
     rouge = ROUGEScore()
     bleu = BLEUScore()
 
-    rouge_score = rouge(inputs, generated)
-    blue_score = bleu(inputs, generated)
+    rouge_scores = rouge(inputs, generated)
+    bleu_score = bleu(inputs, generated)
 
     return {
-        "rouge1": rouge_score["rouge1"].item(),
-        "rouge2": rouge_score["rouge2"].item(),
-        "rougeL": rouge_score["rougeL"].item(),
-        "bleu": blue_score["bleu"].item(),
+        **rouge_scores,
+        "bleu": bleu_score.item(),
     }
 
 
