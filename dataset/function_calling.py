@@ -58,7 +58,7 @@ class FunctionCallingDataModule(FineTunerDataset):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
-        cache_dir = "dataset_cache/function_calling"
+        cache_dir = "dataset_caches/function_calling"
         ensure_directory(cache_dir, clear=False)
         cpu_count = min(len(os.sched_getaffinity(0)), 16)
         # cpu_count = 1

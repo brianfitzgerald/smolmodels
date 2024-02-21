@@ -22,8 +22,8 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 
 print("Loading dependencies - project...")
-from dataset.parti import PromptUpsampleDataModule
-from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID, HyperParams, FineTunerDataset
+from dataset.parti import PromptSafetyDataModule, PromptUpsampleDataModule
+from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID, HyperParams, FineTunerDataset, compute_metrics
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -74,14 +74,14 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
             table_columns.append(decoded)
 
-        # metrics = compute_metrics(table_columns[3], table_columns[4])
+        metrics = compute_metrics(table_columns[3], table_columns[4])
 
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
             self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-            # self.wandb_logger.log_metrics(metrics)
+            self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)
@@ -146,7 +146,7 @@ CONFIGS = {
         T5FineTuner, PromptUpsampleDataModule, "t5-prompt-upsampling"
     ),
     "prompt_safety": ModelConfig(
-        T5FineTuner, PromptUpsampleDataModule, "t5-prompt-safety"
+        T5FineTuner, PromptSafetyDataModule, "t5-prompt-safety"
     ),
 }
 
