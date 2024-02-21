@@ -12,7 +12,7 @@ from transformers.models.t5.tokenization_t5 import T5Tokenizer
 
 
 class T5FineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams, ckpt_name: str = "google/t5-efficient-tiny"):
+    def __init__(self, params: HyperParams, ckpt_name: str = "google/flan-t5-small"):
         super(T5FineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))

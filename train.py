@@ -31,7 +31,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         self,
         tokenizer: T5Tokenizer,
         wandb_logger: Optional[WandbLogger] = None,
-        max_new_tokens: int = 100,
+        max_new_tokens: int = 256,
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
@@ -170,7 +170,7 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
         wandb_logger.watch(model)
 
     sample_callback = LogPredictionSamplesCallback(
-        model.tokenizer, wandb_logger, params.max_seq_length
+        model.tokenizer, wandb_logger
     )
 
     checkpoint_callback = HfModelCheckpoint(

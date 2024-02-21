@@ -49,7 +49,7 @@ class PromptUpsampleDataModule(FineTunerDataset):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
-        ensure_directory(self.cache_dir)
+        ensure_directory(self.cache_dir, clear=False)
 
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,
