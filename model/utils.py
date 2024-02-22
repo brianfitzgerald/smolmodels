@@ -6,6 +6,8 @@ import shutil
 import lightning.pytorch as pl
 from transformers.tokenization_utils import PreTrainedTokenizer
 from torch.utils.data import DataLoader
+import os
+from dataclasses import dataclass
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = "Rewrite the following prompt to remove any unsafe or copyrighted content: "
@@ -13,9 +15,11 @@ IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
 
+@dataclass
 class HyperParams:
+    base_model_checkpoint: str = "google/flan-t5-base"
     max_seq_length: int = 2048
-    learning_rate: float = 2e-4
+    learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
     train_batch_size: int = 2
@@ -42,12 +46,13 @@ class FineTunerDataset(pl.LightningDataModule):
         self.batch_size = batch_size
         self.tokenizer = tokenizer
         self.max_token_length = max_token_length
+        self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=35)  # type: ignore
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.cpu_count)  # type: ignore
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=35)  # type: ignore
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):

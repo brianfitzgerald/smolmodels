@@ -9,14 +9,14 @@ from transformers.models.llama.tokenization_llama import LlamaTokenizer
 
 
 class LlamaFineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams, ckpt_name: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"):
+    def __init__(self, params: HyperParams):
         super(LlamaFineTuner, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
 
-        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(ckpt_name)
-        self.tokenizer = LlamaTokenizer.from_pretrained(ckpt_name)
-        self.ckpt_name = ckpt_name
+        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(params.base_model_checkpoint)
+        self.tokenizer = LlamaTokenizer.from_pretrained(params.base_model_checkpoint)
+        self.ckpt_name = params.base_model_checkpoint
         self.train_steps = 0
         self.save_hyperparameters()
 

@@ -10,6 +10,7 @@ import shutil
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
 from dataset.function_calling import FunctionCallingDataModule
+import logging
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
@@ -23,7 +24,13 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 
 print("Loading dependencies - project...")
 from dataset.parti import PromptSafetyDataModule, PromptUpsampleDataModule
-from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID, HyperParams, FineTunerDataset, compute_metrics
+from model.utils import (
+    IGNORE_TOKEN_INDEX,
+    PAD_TOKEN_ID,
+    HyperParams,
+    FineTunerDataset,
+    compute_metrics,
+)
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -80,7 +87,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
-            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
+            self.wandb_logger.log_table("validation/samples", columns, table_rows)
             self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
@@ -136,14 +143,24 @@ class ModelConfig:
     model: type[pl.LightningModule]
     data_module: type[FineTunerDataset]
     wandb_project_name: str
+    hyperparams: HyperParams = HyperParams()
 
 
 CONFIGS = {
     "fn_calling": ModelConfig(
-        LlamaFineTuner, FunctionCallingDataModule, "llama-function-calling"
+        LlamaFineTuner, FunctionCallingDataModule, "llama-function-calling", HyperParams("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
     ),
-    "prompt_upsample": ModelConfig(
-        T5FineTuner, PromptUpsampleDataModule, "t5-prompt-upsampling"
+    "prompt_upsample_small": ModelConfig(
+        T5FineTuner,
+        PromptUpsampleDataModule,
+        "t5-prompt-upsampling",
+        HyperParams(base_model_checkpoint="google/flan-t5-small"),
+    ),
+    "prompt_upsample_base": ModelConfig(
+        T5FineTuner,
+        PromptUpsampleDataModule,
+        "t5-prompt-upsampling",
+        HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
     "prompt_safety": ModelConfig(
         T5FineTuner, PromptSafetyDataModule, "t5-prompt-safety"
@@ -151,14 +168,14 @@ CONFIGS = {
 }
 
 
-def main(wandb: bool = False, config: str = "prompt_safety"):
-    params = HyperParams()
+def main(wandb: bool = False, config: str = "prompt_upsample"):
     loggers = []
 
     model_config = CONFIGS[config]
-    model = model_config.model(params)
+    hparams = model_config.hyperparams
+    model = model_config.model(hparams)
     data_module = model_config.data_module(
-        params.train_batch_size, model.tokenizer, params.max_seq_length
+        hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
     )
 
     wandb_logger = None
@@ -169,9 +186,7 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
-    sample_callback = LogPredictionSamplesCallback(
-        model.tokenizer, wandb_logger
-    )
+    sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
 
     checkpoint_callback = HfModelCheckpoint(
         dirpath="checkpoints",
@@ -181,15 +196,17 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
     )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
+    precision = "32" if model_config.model == T5FineTuner else "16-mixed"
 
     trainer = pl.Trainer(
-        accumulate_grad_batches=params.gradient_accumulation_steps,
-        max_epochs=params.num_train_epochs,
-        precision="16",
-        gradient_clip_val=params.max_grad_norm,
-        # val_check_interval=0.1,
+        accumulate_grad_batches=hparams.gradient_accumulation_steps,
+        max_epochs=hparams.num_train_epochs,
+        precision=precision,
+        gradient_clip_val=hparams.max_grad_norm,
+        val_check_interval=0.25,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
+        log_every_n_steps=1,
     )
     trainer.fit(model, datamodule=data_module)
 
