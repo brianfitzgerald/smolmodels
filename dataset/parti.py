@@ -1,9 +1,7 @@
-from pathlib import Path
 from datasets import load_dataset
 from typing import Optional
 from transformers.tokenization_utils import PreTrainedTokenizer
-from torch import Tensor
-import lightning.pytorch as pl
+import os
 
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
@@ -55,14 +53,16 @@ class PromptUpsampleDataModule(FineTunerDataset):
             self.prepare_sample,
             batched=True,
             load_from_cache_file=True,
-            cache_file_name=f"{self.cache_dir}/training",
+            cache_file_name=f"{self.cache_dir}/training.parquet",
+            num_proc=self.cpu_count,
         )
 
         self.val_dataset = self.val_dataset.map(
             self.prepare_sample,
             batched=True,
             load_from_cache_file=True,
-            cache_file_name=f"{self.cache_dir}/validation",
+            cache_file_name=f"{self.cache_dir}/validation.parquewt",
+            num_proc=self.cpu_count,
         )
 
         columns = [
