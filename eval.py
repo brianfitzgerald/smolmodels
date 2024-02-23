@@ -28,6 +28,7 @@ def main(
     batch_size: int = 8,
     upload_to_hf: bool = False,
     generate_samples: bool = False,
+    sdxl: bool = True,
 ):
 
     print("Loading model...")
@@ -36,11 +37,16 @@ def main(
         checkpoint_dir
     )
 
-
     drawbench_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
     if generate_samples:
+        pipeline_name = (
+            "stabilityai/stable-diffusion-xl-base-1.0"
+            if sdxl
+            else "runwayml/stable-diffusion-v1-5"
+        )
+        print(f"Loading pipeline: {pipeline_name}")
         pipe: DiffusionPipeline = DiffusionPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-xl-base-1.0",
+            pipeline_name,
             torch_dtype=torch.float16,
             use_safetensors=True,
             variant="fp16",
@@ -66,18 +72,25 @@ def main(
         model.push_to_hub("superprompt-v1")
         return
 
+    out_dir = "samples/samples_mq"
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(out_dir, ignore_errors=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
     for i in range(0, len(drawbench_df), batch_size):
 
         chunk = drawbench_df[i : i + batch_size]
 
-        prompts_with_prefix = [PROMPT_EXPANSION_TASK_PREFIX + sentence for sentence in chunk["Prompt"]]
+        prompts_with_prefix = [
+            PROMPT_EXPANSION_TASK_PREFIX + sentence for sentence in chunk["Prompt"]
+        ]
 
         inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True)
 
         output_sequences = model.generate(
             input_ids=inputs["input_ids"],
             attention_mask=inputs["attention_mask"],
-            max_length=256,
+            max_length=77,
             num_return_sequences=1,
         )
 
@@ -88,10 +101,10 @@ def main(
             if generate_samples:
                 for k, txt in enumerate([prompt, upsampled]):
                     print(f"Generating sample for: {txt}")
-                    image: Image.Image = pipe(txt).images[0]  # type: ignore
+                    image: Image.Image = pipe(txt, num_inference_steps=30, guidance_scale=20).images[0]  # type: ignore
                     prompt_fmt = format_filename(txt)
                     label = "prompt" if k == 0 else "upsampled"
-                    image.save(f"samples/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
+                    image.save(f"{out_dir}/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
 
 
 if __name__ == "__main__":
