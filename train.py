@@ -87,7 +87,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
-            self.wandb_logger.log_table("validation/samples", columns, table_rows)
+            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
             self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
@@ -146,21 +146,32 @@ class ModelConfig:
     hyperparams: HyperParams = HyperParams()
 
 
+T5_WANDB_PROJECT = "t5-prompt-upsampling"
+
 CONFIGS = {
     "fn_calling": ModelConfig(
-        LlamaFineTuner, FunctionCallingDataModule, "llama-function-calling", HyperParams("TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+        LlamaFineTuner,
+        FunctionCallingDataModule,
+        "llama-function-calling",
+        HyperParams("TinyLlama/TinyLlama-1.1B-Chat-v1.0"),
     ),
     "prompt_upsample_small": ModelConfig(
         T5FineTuner,
         PromptUpsampleDataModule,
-        "t5-prompt-upsampling",
+        T5_WANDB_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
-    "prompt_upsample_base": ModelConfig(
+    "prompt_upsample": ModelConfig(
         T5FineTuner,
         PromptUpsampleDataModule,
-        "t5-prompt-upsampling",
+        T5_WANDB_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
+    ),
+    "prompt_upsample_adafactor": ModelConfig(
+        T5FineTuner,
+        PromptUpsampleDataModule,
+        T5_WANDB_PROJECT,
+        HyperParams(optimizer="Adafactor", learning_rate=1e-3),
     ),
     "prompt_safety": ModelConfig(
         T5FineTuner, PromptSafetyDataModule, "t5-prompt-safety"
@@ -182,7 +193,7 @@ def main(wandb: bool = False, config: str = "prompt_upsample"):
 
     if wandb:
         project_name = model_config.wandb_project_name
-        wandb_logger = WandbLogger(project=project_name)
+        wandb_logger = WandbLogger(name=config, project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
