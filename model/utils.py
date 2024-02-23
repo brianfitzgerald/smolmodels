@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Literal
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
@@ -14,10 +14,11 @@ SAFETY_TASK_PREFIX = "Rewrite the following prompt to remove any unsafe or copyr
 IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
+OptimizerChoice = Literal["AdamW", "Adafactor"]
 
 @dataclass
 class HyperParams:
-    base_model_checkpoint: str = "google/flan-t5-base"
+    base_model_checkpoint: str = "google/flan-t5-small"
     max_seq_length: int = 2048
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
@@ -30,6 +31,7 @@ class HyperParams:
     max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
+    optimizer: OptimizerChoice = "AdamW"
 
 
 class FineTunerDataset(pl.LightningDataModule):

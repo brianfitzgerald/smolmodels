@@ -1,5 +1,4 @@
-from typing import Any, Dict
-from transformers.optimization import get_inverse_sqrt_schedule
+from transformers.optimization import Adafactor, get_inverse_sqrt_schedule, AdafactorSchedule
 from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
@@ -109,14 +108,29 @@ class T5FineTuner(pl.LightningModule):
                 "weight_decay": 0.0,
             },
         ]
-        optimizer = AdamW(
-            optimizer_grouped_parameters,
-            lr=self.params.learning_rate,
-            eps=self.params.adam_epsilon,
-        )
-        scheduler = get_inverse_sqrt_schedule(
-            optimizer, num_warmup_steps=self.params.warmup_steps
-        )
+        if self.params.optimizer == "AdamW":
+            optimizer = AdamW(
+                optimizer_grouped_parameters,
+                lr=self.params.learning_rate,
+                eps=self.params.adam_epsilon,
+            )
+            scheduler = get_inverse_sqrt_schedule(
+                optimizer, num_warmup_steps=self.params.warmup_steps
+            )
+        elif self.params.optimizer == "Adafactor":
+            optimizer = Adafactor(
+                optimizer_grouped_parameters,
+                lr=self.params.learning_rate,
+                eps=(self.params.adam_epsilon, 1e-3),
+                clip_threshold=1.0,
+                decay_rate=-0.8,
+                beta1=None,
+                weight_decay=0.0,
+                scale_parameter=False,
+                relative_step=False,
+                warmup_init=False,
+            )
+            scheduler = AdafactorSchedule(optimizer)
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
