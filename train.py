@@ -10,7 +10,8 @@ import shutil
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
 from dataset.function_calling import FunctionCallingDataModule
-import logging
+import random
+import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
@@ -104,6 +105,7 @@ class LogPredictionSamplesCallback(pl.Callback):
             headers=columns,
             maxcolwidths=[10, 10, 100, 100, 100],
         )
+        print(new_rows)
         with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
             f.write(new_rows)
             f.write("\n")
@@ -190,10 +192,12 @@ def main(wandb: bool = False, config: str = "prompt_upsample"):
     )
 
     wandb_logger = None
+    run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
+    run_name = f"{config}-{run_name}"
 
     if wandb:
         project_name = model_config.wandb_project_name
-        wandb_logger = WandbLogger(name=config, project=project_name)
+        wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
@@ -201,7 +205,7 @@ def main(wandb: bool = False, config: str = "prompt_upsample"):
 
     checkpoint_callback = HfModelCheckpoint(
         dirpath="checkpoints",
-        filename="best_model",
+        filename=run_name,
         monitor="val_loss",
         mode="min",
     )
