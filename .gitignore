@@ -167,8 +167,8 @@ wandb/latest-run
 *.out.*
 latest-run
 upsampled_new_prompts.csv
-*.csv
 *.txt
+logs/*
 submit.sh
 dataset_cache_parti/*
 dataset_cache_llava/*
