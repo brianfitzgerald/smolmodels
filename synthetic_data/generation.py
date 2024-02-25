@@ -7,6 +7,7 @@ from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
 
+Conversation = List[ChatCompletionMessageParam]
 
 def upload_dataset(
     hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
@@ -28,7 +29,7 @@ class GenerationWrapper(ABC):
     tokenizer: PreTrainedTokenizerBase
 
     @abstractmethod
-    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
+    async def generate(self, conversations: List[Conversation]):
         pass
 
 
@@ -46,7 +47,7 @@ class VLLMWrapper(GenerationWrapper):
         print("Pipeline loaded.")
         self.tokenizer = self.model.get_tokenizer()
 
-    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
+    async def generate(self, conversations: List[Conversation]):
         return self.model.generate(conversations, self.sampling_params)
 
 
@@ -57,7 +58,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError("OpenAI API key is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
 
-    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
+    async def generate(self, conversations: List[Conversation]):
         completion_requests = []
         for conversation in conversations:
             request = self.oai_client.chat.completions.create(

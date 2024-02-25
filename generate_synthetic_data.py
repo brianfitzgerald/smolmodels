@@ -9,7 +9,9 @@ from datasets import Dataset, load_dataset
 import fire
 from huggingface_hub import login
 from dotenv import dotenv_values
+from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import (
+    Conversation,
     GenerationWrapper,
     VLLMWrapper,
     OpenAIGenerationWrapper,
@@ -59,6 +61,25 @@ CONFIGS = {
         output_dataset_name="roborovski/upsampled-prompts-parti",
     ),
 }
+
+
+def format_and_complete_conversation(
+    conversations: List[Conversation], model_wrapper: GenerationWrapper
+) -> List[Conversation]:
+    formatted = []
+    for conversation in conversations:
+        full_conversation_formatted = model_wrapper.tokenizer.apply_chat_template(
+            conversation, tokenize=False, add_generation_prompt=True  # type: ignore
+        )
+        formatted.append(
+            cast(
+                List[ChatCompletionMessageParam],
+                full_conversation_formatted,
+            )
+        )
+
+    outputs = asyncio.run(model_wrapper.generate(formatted))
+    return outputs  # type: ignore
 
 
 def main(
@@ -112,40 +133,66 @@ def main(
     print("Running...")
     for epoch in range(config.n_epochs):
         for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
-            prompts, categories_batch = batch["Prompt"], batch["Category"] # type: ignore
-            full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
+            if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
+                prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
+                full_conversations_batch: List[Conversation] = [
+                    format_dalle_prompt_template(prompt) for prompt in prompts
+                ]
+                outputs = format_and_complete_conversation(
+                    full_conversations_batch, model_wrapper
+                )
 
-            for prompt in prompts.to_list():
-                if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                    conversation = format_dalle_prompt_template(prompt)
-                elif config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
-                    conversation = format_dalle_prompt_template(prompt)
-
-                full_conversation_formatted = (
-                    model_wrapper.tokenizer.apply_chat_template(
-                        conversation, tokenize=False, add_generation_prompt=True
+                for category, original_prompt, output in zip(
+                    categories_batch, prompts, outputs  # type: ignore
+                ):
+                    new_dataset_rows.append(
+                        {
+                            "Prompt": original_prompt,
+                            "Category": category,
+                            "Upsampled": output,
+                        }
                     )
-                )
-                full_conversations_batch.append(
-                    cast(List[ChatCompletionMessageParam], full_conversation_formatted)
+
+                    print(
+                        f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
+                    )
+            elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
+
+                glaive_conversations = [chatml_to_conversation(row) for row in batch]
+                completion_conversations = []
+                for conversation in glaive_conversations:
+                    completion_conv = []
+                    for msg in conversation:
+                        if msg["from"] == "gpt":
+                            break
+                        completion_conv.append(
+                            {
+                                "role": msg["from"],
+                                "content": msg["value"],
+                            }
+                        )
+                    completion_conversations.append(completion_conv)
+
+                completions = format_and_complete_conversation(
+                    completion_conversations, model_wrapper
                 )
 
-            outputs = asyncio.run(model_wrapper.generate(full_conversations_batch))
-
-            for category, original_prompt, output in zip(
-                categories_batch, prompts, outputs
-            ):
-                new_dataset_rows.append(
-                    {
-                        "Prompt": original_prompt,
-                        "Category": category,
-                        "Upsampled": output,
-                    }
-                )
-
-                print(
-                    f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
-                )
+                for completion, glaive_conversation in zip(
+                    completions, glaive_conversations
+                ):
+                    system_msg = completion[0]["content"]  # type: ignore
+                    user_msg = glaive_conversation[1]["content"]
+                    accepted_msg = glaive_conversation[1]["content"]
+                    rejected_msg = completion[-1]["content"]  # type: ignore
+                    new_dataset_rows.append(
+                        {
+                            "system": system_msg,
+                            "question": user_msg,
+                            "chosen": accepted_msg,
+                            "rejected": rejected_msg,
+                        }
+                    )
 
             if i % upload_every == 0:
                 print(f"Upsampled {i} prompts")

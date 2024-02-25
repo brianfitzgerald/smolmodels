@@ -1,6 +1,6 @@
-from typing import List, Dict
+from synthetic_data.generation import Conversation
 
-def format_dalle_prompt_template(user_prompt: str) -> List[Dict]:
+def format_dalle_prompt_template(user_prompt: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
 
@@ -48,5 +48,4 @@ There are a few rules to follow:
         {"role": "user", "content": last_msg_content},
     ]
     return user_conversation
-
 

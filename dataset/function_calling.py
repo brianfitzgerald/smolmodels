@@ -8,39 +8,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-ROLE_DICT = {
-    "ASSISTANT": "assistant",
-    "USER": "user",
-    "SYSTEM": "system",
-}
-
-
-def chatml_to_conversation(conversation: str) -> List[Dict]:
-    """
-    Convert a string in ChatML format to a list of conversation steps.
-    """
-    message_regex = r"(SYSTEM|USER|ASSISTANT):"
-
-    conversation = conversation.replace("<|endoftext|>", "").replace("\n", " ").replace("</s>", "").strip()
-
-    conversation_steps = []
-    user_and_assistant_messages = re.split(message_regex, conversation)
-    messages = [
-        message.strip() for message in user_and_assistant_messages if message.strip()
-    ]
-    for i in range(0, len(messages), 2):
-        if messages[i] not in ROLE_DICT:
-            print(f"Unknown role: {messages[i]}")
-            continue
-        role = ROLE_DICT[messages[i]]
-        if i + 1 >= len(messages):
-            print(f"Missing message for role: {role}")
-            continue
-        message = messages[i + 1]
-        conversation_steps.append({"role": role, "content": message})
-
-    return conversation_steps
-
+from synthetic_data.conversion import chatml_to_conversation
 
 class FunctionCallingDataModule(FineTunerDataset):
     def __init__(
@@ -60,7 +28,7 @@ class FunctionCallingDataModule(FineTunerDataset):
 
         cache_dir = "dataset_caches/function_calling"
         ensure_directory(cache_dir, clear=False)
-        cpu_count = min(len(os.sched_getaffinity(0)), 16)
+        cpu_count = min(len(os.sched_getaffinity(0)), 16) # type: ignore
         # cpu_count = 1
 
         # Set format for PyTorch
