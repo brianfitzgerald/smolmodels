@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
-from typing import Dict, List
+from typing import Dict, List, cast
+import asyncio
 
 from enum import Enum
 import pandas as pd
@@ -14,6 +15,7 @@ from synthetic_data.generation import (
     OpenAIGenerationWrapper,
     upload_dataset,
 )
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from synthetic_data.prompts import format_dalle_prompt_template
 
@@ -28,14 +30,14 @@ class DataSourceFormat(Enum):
     HF_DATASET = "hf_dataset"
 
 
-class DatasetFormat(Enum):
-    DPO = "dpo"
-    UPSAMPLE = "upsample"
+class DatasetTask(Enum):
+    TOOL_USAGE_DPO = "dpo"
+    PROMPT_UPSAMPLE = "upsample"
 
 
 @dataclass
 class Config:
-    dataset_format: DatasetFormat
+    dataset_task: DatasetTask
     seed_data_format: DataSourceFormat
     # Either the name of the HF dataset or the path to the CSV file
     seed_data_location: str
@@ -45,13 +47,13 @@ class Config:
 
 CONFIGS = {
     "tool_usage": Config(
-        dataset_format=DatasetFormat.DPO,
+        dataset_task=DatasetTask.TOOL_USAGE_DPO,
         seed_data_format=DataSourceFormat.HF_DATASET,
         seed_data_location="glaiveai/glaive-function-calling-v2",
         output_dataset_name="roborovski/glaive-tool-usage-dpo",
     ),
     "upsample": Config(
-        dataset_format=DatasetFormat.UPSAMPLE,
+        dataset_task=DatasetTask.PROMPT_UPSAMPLE,
         seed_data_format=DataSourceFormat.TSV,
         seed_data_location="data/PartiPrompts.tsv",
         output_dataset_name="roborovski/upsampled-prompts-parti",
@@ -84,56 +86,74 @@ def main(
 
     print("Loading existing data...")
     if restart:
-        hf_dataset = Dataset.from_dict({"Prompt": [], "Category": [], "Upsampled": []})
+        output_dataset = Dataset.from_dict(
+            {"Prompt": [], "Category": [], "Upsampled": []}
+        )
     else:
-        hf_dataset: Dataset = load_dataset(hf_dataset_name, split="train")  # type: ignore
+        output_dataset = cast(
+            Dataset, load_dataset(config.output_dataset_name, split="train")
+        )
 
-    print("Loading new prompts...")
-    parti_prompts: pd.DataFrame = pd.read_csv("data/PartiPrompts.tsv", sep="\t")
+    input_dataset: Dataset
+    if config.seed_data_format == DataSourceFormat.HF_DATASET:
+        input_dataset = cast(
+            Dataset, load_dataset(config.seed_data_location, split="train")
+        )
+    elif config.seed_data_format == DataSourceFormat.TSV:
+        input_dataset = cast(
+            Dataset, load_dataset("tsv", data_files=config.seed_data_location)
+        )
 
     new_dataset_rows: List[Dict] = []
 
     # initial test upload before loading the pipeline
-    upload_dataset(hf_dataset, config.output_dataset_name, new_dataset_rows)
+    upload_dataset(output_dataset, config.output_dataset_name, new_dataset_rows)
 
-    print("Upsampling captions...")
+    print("Running...")
     for epoch in range(config.n_epochs):
-        for i in range(0, len(parti_prompts), batch_size):
-            batch = parti_prompts.iloc[i : i + batch_size]
-            prompts, categories_batch = batch["Prompt"], batch["Category"]
-            full_conversations_batch = []
+        for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+            prompts, categories_batch = batch["Prompt"], batch["Category"] # type: ignore
+            full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
             for prompt in prompts.to_list():
-                conversation = format_dalle_prompt_template(prompt)
+                if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                    conversation = format_dalle_prompt_template(prompt)
+                elif config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
+                    conversation = format_dalle_prompt_template(prompt)
 
-                full_conversation_formatted: str = model_wrapper.tokenizer.apply_chat_template(  # type: ignore
-                    conversation, tokenize=False, add_generation_prompt=True
+                full_conversation_formatted = (
+                    model_wrapper.tokenizer.apply_chat_template(
+                        conversation, tokenize=False, add_generation_prompt=True
+                    )
                 )
-                full_conversations_batch.append(full_conversation_formatted)
+                full_conversations_batch.append(
+                    cast(List[ChatCompletionMessageParam], full_conversation_formatted)
+                )
 
-            outputs = model_wrapper.generate(full_conversations_batch)
+            outputs = asyncio.run(model_wrapper.generate(full_conversations_batch))
 
             for category, original_prompt, output in zip(
-                categories_batch, prompts, outputs  # type: ignore
+                categories_batch, prompts, outputs
             ):
-                upsampled = output.outputs[0].text
                 new_dataset_rows.append(
                     {
                         "Prompt": original_prompt,
                         "Category": category,
-                        "Upsampled": upsampled,
+                        "Upsampled": output,
                     }
                 )
 
                 print(
-                    f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {upsampled}"
+                    f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
                 )
 
             if i % upload_every == 0:
                 print(f"Upsampled {i} prompts")
-                upload_dataset(hf_dataset, config.output_dataset_name, new_dataset_rows)
+                upload_dataset(
+                    output_dataset, config.output_dataset_name, new_dataset_rows
+                )
 
-        upload_dataset(hf_dataset, config.output_dataset_name, new_dataset_rows)
+        upload_dataset(output_dataset, config.output_dataset_name, new_dataset_rows)
 
 
 if __name__ == "__main__":

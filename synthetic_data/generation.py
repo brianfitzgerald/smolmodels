@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 import openai
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict, Optional
 from datasets import Dataset, concatenate_datasets
-from tokenizers import Tokenizer
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+import asyncio
 
 
 def upload_dataset(
@@ -23,10 +25,10 @@ class GenerationWrapper(ABC):
     Abstract method for various ways of generating data.
     """
 
-    tokenizer: Tokenizer
+    tokenizer: PreTrainedTokenizerBase
 
     @abstractmethod
-    async def generate(self, messages: List[ChatCompletionMessageParam]):
+    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
         pass
 
 
@@ -34,7 +36,7 @@ class VLLMWrapper(GenerationWrapper):
 
     def __init__(self):
 
-        from vllm import LLM, SamplingParams # type: ignore
+        from vllm import LLM, SamplingParams  # type: ignore
 
         self.sampling_params = SamplingParams(
             temperature=0.7, top_p=0.95, max_tokens=256
@@ -44,8 +46,8 @@ class VLLMWrapper(GenerationWrapper):
         print("Pipeline loaded.")
         self.tokenizer = self.model.get_tokenizer()
 
-    async def generate(self, messages: List[ChatCompletionMessageParam]):
-        return self.model.generate(messages, self.sampling_params)
+    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
+        return self.model.generate(conversations, self.sampling_params)
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
@@ -55,10 +57,15 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError("OpenAI API key is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
 
-    async def generate(self, messages: List[ChatCompletionMessageParam]):
-        result = await self.oai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            temperature=0,
-        )
-        return result.choices[0].message.content
+    async def generate(self, conversations: List[List[ChatCompletionMessageParam]]):
+        completion_requests = []
+        for conversation in conversations:
+            request = self.oai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=conversation,
+                temperature=0,
+            )
+            completion_requests.append(request)
+        results: List[ChatCompletion] = await asyncio.gather(*completion_requests)
+        completions = [result.choices[0].message.content for result in results]
+        return completions
