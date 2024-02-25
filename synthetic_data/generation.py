@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 import openai
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-from typing import List, Dict
+from typing import List, Dict, Optional
 from datasets import Dataset, concatenate_datasets
 from tokenizers import Tokenizer
 
 
 def upload_dataset(
-    hf_dataset: Dataset, hf_dataset_name: str, new_dataset_rows: List[Dict]
+    hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
     dataset_new_rows.to_csv("upsampled_new_prompts.csv")
@@ -15,7 +15,7 @@ def upload_dataset(
     concat_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
 
     print(f"Uploading {len(new_dataset_rows)} new prompts to the Hub...")
-    concat_dataset.push_to_hub(hf_dataset_name)
+    concat_dataset.push_to_hub(dataset_name)
 
 
 class GenerationWrapper(ABC):
@@ -50,8 +50,10 @@ class VLLMWrapper(GenerationWrapper):
 
 class OpenAIGenerationWrapper(GenerationWrapper):
 
-    def __init__(self):
-        self.oai_client = openai.AsyncOpenAI()
+    def __init__(self, api_key: Optional[str]):
+        if api_key is None:
+            raise ValueError("OpenAI API key is required for OpenAIGenerationWrapper")
+        self.oai_client = openai.AsyncOpenAI(api_key=api_key)
 
     async def generate(self, messages: List[ChatCompletionMessageParam]):
         result = await self.oai_client.chat.completions.create(
