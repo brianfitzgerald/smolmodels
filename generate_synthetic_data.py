@@ -10,6 +10,7 @@ from huggingface_hub import login
 from dotenv import dotenv_values
 from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import (
+    SHAREGPT_TO_OPENAI_ROLE,
     Conversation,
     GenerationWrapper,
     VLLMWrapper,
@@ -60,25 +61,6 @@ CONFIGS = {
         output_dataset_name="roborovski/upsampled-prompts-parti",
     ),
 }
-
-
-def format_and_complete_conversation(
-    conversations: List[Conversation], model_wrapper: GenerationWrapper
-) -> List[Conversation]:
-    formatted = []
-    for conversation in conversations:
-        full_conversation_formatted = model_wrapper.tokenizer.apply_chat_template(
-            conversation, tokenize=False, add_generation_prompt=True  # type: ignore
-        )
-        formatted.append(
-            cast(
-                List[ChatCompletionMessageParam],
-                full_conversation_formatted,
-            )
-        )
-
-    outputs = asyncio.run(model_wrapper.generate(formatted))
-    return outputs  # type: ignore
 
 
 def main(
@@ -137,12 +119,12 @@ def main(
                 full_conversations_batch: List[Conversation] = [
                     format_dalle_prompt_template(prompt) for prompt in prompts
                 ]
-                outputs = format_and_complete_conversation(
-                    full_conversations_batch, model_wrapper
+                completions = asyncio.run(
+                    model_wrapper.generate(full_conversations_batch)
                 )
 
                 for category, original_prompt, output in zip(
-                    categories_batch, prompts, outputs  # type: ignore
+                    categories_batch, prompts, completions
                 ):
                     new_dataset_rows.append(
                         {
@@ -158,8 +140,8 @@ def main(
             elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
                 full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
-                glaive_conversations = [chatml_to_conversation(row) for row in batch]
-                completion_conversations = []
+                glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
+                completion_conversations: List[Conversation] = []
                 for conversation in glaive_conversations:
                     completion_conv = []
                     for msg in conversation:
@@ -167,23 +149,24 @@ def main(
                             break
                         completion_conv.append(
                             {
-                                "role": msg["from"],
+                                "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
                                 "content": msg["value"],
                             }
                         )
                     completion_conversations.append(completion_conv)
 
-                completions = format_and_complete_conversation(
-                    completion_conversations, model_wrapper
+                print(f"Generating completions for batch {i}")
+                completions = asyncio.run(
+                    model_wrapper.generate(completion_conversations)
                 )
 
                 for completion, glaive_conversation in zip(
                     completions, glaive_conversations
                 ):
-                    system_msg = completion[0]["content"]  # type: ignore
-                    user_msg = glaive_conversation[1]["content"]
-                    accepted_msg = glaive_conversation[1]["content"]
-                    rejected_msg = completion[-1]["content"]  # type: ignore
+                    system_msg = glaive_conversation[0]["value"]
+                    user_msg = glaive_conversation[1]["value"]
+                    accepted_msg = glaive_conversation[-1]["value"]
+                    rejected_msg = completion
                     new_dataset_rows.append(
                         {
                             "system": system_msg,
