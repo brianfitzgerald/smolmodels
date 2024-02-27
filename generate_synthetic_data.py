@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import re
 from typing import Dict, List, cast
 import asyncio
 
@@ -8,6 +9,7 @@ from datasets import Dataset, load_dataset
 import fire
 from huggingface_hub import login
 from dotenv import dotenv_values
+from tabulate import tabulate
 from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import (
     SHAREGPT_TO_OPENAI_ROLE,
@@ -20,6 +22,7 @@ from synthetic_data.generation import (
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from synthetic_data.prompts import format_dalle_prompt_template
+from synthetic_data.utils import print_conversations_table
 
 
 class GenerationSource(str, Enum):
@@ -61,6 +64,16 @@ CONFIGS = {
         output_dataset_name="roborovski/upsampled-prompts-parti",
     ),
 }
+
+def clean_message(message: str) -> str:
+    """
+    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
+    """
+    message = message.strip()
+    message = re.sub(r'\n+|\t+', '', message)
+    message = re.sub(r'\s+', ' ', message)
+    return message
+
 
 
 def main(
@@ -108,9 +121,6 @@ def main(
 
     new_dataset_rows: List[Dict] = []
 
-    # initial test upload before loading the pipeline
-    upload_dataset(output_dataset, config.output_dataset_name, new_dataset_rows)
-
     print("Running...")
     for epoch in range(config.n_epochs):
         for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
@@ -141,6 +151,11 @@ def main(
                 full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
                 glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
+                system_prompts = [
+                    [clean_message(conv[0]["value"])] for conv in glaive_conversations
+                ]
+                for prompt in system_prompts:
+                    print(f"\n{prompt}")
                 completion_conversations: List[Conversation] = []
                 for conversation in glaive_conversations:
                     completion_conv = []
@@ -155,7 +170,7 @@ def main(
                         )
                     completion_conversations.append(completion_conv)
 
-                print(f"Generating completions for batch {i}")
+                print(f"Generating {len(completion_conversations)} completions for batch {i}...")
                 completions = asyncio.run(
                     model_wrapper.generate(completion_conversations)
                 )
@@ -165,7 +180,7 @@ def main(
                 ):
                     system_msg = glaive_conversation[0]["value"]
                     user_msg = glaive_conversation[1]["value"]
-                    accepted_msg = glaive_conversation[-1]["value"]
+                    accepted_msg = clean_message(glaive_conversation[-1]["value"])
                     rejected_msg = completion
                     new_dataset_rows.append(
                         {
@@ -176,7 +191,9 @@ def main(
                         }
                     )
 
-            if i % upload_every == 0:
+                print_conversations_table(new_dataset_rows[:-8])
+
+            if i % upload_every == 0 and i > 0:
                 print(f"Upsampled {i} prompts")
                 upload_dataset(
                     output_dataset, config.output_dataset_name, new_dataset_rows
