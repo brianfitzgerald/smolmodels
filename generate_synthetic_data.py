@@ -4,7 +4,6 @@ from typing import Dict, List, cast
 import asyncio
 
 from enum import Enum
-import pandas as pd
 from datasets import Dataset, load_dataset
 import fire
 from huggingface_hub import login
@@ -95,7 +94,7 @@ def main(
     print("Logging into the Hub...")
     current_dir = os.path.dirname(os.path.abspath(__file__))
     dotenv = dotenv_values(os.path.join(current_dir, ".env"))
-    hf_token, oai_token = dotenv["HF_TOKEN"], dotenv["OAI_TOKEN"]
+    hf_token, oai_token = dotenv["HF_TOKEN"], dotenv["OPENAI_API_KEY"]
     print(f"Logging in with token: {hf_token}")
     login(token=hf_token, add_to_git_credential=True)
 
