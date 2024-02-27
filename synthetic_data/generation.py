@@ -2,12 +2,20 @@ from abc import ABC, abstractmethod
 import openai
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TypedDict
 from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
 
 Conversation = List[ChatCompletionMessageParam]
+ShareGPTConversation = List[Dict[str, str]]
+
+SHAREGPT_TO_OPENAI_ROLE = {
+    "system": "system",
+    "human": "user",
+    "gpt": "assistant",
+}
+
 
 def upload_dataset(
     hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
@@ -48,7 +56,10 @@ class VLLMWrapper(GenerationWrapper):
         self.tokenizer = self.model.get_tokenizer()
 
     async def generate(self, conversations: List[Conversation]):
-        return self.model.generate(conversations, self.sampling_params)
+        full_conversation_formatted = self.tokenizer.apply_chat_template(
+            conversations, tokenize=False, add_generation_prompt=True  # type: ignore
+        )
+        return self.model.generate(full_conversation_formatted, self.sampling_params)
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
@@ -58,7 +69,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError("OpenAI API key is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
 
-    async def generate(self, conversations: List[Conversation]):
+    async def generate(self, conversations: List[Conversation]) -> List[str]:
         completion_requests = []
         for conversation in conversations:
             request = self.oai_client.chat.completions.create(
@@ -68,5 +79,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             )
             completion_requests.append(request)
         results: List[ChatCompletion] = await asyncio.gather(*completion_requests)
-        completions = [result.choices[0].message.content for result in results]
+        completions = [
+            result.choices[0].message.content
+            for result in results
+            if result.choices[0].message.content is not None
+        ]
         return completions
