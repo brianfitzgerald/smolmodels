@@ -80,7 +80,7 @@ def main(
     upload_every: int = 500,
     batch_size: int = 2,
     restart: bool = False,
-    generation_source: GenerationSource = GenerationSource.OPENAI,
+    generation_source: GenerationSource = GenerationSource.VLLM,
     config_name: str = "tool_usage",
 ):
 
