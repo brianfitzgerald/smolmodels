@@ -9,7 +9,6 @@ from datasets import Dataset, load_dataset
 import fire
 from huggingface_hub import login
 from dotenv import dotenv_values
-from tabulate import tabulate
 from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import (
     SHAREGPT_TO_OPENAI_ROLE,
@@ -65,20 +64,21 @@ CONFIGS = {
     ),
 }
 
+
 def clean_message(message: str) -> str:
     """
     Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
     """
     message = message.strip()
-    message = re.sub(r'\n+|\t+', '', message)
-    message = re.sub(r'\s+', ' ', message)
+    message = message.replace("<|endoftext|>", "")
+    message = re.sub(r"\n+|\t+", "", message)
+    message = re.sub(r"\s+", " ", message)
     return message
-
 
 
 def main(
     upload_every: int = 500,
-    batch_size: int = 16,
+    batch_size: int = 2,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
     config_name: str = "tool_usage",
@@ -124,6 +124,7 @@ def main(
     print("Running...")
     for epoch in range(config.n_epochs):
         for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+            new_rows_batch = []
             if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
                 prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
                 full_conversations_batch: List[Conversation] = [
@@ -136,7 +137,7 @@ def main(
                 for category, original_prompt, output in zip(
                     categories_batch, prompts, completions
                 ):
-                    new_dataset_rows.append(
+                    new_rows_batch.append(
                         {
                             "Prompt": original_prompt,
                             "Category": category,
@@ -151,11 +152,6 @@ def main(
                 full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
                 glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
-                system_prompts = [
-                    [clean_message(conv[0]["value"])] for conv in glaive_conversations
-                ]
-                for prompt in system_prompts:
-                    print(f"\n{prompt}")
                 completion_conversations: List[Conversation] = []
                 for conversation in glaive_conversations:
                     completion_conv = []
@@ -170,7 +166,9 @@ def main(
                         )
                     completion_conversations.append(completion_conv)
 
-                print(f"Generating {len(completion_conversations)} completions for batch {i}...")
+                print(
+                    f"Generating {len(completion_conversations)} completions for batch {i}..."
+                )
                 completions = asyncio.run(
                     model_wrapper.generate(completion_conversations)
                 )
@@ -178,11 +176,19 @@ def main(
                 for completion, glaive_conversation in zip(
                     completions, glaive_conversations
                 ):
-                    system_msg = glaive_conversation[0]["value"]
-                    user_msg = glaive_conversation[1]["value"]
-                    accepted_msg = clean_message(glaive_conversation[-1]["value"])
-                    rejected_msg = completion
-                    new_dataset_rows.append(
+
+                    system_msg, user_msg, accepted_msg, rejected_msg = "", "", "", ""
+                    for i, msg in enumerate(glaive_conversation):
+                        role, content = msg["from"], msg["value"]
+                        if role == "system":
+                            system_msg = clean_message(content)
+                        if role == "human":
+                            user_msg = clean_message(content)
+                        if role == "gpt":
+                            accepted_msg = clean_message(content)
+                            rejected_msg = completion
+                            break
+                    new_rows_batch.append(
                         {
                             "system": system_msg,
                             "question": user_msg,
@@ -191,7 +197,8 @@ def main(
                         }
                     )
 
-                print_conversations_table(new_dataset_rows[:-8])
+                print_conversations_table(new_rows_batch)
+                new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:
                 print(f"Upsampled {i} prompts")

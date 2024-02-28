@@ -76,7 +76,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 model="gpt-3.5-turbo",
                 messages=conversation,
                 temperature=0,
-                max_tokens=1024,
+                max_tokens=512,
             )
             completion_requests.append(request)
         results: List[ChatCompletion] = await asyncio.gather(*completion_requests)

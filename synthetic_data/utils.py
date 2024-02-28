@@ -20,11 +20,11 @@ def print_conversations_table(results: List[Dict]):
         (clean_message(row["system"]), row["question"], row["chosen"], row["rejected"])
         for row in results
     ]
-    breakpoint()
     print(
         tabulate(
             new_dataset_row_elements,
             headers=["System", "Question", "Chosen", "Rejected"],
-            maxcolwidths=[50] * 4,
+            tablefmt="simple",
+            maxcolwidths=[50] * 4
         )
     )
