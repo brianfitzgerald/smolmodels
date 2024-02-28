@@ -56,10 +56,11 @@ class VLLMWrapper(GenerationWrapper):
         self.tokenizer = self.model.get_tokenizer()
 
     async def generate(self, conversations: List[Conversation]):
-        full_conversation_formatted = self.tokenizer.apply_chat_template(
+        full_conversation_formatted: str = self.tokenizer.apply_chat_template(
             conversations, tokenize=False, add_generation_prompt=True  # type: ignore
         )
-        return self.model.generate(full_conversation_formatted, self.sampling_params)
+        responses = self.model.generate(full_conversation_formatted, self.sampling_params)
+        return [r.outputs[0].text for r in responses]
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
