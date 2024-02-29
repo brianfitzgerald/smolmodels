@@ -58,7 +58,9 @@ class VLLMWrapper(GenerationWrapper):
     async def generate(self, conversations: List[Conversation]):
         convs_formatted: str = [self.tokenizer.apply_chat_template(c, tokenize=False) for c in conversations]  # type: ignore
         responses = self.model.generate(convs_formatted, self.sampling_params)
-        return [r.outputs[0].text for r in responses]
+        responses_text = [r.outputs[0].text for r in responses]
+        responses_text = [r.replace("<|assistant|>", " ") for r in responses_text]
+        return responses_text
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
