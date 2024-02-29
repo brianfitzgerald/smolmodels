@@ -48,7 +48,7 @@ class VLLMWrapper(GenerationWrapper):
         from vllm import LLM, SamplingParams  # type: ignore
 
         self.sampling_params = SamplingParams(
-            temperature=0.7, top_p=0.95, max_tokens=256
+            temperature=0.7, top_p=0.95, max_tokens=128
         )
         print("Loading local pipeline...")
         self.model = LLM(model="HuggingFaceH4/zephyr-7b-beta", dtype="auto")
