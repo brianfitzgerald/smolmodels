@@ -45,6 +45,7 @@ class Config:
     seed_data_format: DataSourceFormat
     # Either the name of the HF dataset or the path to the CSV file
     seed_data_location: str
+    output_dataset_org: str
     output_dataset_name: str
     n_epochs: int = 10
 
@@ -54,13 +55,15 @@ CONFIGS = {
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
         seed_data_format=DataSourceFormat.HF_DATASET,
         seed_data_location="glaiveai/glaive-function-calling-v2",
-        output_dataset_name="roborovski/glaive-tool-usage-dpo",
+        output_dataset_name="glaive-tool-usage-dpo",
+        output_dataset_org="roborovski",
     ),
     "upsample": Config(
         dataset_task=DatasetTask.PROMPT_UPSAMPLE,
         seed_data_format=DataSourceFormat.TSV,
         seed_data_location="data/PartiPrompts.tsv",
         output_dataset_name="roborovski/upsampled-prompts-parti",
+        output_dataset_org="roborovski",
     ),
 }
 
@@ -106,7 +109,7 @@ def main(
         )
     else:
         output_dataset = cast(
-            Dataset, load_dataset(config.output_dataset_name, split="train")
+            Dataset, load_dataset(f"{config.output_dataset_org}/{config.output_dataset_name}", split="train")
         )
 
     input_dataset: Dataset
@@ -178,7 +181,7 @@ def main(
                 ):
 
                     system_msg, user_msg, accepted_msg, rejected_msg = "", "", "", ""
-                    for i, msg in enumerate(glaive_conversation):
+                    for msg in glaive_conversation:
                         role, content = msg["from"], msg["value"]
                         if role == "system":
                             system_msg = clean_message(content)
