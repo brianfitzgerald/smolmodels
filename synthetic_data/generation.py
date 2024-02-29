@@ -21,11 +21,11 @@ def upload_dataset(
     hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
-    dataset_new_rows.to_csv("upsampled_new_prompts.csv")
+    dataset_new_rows.to_csv(f"{dataset_name}.csv")
 
     concat_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
 
-    print(f"Uploading {len(new_dataset_rows)} new prompts to the Hub...")
+    print(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
     concat_dataset.push_to_hub(dataset_name)
 
 
