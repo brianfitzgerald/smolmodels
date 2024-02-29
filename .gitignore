@@ -169,10 +169,11 @@ latest-run
 upsampled_new_prompts.csv
 *.txt
 logs/*
-submit.sh
 dataset_cache_parti/*
 dataset_cache_llava/*
 *.parquet
 
 samples/*
 dataset_caches/*
+submit.sh
+submit_datagen.sh
