@@ -77,7 +77,7 @@ def clean_message(message: str) -> str:
 
 
 def main(
-    upload_every: int = 500,
+    upload_every: int = 100,
     batch_size: int = 2,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.VLLM,
