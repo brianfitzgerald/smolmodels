@@ -49,3 +49,6 @@ There are a few rules to follow:
     ]
     return user_conversation
 
+example_generation_prompt = """
+Generate a list of examples of problems or user queries that could be solved via an API call, and provide an example of the API call.
+"""
