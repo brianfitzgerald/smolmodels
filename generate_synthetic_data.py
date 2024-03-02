@@ -21,7 +21,7 @@ from synthetic_data.generation import (
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 from synthetic_data.prompts import format_dalle_prompt_template
-from synthetic_data.utils import print_conversations_table
+from synthetic_data.utils import clean_message, print_conversations_table
 
 
 class GenerationSource(str, Enum):
@@ -32,10 +32,11 @@ class GenerationSource(str, Enum):
 class DataSourceFormat(Enum):
     TSV = "tsv"
     HF_DATASET = "hf_dataset"
+    SYNTHETIC = "synthetic"
 
 
 class DatasetTask(Enum):
-    TOOL_USAGE_DPO = "dpo"
+    TOOL_USAGE_DPO = "dpo_generation"
     PROMPT_UPSAMPLE = "upsample"
 
 
@@ -51,7 +52,14 @@ class Config:
 
 
 CONFIGS = {
-    "tool_usage": Config(
+    "synthetic_tool_usage": Config(
+        dataset_task=DatasetTask.TOOL_USAGE_DPO,
+        seed_data_format=DataSourceFormat.SYNTHETIC,
+        seed_data_location="synthetic_tool_usage.csv",
+        output_dataset_name="synthetic-tool-use-dpo",
+        output_dataset_org="roborovski",
+    ),
+    "glaive_tool_usage": Config(
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
         seed_data_format=DataSourceFormat.HF_DATASET,
         seed_data_location="glaiveai/glaive-function-calling-v2",
@@ -68,23 +76,14 @@ CONFIGS = {
 }
 
 
-def clean_message(message: str) -> str:
-    """
-    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
-    """
-    message = message.strip()
-    message = message.replace("<|endoftext|>", "")
-    message = re.sub(r"\n+|\t+", "", message)
-    message = re.sub(r"\s+", " ", message)
-    return message
-
-
 def main(
     upload_every: int = 100,
     batch_size: int = 2,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.VLLM,
     config_name: str = "tool_usage",
+    # If true, will generate seed data instead of DPO pairs
+    generate_seed_data: bool = False,
 ):
 
     config = CONFIGS[config_name]
@@ -109,7 +108,11 @@ def main(
         )
     else:
         output_dataset = cast(
-            Dataset, load_dataset(f"{config.output_dataset_org}/{config.output_dataset_name}", split="train")
+            Dataset,
+            load_dataset(
+                f"{config.output_dataset_org}/{config.output_dataset_name}",
+                split="train",
+            ),
         )
 
     input_dataset: Dataset
@@ -120,6 +123,13 @@ def main(
     elif config.seed_data_format == DataSourceFormat.TSV:
         input_dataset = cast(
             Dataset, load_dataset("tsv", data_files=config.seed_data_location)
+        )
+    elif config.seed_data_format == DataSourceFormat.SYNTHETIC:
+        input_dataset = Dataset.from_dict(
+            {
+                "chat": [],
+                "system": [],
+            }
         )
 
     new_dataset_rows: List[Dict] = []
@@ -152,56 +162,62 @@ def main(
                         f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
                     )
             elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
-                glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
-                completion_conversations: List[Conversation] = []
-                for conversation in glaive_conversations:
-                    completion_conv = []
-                    for msg in conversation:
-                        if msg["from"] == "gpt":
-                            break
-                        completion_conv.append(
-                            {
-                                "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
-                                "content": msg["value"],
-                            }
-                        )
-                    completion_conversations.append(completion_conv)
+                # Generate the prompts that will be completed using the logic below.
+                if generate_seed_data:
+                    pass
+                else:
+                    # Generate completions for the Glaive prompts
+                    full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
 
-                print(
-                    f"Generating {len(completion_conversations)} completions for batch {i}..."
-                )
-                completions = asyncio.run(
-                    model_wrapper.generate(completion_conversations)
-                )
+                    glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
+                    completion_conversations: List[Conversation] = []
+                    for conversation in glaive_conversations:
+                        completion_conv = []
+                        for msg in conversation:
+                            if msg["from"] == "gpt":
+                                break
+                            completion_conv.append(
+                                {
+                                    "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
+                                    "content": msg["value"],
+                                }
+                            )
+                        completion_conversations.append(completion_conv)
 
-                for completion, glaive_conversation in zip(
-                    completions, glaive_conversations
-                ):
-
-                    system_msg, user_msg, accepted_msg, rejected_msg = "", "", "", ""
-                    for msg in glaive_conversation:
-                        role, content = msg["from"], msg["value"]
-                        if role == "system":
-                            system_msg = clean_message(content)
-                        if role == "human":
-                            user_msg = clean_message(content)
-                        if role == "gpt":
-                            accepted_msg = clean_message(content)
-                            rejected_msg = completion
-                            break
-                    new_rows_batch.append(
-                        {
-                            "system": system_msg,
-                            "question": user_msg,
-                            "chosen": accepted_msg,
-                            "rejected": rejected_msg,
-                        }
+                    print(
+                        f"Generating {len(completion_conversations)} completions for batch {i}..."
+                    )
+                    completions = asyncio.run(
+                        model_wrapper.generate(completion_conversations)
                     )
 
-                print_conversations_table(new_rows_batch)
-                new_dataset_rows.extend(new_rows_batch)
+                    for completion, glaive_conversation in zip(
+                        completions, glaive_conversations
+                    ):
+
+                        system_msg, user_msg, accepted_msg, rejected_msg = "", "", "", ""
+                        for msg in glaive_conversation:
+                            role, content = msg["from"], msg["value"]
+                            if role == "system":
+                                system_msg = clean_message(content)
+                            if role == "human":
+                                user_msg = clean_message(content)
+                            if role == "gpt":
+                                accepted_msg = clean_message(content)
+                                rejected_msg = completion
+                                break
+                        new_rows_batch.append(
+                            {
+                                "system": system_msg,
+                                "question": user_msg,
+                                "chosen": accepted_msg,
+                                "rejected": rejected_msg,
+                            }
+                        )
+
+                    print_conversations_table(new_rows_batch)
+                    new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:
                 print(f"Upsampled {i} prompts")

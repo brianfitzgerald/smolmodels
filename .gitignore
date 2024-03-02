@@ -177,4 +177,3 @@ samples/*
 dataset_caches/*
 submit.sh
 submit_datagen.sh
-glaive-tool-usage-dpo.csv
