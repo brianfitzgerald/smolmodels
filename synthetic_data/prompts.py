@@ -51,14 +51,49 @@ There are a few rules to follow:
     return user_conversation
 
 
+API_EXAMPLE = {
+    "name": "convert_weight",
+    "description": "Convert weight from one unit to another. Returns the converted weight.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "weight": {"type": "number", "description": "The weight value"},
+            "from_unit": {"type": "string", "description": "The unit to convert from"},
+            "to_unit": {"type": "string", "description": "The unit to convert to"},
+        },
+        "required": ["weight", "from_unit", "to_unit"],
+    },
+}
+
+API_USAGE_EXAMPLE = {"weight": 10, "from_unit": "pounds", "to_unit": "kilograms"}
+
 tool_usage_prompt = """
-Generate a list of examples scenarios of a user performing the task: {task}, in the domain of {domain} with {subdomain}.
-The examples must be detailed and descriptive, and should be between 15-80 words.
-Add an example API call, in the form of a JSON object, that would be used to perform the task.
+Generate an example of an API in the category of {category} that could be used to {task}.
+Provide the API in the form of a JSON definition. Follow the example below.
+Then, provide an example of a user query that would be used to perform the task.
+Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples.
+Finally, provide an example of the agent's output to the user query.
+
+Do not use any emoji or special characters in your response.
+
+For example:
+
+Task: Convert weight
+API: {api_example}
+User: Convert 10 pounds to kilograms
+Call: {api_usage_example}
+Result: 4.53592
+Agent: 10 pounds is equal to 4.53592 kilograms.
+
+"""
+
+CATEGORY_GENERATION_PROMPT = """
+Generate 100 examples of tasks that an API would perform, such as calculating distance, searching for recipes, or generating a random color.
+Do not mention any brands or specific programs. Return the answer in CSV format with a category for each
 """
 
 
-def format_tool_usage_prompt(task: str, domain: str, subdomain: str) -> Conversation:
+def format_tool_usage_prompt(category: str, task: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
     """
@@ -67,7 +102,10 @@ def format_tool_usage_prompt(task: str, domain: str, subdomain: str) -> Conversa
         {
             "role": "system",
             "content": tool_usage_prompt.format(
-                task=task, domain=domain, subdomain=subdomain
+                task=task,
+                category=category,
+                api_example=API_EXAMPLE,
+                api_usage_example=API_USAGE_EXAMPLE,
             ),
         }
     ]
