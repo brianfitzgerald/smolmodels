@@ -178,5 +178,3 @@ dataset_caches/*
 dataset_samples/*
 submit.sh
 submit_datagen.sh
-
-seed_data_files/categories.csv

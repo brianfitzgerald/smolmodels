@@ -30,6 +30,7 @@ from synthetic_data.utils import (
     clean_example,
     clean_message,
     extract_code_blocks,
+    extract_lines_with_prefixes,
     print_conversations_table,
 )
 
@@ -76,7 +77,7 @@ CONFIGS = {
     "synthetic_tool_usage": Config(
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
         seed_data_format=DataSourceFormat.SYNTHETIC,
-        seed_data_location="seed_data_files/categories.csv",
+        seed_data_location="seed_data_files/domain_specific_tasks.csv",
         output_dataset_name="synthetic-tool-use-dpo",
         output_dataset_org="roborovski",
     ),
@@ -105,12 +106,14 @@ def main(
     config_name: str = "synthetic_tool_usage",
     # If true, will generate seed data instead of DPO pairs
     seed: bool = False,
+    **kwargs,
 ):
     """
     Generate synthetic preference data from a given dataset.
     Inputs a seed dataset, that is either given from a CSV or HF dataset,
     or generated from a synthetic source, such as a list of subjects.
     """
+    assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
     config = CONFIGS[config_name]
 
@@ -182,26 +185,26 @@ def main(
                 for _, seed_data_row in seed_data_batch.iterrows():
                     completion_conversations.append(
                         format_tool_usage_prompt(
-                            seed_data_row["task"],
-                            seed_data_row["domain"],
-                            seed_data_row["subdomain"],
+                            seed_data_row["Category"],
+                            seed_data_row["Task"],
                         )
                     )
                 print(
                     f"Generating {len(completion_conversations)} completions for batch {i}..."
                 )
+                print(f"Conversations: {completion_conversations}")
                 completions = asyncio.run(
                     model_wrapper.generate(completion_conversations)
                 )
                 for completion in completions:
-                    code_block = extract_code_blocks(completion)
-                    instruction = clean_example(completion)
+                    task, definition, tool_call, call_result, agent_output = extract_lines_with_prefixes(completion)
                     new_rows_batch.append(
                         {
-                            "system": "",
-                            "question": instruction,
-                            "chosen": code_block,
-                            "rejected": "",
+                            "tool": definition,
+                            "question": task,
+                            "call_result": call_result,
+                            "tool_call": tool_call,
+                            "agent_output": agent_output,
                         }
                     )
                 print_conversations_table(new_rows_batch)

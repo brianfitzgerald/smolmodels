@@ -4,10 +4,20 @@ from typing import Dict, List
 from tabulate import tabulate
 
 
+def clean_message(message: str) -> str:
+    """
+    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
+    """
+    message = message.strip()
+    message = message.replace("<|endoftext|>", "")
+    message = re.sub(r"\n+|\t+", "", message)
+    return message
+
+
 def print_conversations_table(
     results: List[Dict],
-    columns: List[str] = ["system", "question", "chosen", "rejected"],
 ):
+    columns = list(results[0].keys())
     new_dataset_row_elements = [
         [clean_message(row[column]) for column in columns] for row in results
     ]
@@ -16,20 +26,9 @@ def print_conversations_table(
             new_dataset_row_elements,
             headers=columns,
             tablefmt="simple",
-            maxcolwidths=[50] * 4,
+            maxcolwidths=[50] * len(columns),
         )
     )
-
-
-def clean_message(message: str) -> str:
-    """
-    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
-    """
-    message = message.strip()
-    message = message.replace("<|endoftext|>", "")
-    message = re.sub(r"\n+|\t+", "", message)
-    message = re.sub(r"\s+", " ", message)
-    return message
 
 
 def extract_code_blocks(text):
@@ -45,6 +44,25 @@ def extract_code_blocks(text):
     code_blocks_str = "\n".join(clean_code_blocks)
     return code_blocks_str
 
+
+def extract_lines_with_prefixes(text: str):
+    # Define the regular expression pattern to match lines starting with Task:, API:, Call:, and Output:
+    pattern = re.compile(r"(Task:|API:|Call:|Result:|Agent:)\s*(.*)", re.IGNORECASE)
+
+    # Find all matches
+    matches = pattern.findall(text)
+
+    # Filter out empty matches and remove prefixes
+    extracted_lines = []
+    for match in matches:
+        if match[1]:
+            extracted_lines.append(match[1])
+
+    return extracted_lines
+
+
 def clean_example(text):
-    cleaned_paragraph = re.sub(r'1\. Scenario:.*?Example API Call:|```.*?```', '', text, flags=re.DOTALL)
+    cleaned_paragraph = re.sub(
+        r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
+    )
     return cleaned_paragraph.strip()
