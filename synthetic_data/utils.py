@@ -17,6 +17,9 @@ def clean_message(message: str) -> str:
 def print_conversations_table(
     results: List[Dict],
 ):
+    if len(results) == 0:
+        print("No conversations found, skipping print.")
+        return
     columns = list(results[0].keys())
     new_dataset_row_elements = [
         [clean_message(row[column]) for column in columns] for row in results
