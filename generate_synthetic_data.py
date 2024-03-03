@@ -22,8 +22,16 @@ from synthetic_data.generation import (
 )
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
-from synthetic_data.prompts import format_dalle_prompt_template, format_tool_usage_prompt
-from synthetic_data.utils import clean_message, print_conversations_table
+from synthetic_data.prompts import (
+    format_dalle_prompt_template,
+    format_tool_usage_prompt,
+)
+from synthetic_data.utils import (
+    clean_example,
+    clean_message,
+    extract_code_blocks,
+    print_conversations_table,
+)
 
 
 class GenerationSource(str, Enum):
@@ -165,19 +173,44 @@ def main(
 
             # Iterate through batches
             for i in range(num_batches):
+                new_rows_batch = []
                 start_idx = i * batch_size
                 end_idx = min((i + 1) * batch_size, len(seed_data))
                 seed_data_batch = seed_data.iloc[start_idx:end_idx]
 
                 completion_conversations: List[Conversation] = []
                 for _, seed_data_row in seed_data_batch.iterrows():
-                    completion_conversations.append(format_tool_usage_prompt(seed_data_row["task"], seed_data_row["domain"], seed_data_row["subdomain"]))
+                    completion_conversations.append(
+                        format_tool_usage_prompt(
+                            seed_data_row["task"],
+                            seed_data_row["domain"],
+                            seed_data_row["subdomain"],
+                        )
+                    )
                 print(
                     f"Generating {len(completion_conversations)} completions for batch {i}..."
                 )
-                completions = asyncio.run(model_wrapper.generate(completion_conversations))
+                completions = asyncio.run(
+                    model_wrapper.generate(completion_conversations)
+                )
                 for completion in completions:
-                    print(completion)
+                    code_block = extract_code_blocks(completion)
+                    instruction = clean_example(completion)
+                    new_rows_batch.append(
+                        {
+                            "system": "",
+                            "question": instruction,
+                            "chosen": code_block,
+                            "rejected": "",
+                        }
+                    )
+                print_conversations_table(new_rows_batch)
+                new_dataset_rows.extend(new_rows_batch)
+
+                if i % upload_every == 0 and i > 0:
+                    upload_dataset(
+                        output_dataset, config.output_dataset_name, new_dataset_rows
+                    )
         # Generate completions for the tool usage prompts
         else:
             for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
