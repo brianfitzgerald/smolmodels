@@ -197,16 +197,19 @@ def main(
                     model_wrapper.generate(completion_conversations)
                 )
                 for completion in completions:
-                    task, definition, tool_call, call_result, agent_output = extract_lines_with_prefixes(completion)
-                    new_rows_batch.append(
-                        {
-                            "tool": definition,
-                            "question": task,
-                            "call_result": call_result,
-                            "tool_call": tool_call,
-                            "agent_output": agent_output,
-                        }
-                    )
+                    try:
+                        task, definition, tool_call, call_result, agent_output = extract_lines_with_prefixes(completion)
+                        new_rows_batch.append(
+                            {
+                                "tool": definition,
+                                "question": task,
+                                "call_result": call_result,
+                                "tool_call": tool_call,
+                                "agent_output": agent_output,
+                            }
+                        )
+                    except ValueError:
+                        print(f"Failed to parse completion: {completion}")
                 print_conversations_table(new_rows_batch)
                 new_dataset_rows.extend(new_rows_batch)
 
