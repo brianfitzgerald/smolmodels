@@ -1,5 +1,6 @@
 from synthetic_data.generation import Conversation
 
+
 def format_dalle_prompt_template(user_prompt: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
@@ -49,6 +50,24 @@ There are a few rules to follow:
     ]
     return user_conversation
 
-example_generation_prompt = """
-Generate a list of examples of problems or user queries that could be solved via an API call, and provide an example of the API call.
+
+tool_usage_prompt = """
+Generate a list of examples scenarios of a user performing the task: {task}, in the domain of {domain} with {subdomain}.
+The examples must be detailed and descriptive, and should be between 15-80 words.
+Add an example API call, in the form of a JSON object, that would be used to perform the task.
 """
+
+
+def format_tool_usage_prompt(task: str, domain: str, subdomain: str) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    return [
+        {
+            "role": "system",
+            "content": tool_usage_prompt.format(
+                task=task, domain=domain, subdomain=subdomain
+            ),
+        }
+    ]

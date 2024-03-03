@@ -4,8 +4,10 @@ import re
 from typing import Dict, List, cast
 import asyncio
 
+import pandas as pd
 from enum import Enum
 from datasets import Dataset, load_dataset
+from datasets.data_files import EmptyDatasetError
 import fire
 from huggingface_hub import login
 from dotenv import dotenv_values
@@ -20,7 +22,7 @@ from synthetic_data.generation import (
 )
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
-from synthetic_data.prompts import format_dalle_prompt_template
+from synthetic_data.prompts import format_dalle_prompt_template, format_tool_usage_prompt
 from synthetic_data.utils import clean_message, print_conversations_table
 
 
@@ -40,6 +42,17 @@ class DatasetTask(Enum):
     PROMPT_UPSAMPLE = "upsample"
 
 
+EMPTY_DATASET_FORMATS = {
+    DatasetTask.PROMPT_UPSAMPLE: {"Prompt": [], "Category": [], "Upsampled": []},
+    DatasetTask.TOOL_USAGE_DPO: {
+        "system": [],
+        "question": [],
+        "chosen": [],
+        "rejected": [],
+    },
+}
+
+
 @dataclass
 class Config:
     dataset_task: DatasetTask
@@ -55,7 +68,7 @@ CONFIGS = {
     "synthetic_tool_usage": Config(
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
         seed_data_format=DataSourceFormat.SYNTHETIC,
-        seed_data_location="synthetic_tool_usage.csv",
+        seed_data_location="seed_data_files/categories.csv",
         output_dataset_name="synthetic-tool-use-dpo",
         output_dataset_org="roborovski",
     ),
@@ -80,11 +93,16 @@ def main(
     upload_every: int = 100,
     batch_size: int = 2,
     restart: bool = False,
-    generation_source: GenerationSource = GenerationSource.VLLM,
-    config_name: str = "tool_usage",
+    generation_source: GenerationSource = GenerationSource.OPENAI,
+    config_name: str = "synthetic_tool_usage",
     # If true, will generate seed data instead of DPO pairs
-    generate_seed_data: bool = False,
+    seed: bool = False,
 ):
+    """
+    Generate synthetic preference data from a given dataset.
+    Inputs a seed dataset, that is either given from a CSV or HF dataset,
+    or generated from a synthetic source, such as a list of subjects.
+    """
 
     config = CONFIGS[config_name]
 
@@ -103,17 +121,21 @@ def main(
 
     print("Loading existing data...")
     if restart:
-        output_dataset = Dataset.from_dict(
-            {"Prompt": [], "Category": [], "Upsampled": []}
-        )
+        output_dataset = Dataset.from_dict(EMPTY_DATASET_FORMATS[config.dataset_task])
     else:
-        output_dataset = cast(
-            Dataset,
-            load_dataset(
-                f"{config.output_dataset_org}/{config.output_dataset_name}",
-                split="train",
-            ),
-        )
+        try:
+            output_dataset = cast(
+                Dataset,
+                load_dataset(
+                    f"{config.output_dataset_org}/{config.output_dataset_name}",
+                    split="train",
+                ),
+            )
+        except EmptyDatasetError:
+            print("No existing dataset found, starting from scratch...")
+            output_dataset = Dataset.from_dict(
+                EMPTY_DATASET_FORMATS[config.dataset_task]
+            )
 
     input_dataset: Dataset
     if config.seed_data_format == DataSourceFormat.HF_DATASET:
@@ -136,39 +158,57 @@ def main(
 
     print("Running...")
     for epoch in range(config.n_epochs):
-        for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
-            new_rows_batch = []
-            if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
-                prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
-                full_conversations_batch: List[Conversation] = [
-                    format_dalle_prompt_template(prompt) for prompt in prompts
-                ]
-                completions = asyncio.run(
-                    model_wrapper.generate(full_conversations_batch)
+        # Generate the prompts that will be completed using the logic below.
+        if seed:
+            seed_data = pd.read_csv(config.seed_data_location, on_bad_lines="skip")
+            num_batches = len(seed_data) // batch_size + 1
+
+            # Iterate through batches
+            for i in range(num_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, len(seed_data))
+                seed_data_batch = seed_data.iloc[start_idx:end_idx]
+
+                completion_conversations: List[Conversation] = []
+                for _, seed_data_row in seed_data_batch.iterrows():
+                    completion_conversations.append(format_tool_usage_prompt(seed_data_row["task"], seed_data_row["domain"], seed_data_row["subdomain"]))
+                print(
+                    f"Generating {len(completion_conversations)} completions for batch {i}..."
                 )
-
-                for category, original_prompt, output in zip(
-                    categories_batch, prompts, completions
-                ):
-                    new_rows_batch.append(
-                        {
-                            "Prompt": original_prompt,
-                            "Category": category,
-                            "Upsampled": output,
-                        }
+                completions = asyncio.run(model_wrapper.generate(completion_conversations))
+                for completion in completions:
+                    print(completion)
+        # Generate completions for the tool usage prompts
+        else:
+            for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+                new_rows_batch = []
+                if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
+                    prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
+                    full_conversations_batch: List[Conversation] = [
+                        format_dalle_prompt_template(prompt) for prompt in prompts
+                    ]
+                    completions = asyncio.run(
+                        model_wrapper.generate(full_conversations_batch)
                     )
 
-                    print(
-                        f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
-                    )
-            elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                    for category, original_prompt, output in zip(
+                        categories_batch, prompts, completions
+                    ):
+                        new_rows_batch.append(
+                            {
+                                "Prompt": original_prompt,
+                                "Category": category,
+                                "Upsampled": output,
+                            }
+                        )
 
-                # Generate the prompts that will be completed using the logic below.
-                if generate_seed_data:
-                    pass
-                else:
-                    # Generate completions for the Glaive prompts
-                    full_conversations_batch: List[List[ChatCompletionMessageParam]] = []
+                        print(
+                            f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
+                        )
+                elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                    full_conversations_batch: List[List[ChatCompletionMessageParam]] = (
+                        []
+                    )
 
                     glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
                     completion_conversations: List[Conversation] = []
@@ -196,7 +236,12 @@ def main(
                         completions, glaive_conversations
                     ):
 
-                        system_msg, user_msg, accepted_msg, rejected_msg = "", "", "", ""
+                        system_msg, user_msg, accepted_msg, rejected_msg = (
+                            "",
+                            "",
+                            "",
+                            "",
+                        )
                         for msg in glaive_conversation:
                             role, content = msg["from"], msg["value"]
                             if role == "system":
@@ -220,7 +265,6 @@ def main(
                     new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:
-                print(f"Upsampled {i} prompts")
                 upload_dataset(
                     output_dataset, config.output_dataset_name, new_dataset_rows
                 )
