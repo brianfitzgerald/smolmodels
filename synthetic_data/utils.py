@@ -1,4 +1,7 @@
+import ast
+import json
 import re
+import traceback
 from typing import Dict, List
 
 from tabulate import tabulate
@@ -8,6 +11,10 @@ def clean_message(message: str) -> str:
     """
     Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
     """
+    
+    # Handle odd edge case where textwrap evaluates the value as a bool
+    if message == "True" or message == "False":
+        message = message.lower()
     message = message.strip()
     message = message.replace("<|endoftext|>", "")
     message = re.sub(r"\n+|\t+", "", message)
@@ -63,6 +70,10 @@ def extract_lines_with_prefixes(text: str):
 
     return extracted_lines
 
+
+def assert_valid_python_value(json_str: str):
+    evaluated = ast.literal_eval(json_str)
+    assert isinstance(evaluated, (dict, list, str, int, float))
 
 def clean_example(text):
     cleaned_paragraph = re.sub(

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 import re
+import traceback
 from typing import Dict, List, cast
 import asyncio
 
@@ -16,6 +17,7 @@ from synthetic_data.generation import (
     SHAREGPT_TO_OPENAI_ROLE,
     Conversation,
     GenerationWrapper,
+    OpenRouterGenerationWrapper,
     VLLMWrapper,
     OpenAIGenerationWrapper,
     upload_dataset,
@@ -31,6 +33,7 @@ from synthetic_data.utils import (
     clean_message,
     extract_code_blocks,
     extract_lines_with_prefixes,
+    assert_valid_python_value,
     print_conversations_table,
 )
 
@@ -38,6 +41,7 @@ from synthetic_data.utils import (
 class GenerationSource(str, Enum):
     OPENAI = "openai"
     VLLM = "vllm"
+    OPENROUTER = "mixtral"
 
 
 class DataSourceFormat(Enum):
@@ -97,12 +101,18 @@ CONFIGS = {
     ),
 }
 
+MODEL_WRAPPER_CLASSES = {
+    GenerationSource.OPENAI: OpenAIGenerationWrapper,
+    GenerationSource.VLLM: VLLMWrapper,
+    GenerationSource.OPENROUTER: OpenRouterGenerationWrapper,
+}
+
 
 def main(
     upload_every: int = 100,
-    batch_size: int = 2,
+    batch_size: int = 8,
     restart: bool = False,
-    generation_source: GenerationSource = GenerationSource.OPENAI,
+    generation_source: GenerationSource = GenerationSource.OPENROUTER,
     config_name: str = "synthetic_tool_usage",
     # If true, will generate seed data instead of DPO pairs
     seed: bool = False,
@@ -120,15 +130,11 @@ def main(
     print("Logging into the Hub...")
     current_dir = os.path.dirname(os.path.abspath(__file__))
     dotenv = dotenv_values(os.path.join(current_dir, ".env"))
-    hf_token, oai_token = dotenv["HF_TOKEN"], dotenv["OPENAI_API_KEY"]
+    hf_token = dotenv["HF_TOKEN"]
     print(f"Logging in with token: {hf_token}")
     login(token=hf_token, add_to_git_credential=True)
 
-    model_wrapper: GenerationWrapper = (
-        OpenAIGenerationWrapper(oai_token)
-        if generation_source == GenerationSource.OPENAI == "openai"
-        else VLLMWrapper()
-    )
+    model_wrapper: GenerationWrapper = MODEL_WRAPPER_CLASSES[generation_source](dotenv)
 
     print("Loading existing data...")
     if restart:
@@ -176,7 +182,6 @@ def main(
 
             # Iterate through batches
             for i in range(num_batches):
-                new_rows_batch = []
                 start_idx = i * batch_size
                 end_idx = min((i + 1) * batch_size, len(seed_data))
                 seed_data_batch = seed_data.iloc[start_idx:end_idx]
@@ -189,27 +194,38 @@ def main(
                             seed_data_row["Task"],
                         )
                     )
+
                 print(
                     f"Generating {len(completion_conversations)} completions for batch {i}..."
                 )
-                print(f"Conversations: {completion_conversations}")
                 completions = asyncio.run(
                     model_wrapper.generate(completion_conversations)
                 )
+
+                new_rows_batch = []
                 for completion in completions:
                     try:
-                        task, definition, tool_call, call_result, agent_output = extract_lines_with_prefixes(completion)
-                        new_rows_batch.append(
-                            {
-                                "tool": definition,
-                                "question": task,
-                                "call_result": call_result,
-                                "tool_call": tool_call,
-                                "agent_output": agent_output,
-                            }
+                        task, definition, tool_call, call_result, agent_output = (
+                            extract_lines_with_prefixes(completion)
                         )
-                    except ValueError:
-                        print(f"Failed to parse completion: {completion}")
+
+                        assert_valid_python_value(definition)
+                        assert_valid_python_value(call_result)
+                        assert_valid_python_value(tool_call)
+
+                    except Exception as e:
+                        traceback.print_exc()
+                        continue
+                    new_rows_batch.append(
+                        {
+                            "tool": definition,
+                            "question": task,
+                            "call_result": call_result,
+                            "tool_call": tool_call,
+                            "agent_output": agent_output,
+                        }
+                    )
+
                 print_conversations_table(new_rows_batch)
                 new_dataset_rows.extend(new_rows_batch)
 

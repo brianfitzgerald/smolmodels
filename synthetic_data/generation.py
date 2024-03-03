@@ -37,13 +37,13 @@ class GenerationWrapper(ABC):
     tokenizer: PreTrainedTokenizerBase
 
     @abstractmethod
-    async def generate(self, conversations: List[Conversation]):
+    async def generate(self, conversations: List[Conversation]) -> List[str]:
         pass
 
 
 class VLLMWrapper(GenerationWrapper):
 
-    def __init__(self):
+    def __init__(self, dotenv: Dict[str, str]):
 
         from vllm import LLM, SamplingParams  # type: ignore
 
@@ -55,7 +55,7 @@ class VLLMWrapper(GenerationWrapper):
         print("Pipeline loaded.")
         self.tokenizer = self.model.get_tokenizer()
 
-    async def generate(self, conversations: List[Conversation]):
+    async def generate(self, conversations: List[Conversation]) -> List[str]:
         convs_formatted: str = [self.tokenizer.apply_chat_template(c, tokenize=False) for c in conversations]  # type: ignore
         responses = self.model.generate(convs_formatted, self.sampling_params)
         responses_text = [r.outputs[0].text for r in responses]
@@ -65,16 +65,18 @@ class VLLMWrapper(GenerationWrapper):
 
 class OpenAIGenerationWrapper(GenerationWrapper):
 
-    def __init__(self, api_key: Optional[str]):
+    def __init__(self, dotenv: Dict[str, str]):
+        api_key = dotenv.get("OPENAI_API_KEY")
         if api_key is None:
-            raise ValueError("OpenAI API key is required for OpenAIGenerationWrapper")
+            raise ValueError("OPENAI_API_KEY is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
+        self.model_name = "gpt-3.5-turbo"
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
         completion_requests = []
         for conversation in conversations:
             request = self.oai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=self.model_name,
                 messages=conversation,
                 temperature=0,
                 max_tokens=512,
@@ -87,3 +89,16 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             if result.choices[0].message.content is not None
         ]
         return completions
+
+
+class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
+
+    def __init__(self, dotenv: Dict[str, str]):
+        api_key = dotenv.get("OPENROUTER_API_KEY")
+        if api_key is None:
+            raise ValueError("OPENROUTER_API_KEY is required for OpenRouterGenerationWrapper")
+        self.oai_client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        self.model_name = "nousresearch/nous-hermes-2-mixtral-8x7b-dpo"
