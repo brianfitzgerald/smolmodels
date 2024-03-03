@@ -21,7 +21,7 @@ def upload_dataset(
     hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
-    dataset_new_rows.to_csv(f"{dataset_name}.csv")
+    dataset_new_rows.to_csv(f"dataset_samples/{dataset_name}.csv")
 
     concat_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
 
