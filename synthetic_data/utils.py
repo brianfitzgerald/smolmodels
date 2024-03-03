@@ -26,7 +26,7 @@ def print_conversations_table(
             new_dataset_row_elements,
             headers=columns,
             tablefmt="simple",
-            maxcolwidths=[50] * len(columns),
+            maxcolwidths=[40] * len(columns),
         )
     )
 
