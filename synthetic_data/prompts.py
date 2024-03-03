@@ -51,7 +51,7 @@ There are a few rules to follow:
     return user_conversation
 
 
-API_EXAMPLE = {
+CONVERT_WEIGHT_API_EXAMPLE = {
     "name": "convert_weight",
     "description": "Convert weight from one unit to another. Returns the converted weight.",
     "parameters": {
@@ -65,25 +65,58 @@ API_EXAMPLE = {
     },
 }
 
-API_USAGE_EXAMPLE = {"weight": 10, "from_unit": "pounds", "to_unit": "kilograms"}
+CONVERT_WEIGHT_USAGE_EXAMPLE = {
+    "weight": 10,
+    "from_unit": "pounds",
+    "to_unit": "kilograms",
+}
+
+HISTORICAL_WEATHER_API_EXAMPLE = {
+    "name": "historical_weather_data",
+    "description": "Retrieve historical weather data for a location. Returns the weather data for a specific date.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "The location for which to retrieve weather data",
+            },
+            "date": {
+                "type": "string",
+                "description": "The date for which to retrieve historical weather data",
+            },
+        },
+        "required": ["location", "date"],
+    },
+}
+
+HISTORICAL_WEATHER_USAGE_EXAMPLE = {"location": "New York", "date": "2022-01-01"}
+HISTORICAL_WEATHER_RESULT_EXAMPLE = {'temperature': 32, 'weather_condition': 'Snow', 'wind_speed': 10}
 
 tool_usage_prompt = """
 Generate an example of an API in the category of {category} that could be used to {task}.
 Provide the API in the form of a JSON definition. Follow the example below.
 Then, provide an example of a user query that would be used to perform the task.
-Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples.
-Finally, provide an example of the agent's output to the user query.
+Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
 
 Do not use any emoji or special characters in your response.
 
 For example:
 
 Task: Convert weight
-API: {api_example}
+API: {CONVERT_WEIGHT_API_EXAMPLE}
 User: Convert 10 pounds to kilograms
-Call: {api_usage_example}
+Call: {CONVERT_WEIGHT_USAGE_EXAMPLE}
 Result: 4.53592
 Agent: 10 pounds is equal to 4.53592 kilograms.
+
+Task: Retrieve historical weather data
+API: {HISTORICAL_WEATHER_API_EXAMPLE}
+User: Convert 10 pounds to kilograms
+Call: {HISTORICAL_WEATHER_USAGE_EXAMPLE}
+Result: {HISTORICAL_WEATHER_RESULT_EXAMPLE}
+Agent: On January 1, 2020, in New York City, the temperature was 32°F with snowfall and a wind speed of 10 mph.
 
 """
 
@@ -104,8 +137,11 @@ def format_tool_usage_prompt(category: str, task: str) -> Conversation:
             "content": tool_usage_prompt.format(
                 task=task,
                 category=category,
-                api_example=API_EXAMPLE,
-                api_usage_example=API_USAGE_EXAMPLE,
+                CONVERT_WEIGHT_API_EXAMPLE=CONVERT_WEIGHT_API_EXAMPLE,
+                CONVERT_WEIGHT_USAGE_EXAMPLE=CONVERT_WEIGHT_USAGE_EXAMPLE,
+                HISTORICAL_WEATHER_API_EXAMPLE=HISTORICAL_WEATHER_API_EXAMPLE,
+                HISTORICAL_WEATHER_USAGE_EXAMPLE=HISTORICAL_WEATHER_USAGE_EXAMPLE,
+                HISTORICAL_WEATHER_RESULT_EXAMPLE=HISTORICAL_WEATHER_RESULT_EXAMPLE,
             ),
         }
     ]

@@ -172,8 +172,6 @@ Data Processing,Encrypt and decrypt data
 Data Processing,Generate hashes for data integrity verification
 Data Processing,Convert timestamps between time zones
 Data Processing,Generate random passwords
-Networking,Send HTTP requests and receive responses
-Networking,Perform DNS lookups
 Networking,Check if a website is reachable
 Networking,Get information about IP addresses
 Networking,Retrieve web page content
@@ -258,8 +256,6 @@ Travel & Transportation,Share ETA (Estimated Time of Arrival) with contacts
 Travel & Transportation,Find parking spots and reserve parking in advance
 Travel & Transportation,Access maps and navigation for driving or walking directions
 Travel & Transportation,Discover travel deals and vacation packages
-Entertainment & Leisure,Stream music and podcasts
-Entertainment & Leisure,Watch movies and TV shows on demand
 Entertainment & Leisure,Discover new books and authors to read
 Entertainment & Leisure,Find nearby events and activities
 Entertainment & Leisure,Play interactive games and puzzles
