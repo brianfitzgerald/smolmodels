@@ -109,10 +109,11 @@ MODEL_WRAPPER_CLASSES = {
 
 
 def main(
-    upload_every: int = 100,
+    # n batches
+    upload_every: int = 10,
     batch_size: int = 8,
     restart: bool = False,
-    generation_source: GenerationSource = GenerationSource.OPENROUTER,
+    generation_source: GenerationSource = GenerationSource.OPENAI,
     config_name: str = "synthetic_tool_usage",
     # If true, will generate seed data instead of DPO pairs
     seed: bool = False,
@@ -148,7 +149,7 @@ def main(
                     split="train",
                 ),
             )
-        except EmptyDatasetError:
+        except (EmptyDatasetError, ValueError):
             print("No existing dataset found, starting from scratch...")
             output_dataset = Dataset.from_dict(
                 EMPTY_DATASET_FORMATS[config.dataset_task]
@@ -198,9 +199,13 @@ def main(
                 print(
                     f"Generating {len(completion_conversations)} completions for batch {i}..."
                 )
-                completions = asyncio.run(
-                    model_wrapper.generate(completion_conversations)
-                )
+                try:
+                    completions = asyncio.run(
+                        model_wrapper.generate(completion_conversations)
+                    )
+                except Exception as e:
+                    print(f"Error generating completions: {e}")
+                    continue
 
                 new_rows_batch = []
                 for completion in completions:
