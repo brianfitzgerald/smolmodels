@@ -80,6 +80,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 messages=conversation,
                 temperature=0,
                 max_tokens=512,
+                timeout=30,
             )
             completion_requests.append(request)
         results: List[ChatCompletion] = await asyncio.gather(*completion_requests)

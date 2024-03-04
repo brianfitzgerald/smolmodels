@@ -91,19 +91,13 @@ HISTORICAL_WEATHER_API_EXAMPLE = {
 }
 
 HISTORICAL_WEATHER_USAGE_EXAMPLE = {"location": "New York", "date": "2022-01-01"}
-HISTORICAL_WEATHER_RESULT_EXAMPLE = {'temperature': 32, 'weather_condition': 'Snow', 'wind_speed': 10}
+HISTORICAL_WEATHER_RESULT_EXAMPLE = {
+    "temperature": 32,
+    "weather_condition": "Snow",
+    "wind_speed": 10,
+}
 
-tool_usage_prompt = """
-Generate an example of an API in the category of {category} that could be used to {task}.
-Provide the API in the form of a JSON definition. Follow the example below.
-Then, provide an example of a user query that would be used to perform the task.
-Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
-Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
-
-Do not use any emoji or special characters in your response.
-
-For example:
-
+TOOL_USE_EXAMPLES = """
 Task: Convert weight
 API: {CONVERT_WEIGHT_API_EXAMPLE}
 User: Convert 10 pounds to kilograms
@@ -117,8 +111,37 @@ User: Convert 10 pounds to kilograms
 Call: {HISTORICAL_WEATHER_USAGE_EXAMPLE}
 Result: {HISTORICAL_WEATHER_RESULT_EXAMPLE}
 Agent: On January 1, 2020, in New York City, the temperature was 32°F with snowfall and a wind speed of 10 mph.
+"""
+
+tool_usage_prompt = """
+Generate an example of an API in the category of {category} that could be used to {task}.
+Provide the API in the form of a JSON definition. Follow the example below.
+Then, provide an example of a user query that would be used to perform the task.
+Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
+
+Do not use any emoji or special characters in your response.
+
+For example:
+
+{tool_use_examples}
+"""
+
+tool_usage_secondary_sample_prompt = """
+Generate an example of an API in the category of {category} that could be used to {task}.
+You are given a JSON definition of an API and an example of a user query that would be used to perform the task.
+Provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Do not use any emoji or special characters in your response.
+
+For example:
+{tool_use_examples}
+
+Task: {task}
+API: {api_definition}
+User: {user_query}
 
 """
+
 
 CATEGORY_GENERATION_PROMPT = """
 Generate 100 examples of tasks that an API would perform, such as calculating distance, searching for recipes, or generating a random color.
@@ -126,10 +149,22 @@ Do not mention any brands or specific programs. Return the answer in CSV format 
 """
 
 
+def get_tool_use_examples():
+    return TOOL_USE_EXAMPLES.format(
+        CONVERT_WEIGHT_API_EXAMPLE=CONVERT_WEIGHT_API_EXAMPLE,
+        CONVERT_WEIGHT_USAGE_EXAMPLE=CONVERT_WEIGHT_USAGE_EXAMPLE,
+        HISTORICAL_WEATHER_API_EXAMPLE=HISTORICAL_WEATHER_API_EXAMPLE,
+        HISTORICAL_WEATHER_USAGE_EXAMPLE=HISTORICAL_WEATHER_USAGE_EXAMPLE,
+        HISTORICAL_WEATHER_RESULT_EXAMPLE=HISTORICAL_WEATHER_RESULT_EXAMPLE,
+    )
+
+
 def format_tool_usage_prompt(category: str, task: str) -> Conversation:
     """
-    Prepares the system and user-assistant style messages for inference.
+    Format the original tool use generation.
     """
+
+    tool_use_examples = get_tool_use_examples()
 
     return [
         {
@@ -137,11 +172,30 @@ def format_tool_usage_prompt(category: str, task: str) -> Conversation:
             "content": tool_usage_prompt.format(
                 task=task,
                 category=category,
-                CONVERT_WEIGHT_API_EXAMPLE=CONVERT_WEIGHT_API_EXAMPLE,
-                CONVERT_WEIGHT_USAGE_EXAMPLE=CONVERT_WEIGHT_USAGE_EXAMPLE,
-                HISTORICAL_WEATHER_API_EXAMPLE=HISTORICAL_WEATHER_API_EXAMPLE,
-                HISTORICAL_WEATHER_USAGE_EXAMPLE=HISTORICAL_WEATHER_USAGE_EXAMPLE,
-                HISTORICAL_WEATHER_RESULT_EXAMPLE=HISTORICAL_WEATHER_RESULT_EXAMPLE,
+                tool_use_examples=tool_use_examples,
+            ),
+        }
+    ]
+
+
+def format_tool_use_secondary_prompt(
+    category: str, task: str, api_definition: str, user_query: str
+) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    tool_use_examples = get_tool_use_examples()
+
+    return [
+        {
+            "role": "system",
+            "content": tool_usage_secondary_sample_prompt.format(
+                task=task,
+                category=category,
+                tool_use_examples=tool_use_examples,
+                api_definition=api_definition,
+                user_query=user_query,
             ),
         }
     ]
