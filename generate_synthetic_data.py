@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import os
-import re
 import traceback
 from typing import Dict, List, cast
 import asyncio
@@ -29,9 +28,7 @@ from synthetic_data.prompts import (
     format_tool_usage_prompt,
 )
 from synthetic_data.utils import (
-    clean_example,
     clean_message,
-    extract_code_blocks,
     extract_lines_with_prefixes,
     assert_valid_python_value,
     print_conversations_table,
@@ -41,16 +38,18 @@ from synthetic_data.utils import (
 class GenerationSource(str, Enum):
     OPENAI = "openai"
     VLLM = "vllm"
-    OPENROUTER = "mixtral"
+    OPENROUTER = "openrouter"
 
 
 class DataSourceFormat(Enum):
     TSV = "tsv"
     HF_DATASET = "hf_dataset"
+    # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
     SYNTHETIC = "synthetic"
 
 
 class DatasetTask(Enum):
+    GLAIVE_COMPLETION = "dpo_generation"
     TOOL_USAGE_DPO = "dpo_generation"
     PROMPT_UPSAMPLE = "upsample"
 
@@ -86,7 +85,7 @@ CONFIGS = {
         output_dataset_org="roborovski",
     ),
     "glaive_tool_usage": Config(
-        dataset_task=DatasetTask.TOOL_USAGE_DPO,
+        dataset_task=DatasetTask.GLAIVE_COMPLETION,
         seed_data_format=DataSourceFormat.HF_DATASET,
         seed_data_location="glaiveai/glaive-function-calling-v2",
         output_dataset_name="glaive-tool-usage-dpo",
@@ -111,12 +110,10 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 8,
+    batch_size: int = 32,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
     config_name: str = "synthetic_tool_usage",
-    # If true, will generate seed data instead of DPO pairs
-    seed: bool = False,
     **kwargs,
 ):
     """
@@ -176,8 +173,8 @@ def main(
 
     print("Running...")
     for epoch in range(config.n_epochs):
-        # Generate the prompts that will be completed using the logic below.
-        if seed:
+        # Seed dataset, so generate the prompt and negative sample
+        if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
             seed_data = pd.read_csv(config.seed_data_location, on_bad_lines="skip")
             num_batches = len(seed_data) // batch_size + 1
 
@@ -238,7 +235,7 @@ def main(
                     upload_dataset(
                         output_dataset, config.output_dataset_name, new_dataset_rows
                     )
-        # Generate completions for the tool usage prompts
+        # Generate completions for existing prompts
         else:
             for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
                 new_rows_batch = []
