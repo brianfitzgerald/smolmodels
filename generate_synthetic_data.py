@@ -51,6 +51,7 @@ class DataSourceFormat(Enum):
 class DatasetTask(Enum):
     GLAIVE_COMPLETION = "dpo_generation"
     TOOL_USAGE_DPO = "dpo_generation"
+    TOOLFORMER = "toolformer"
     PROMPT_UPSAMPLE = "upsample"
 
 
@@ -95,7 +96,14 @@ CONFIGS = {
         dataset_task=DatasetTask.PROMPT_UPSAMPLE,
         seed_data_format=DataSourceFormat.TSV,
         seed_data_location="data/PartiPrompts.tsv",
-        output_dataset_name="roborovski/upsampled-prompts-parti",
+        output_dataset_name="upsampled-prompts-parti",
+        output_dataset_org="roborovski",
+    ),
+    "synthetic_toolformer": Config(
+        dataset_task=DatasetTask.TOOLFORMER,
+        seed_data_format=DataSourceFormat.SYNTHETIC,
+        seed_data_location="seed_data_files/domain_specific_tasks.csv",
+        output_dataset_name="synthetic-toolformer-dpo",
         output_dataset_org="roborovski",
     ),
 }
