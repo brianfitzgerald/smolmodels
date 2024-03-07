@@ -87,6 +87,7 @@ CONFIGS = {
         seed_data_location="seed_data_files/domain_specific_tasks.csv",
         output_dataset_name="synthetic-toolformer-dpo",
         output_dataset_org="roborovski",
+        n_epochs=1000,
     ),
     "synthetic_tool_usage": Config(
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
@@ -121,7 +122,7 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 32,
+    batch_size: int = 16,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
     config_name: str = "synthetic_toolformer",
@@ -189,7 +190,7 @@ def main(
         # Seed dataset, so generate the prompt and negative sample
         if config.dataset_task in (DatasetTask.TOOL_USAGE_DPO, DatasetTask.TOOLFORMER):
             assert config.seed_data_location
-            completion_conversations: List[Conversation] = []
+            prompt_conversations: List[Conversation] = []
             if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
                 seed_data = pd.read_csv(config.seed_data_location, on_bad_lines="skip")
                 num_batches = len(seed_data) // batch_size + 1
@@ -201,7 +202,7 @@ def main(
                     seed_data_batch = seed_data.iloc[start_idx:end_idx]
 
                     for _, seed_data_row in seed_data_batch.iterrows():
-                        completion_conversations.append(
+                        prompt_conversations.append(
                             get_tool_usage_prompt(
                                 seed_data_row["Category"],
                                 seed_data_row["Task"],
@@ -210,16 +211,14 @@ def main(
             elif config.dataset_task == DatasetTask.TOOLFORMER:
                 # Iterate through batches
                 for category in TOOL_USE_CATEGORIES:
-                    completion_conversations.append(get_toolformer_prompt(category))
+                    prompt_conversations.append(get_toolformer_prompt(category))
 
             i = 0
             try:
                 print(
-                    f"Generating {len(completion_conversations)} completions for batch {i}..."
+                    f"Generating {len(prompt_conversations)} completions for batch {i}..."
                 )
-                completions = asyncio.run(
-                    model_wrapper.generate(completion_conversations)
-                )
+                completions = asyncio.run(model_wrapper.generate(prompt_conversations))
                 i += 1
             except Exception as e:
                 print(f"Error generating completions: {e}")
@@ -247,17 +246,30 @@ def main(
                             }
                         )
                     elif config.dataset_task == DatasetTask.TOOLFORMER:
+                        user_prompt, tool_call, call_result, agent_output = (
+                            extract_lines_with_prefixes(completion)
+                        )
+                        reformatted_conversation: Conversation = [
+                            {"role": "user", "content": user_prompt},
+                            {"role": "assistant", "content": tool_call},
+                            {"role": "assistant", "content": call_result},
+                            {"role": "assistant", "content": agent_output},
+                        ]
                         # TODO validate output
                         new_rows_batch.append(
                             {
-                                "conversations": completion,
+                                "conversations": reformatted_conversation,
                             }
                         )
                 except Exception as e:
                     traceback.print_exc()
                     continue
 
-            print_conversations_table(new_rows_batch)
+            dict_of_steps = [
+                {f"step_{index}": value["content"] for index, value in enumerate(row["conversations"])}
+                for row in new_rows_batch
+            ]
+            print_conversations_table(dict_of_steps)
             new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:
@@ -297,7 +309,7 @@ def main(
                     )
 
                     glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
-                    completion_conversations: List[Conversation] = []
+                    prompt_conversations: List[Conversation] = []
                     for conversation in glaive_conversations:
                         completion_conv = []
                         for msg in conversation:
@@ -309,13 +321,13 @@ def main(
                                     "content": msg["value"],
                                 }
                             )
-                        completion_conversations.append(completion_conv)
+                        prompt_conversations.append(completion_conv)
 
                     print(
-                        f"Generating {len(completion_conversations)} completions for batch {i}..."
+                        f"Generating {len(prompt_conversations)} completions for batch {i}..."
                     )
                     completions = asyncio.run(
-                        model_wrapper.generate(completion_conversations)
+                        model_wrapper.generate(prompt_conversations)
                     )
 
                     for completion, glaive_conversation in zip(
