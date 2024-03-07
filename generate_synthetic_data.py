@@ -186,7 +186,7 @@ def main(
     new_dataset_rows: List[Dict] = []
 
     print("Running...")
-    for epoch in range(config.n_epochs):
+    for epoch_idx in range(config.n_epochs):
 
         # Seed dataset, so generate the prompt and negative sample
         if config.dataset_task in (DatasetTask.TOOL_USAGE_DPO, DatasetTask.TOOLFORMER):
@@ -215,13 +215,11 @@ def main(
                 for category in random_categories:
                     prompt_conversations.append(get_toolformer_prompt(category))
 
-            i = 0
             try:
                 print(
-                    f"Generating {len(prompt_conversations)} completions for batch {i}..."
+                    f"Generating {len(prompt_conversations)} completions for epoch {epoch_idx}..."
                 )
                 completions = asyncio.run(model_wrapper.generate(prompt_conversations))
-                i += 1
             except Exception as e:
                 print(f"Error generating completions: {e}")
                 continue
@@ -277,10 +275,11 @@ def main(
             print_conversations_table(dict_of_steps)
             new_dataset_rows.extend(new_rows_batch)
 
-            if i % upload_every == 0 and i > 0:
+            if epoch_idx % upload_every == 0 and epoch_idx > 0:
                 upload_dataset(
                     output_dataset, config.output_dataset_name, new_dataset_rows
                 )
+
         # Generate completions for existing prompts
         else:
             for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
@@ -306,7 +305,7 @@ def main(
                         )
 
                         print(
-                            f"Epoch: {epoch} idx: {i} ({category}): {original_prompt} -> {output}"
+                            f"Epoch: {epoch_idx} idx: {i} ({category}): {original_prompt} -> {output}"
                         )
                 elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
                     full_conversations_batch: List[List[ChatCompletionMessageParam]] = (
@@ -371,8 +370,6 @@ def main(
                 upload_dataset(
                     output_dataset, config.output_dataset_name, new_dataset_rows
                 )
-
-        upload_dataset(output_dataset, config.output_dataset_name, new_dataset_rows)
 
 
 if __name__ == "__main__":
