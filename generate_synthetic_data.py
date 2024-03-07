@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import random
 import traceback
 from typing import Dict, List, Optional, cast
 import asyncio
@@ -124,7 +125,7 @@ def main(
     upload_every: int = 10,
     batch_size: int = 16,
     restart: bool = False,
-    generation_source: GenerationSource = GenerationSource.OPENAI,
+    generation_source: GenerationSource = GenerationSource.OPENROUTER,
     config_name: str = "synthetic_toolformer",
     **kwargs,
 ):
@@ -210,7 +211,8 @@ def main(
                         )
             elif config.dataset_task == DatasetTask.TOOLFORMER:
                 # Iterate through batches
-                for category in TOOL_USE_CATEGORIES:
+                random_categories = random.sample(TOOL_USE_CATEGORIES, batch_size)
+                for category in random_categories:
                     prompt_conversations.append(get_toolformer_prompt(category))
 
             i = 0
@@ -266,7 +268,10 @@ def main(
                     continue
 
             dict_of_steps = [
-                {f"step_{index}": value["content"] for index, value in enumerate(row["conversations"])}
+                {
+                    f"step_{index}": value["content"]
+                    for index, value in enumerate(row["conversations"])
+                }
                 for row in new_rows_batch
             ]
             print_conversations_table(dict_of_steps)
