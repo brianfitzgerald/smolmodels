@@ -55,9 +55,9 @@ def extract_code_blocks(text):
     return code_blocks_str
 
 
-def extract_lines_with_prefixes(text: str):
+def extract_lines_with_prefixes(text: str) -> List[str]:
     # Define the regular expression pattern to match lines starting with Task:, API:, Call:, and Output:
-    pattern = re.compile(r"(Task:|API:|Call:|Result:|Agent:)\s*(.*)", re.IGNORECASE)
+    pattern = re.compile(r"(User:|Task:|API:|Call:|Result:|Agent:)\s*(.*)", re.IGNORECASE)
 
     # Find all matches
     matches = pattern.findall(text)
