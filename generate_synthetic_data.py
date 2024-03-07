@@ -65,6 +65,7 @@ EMPTY_DATASET_FORMATS = {
         "chosen": [],
         "rejected": [],
     },
+    DatasetTask.TOOLFORMER: {"conversations": []},
 }
 
 
@@ -123,7 +124,7 @@ def main(
     batch_size: int = 32,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
-    config_name: str = "synthetic_tool_usage",
+    config_name: str = "synthetic_toolformer",
     **kwargs,
 ):
     """
@@ -208,17 +209,18 @@ def main(
                         )
             elif config.dataset_task == DatasetTask.TOOLFORMER:
                 # Iterate through batches
-                for i in range(num_batches):
-                    for category in TOOL_USE_CATEGORIES:
-                        completion_conversations.append(get_toolformer_prompt(category))
+                for category in TOOL_USE_CATEGORIES:
+                    completion_conversations.append(get_toolformer_prompt(category))
 
-            print(
-                f"Generating {len(completion_conversations)} completions for batch {i}..."
-            )
+            i = 0
             try:
+                print(
+                    f"Generating {len(completion_conversations)} completions for batch {i}..."
+                )
                 completions = asyncio.run(
                     model_wrapper.generate(completion_conversations)
                 )
+                i += 1
             except Exception as e:
                 print(f"Error generating completions: {e}")
                 continue
@@ -226,26 +228,34 @@ def main(
             new_rows_batch = []
             for completion in completions:
                 try:
-                    task, definition, tool_call, call_result, agent_output = (
-                        extract_lines_with_prefixes(completion)
-                    )
+                    if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                        task, definition, tool_call, call_result, agent_output = (
+                            extract_lines_with_prefixes(completion)
+                        )
 
-                    assert_valid_python_value(definition)
-                    assert_valid_python_value(call_result)
-                    assert_valid_python_value(tool_call)
+                        assert_valid_python_value(definition)
+                        assert_valid_python_value(call_result)
+                        assert_valid_python_value(tool_call)
 
+                        new_rows_batch.append(
+                            {
+                                "tool": definition,
+                                "question": task,
+                                "call_result": call_result,
+                                "tool_call": tool_call,
+                                "agent_output": agent_output,
+                            }
+                        )
+                    elif config.dataset_task == DatasetTask.TOOLFORMER:
+                        # TODO validate output
+                        new_rows_batch.append(
+                            {
+                                "conversations": completion,
+                            }
+                        )
                 except Exception as e:
                     traceback.print_exc()
                     continue
-                new_rows_batch.append(
-                    {
-                        "tool": definition,
-                        "question": task,
-                        "call_result": call_result,
-                        "tool_call": tool_call,
-                        "agent_output": agent_output,
-                    }
-                )
 
             print_conversations_table(new_rows_batch)
             new_dataset_rows.extend(new_rows_batch)

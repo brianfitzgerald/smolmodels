@@ -228,13 +228,13 @@ TOOL_USE_CATEGORIES = [
 ]
 
 TOOLFORMER_TOOL_DESCRIPTIONS = {
-    "ConvertWeight(amount, from, to)": "Convert weight from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, and stones.",
+    "ConvertUnits(amount, from, to)": "Convert a quantity from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, meters, feet, inches, centimeters, and kilometers.",
     "Calculator(expression)": "Evaluate a mathematical expression. Returns the result of the expression.",
 }
 
 JSON_TOOL_USAGE_GEN_PROMPT = """
 You are an agent that has access to the following tools: {tool_descriptions}
-Generate an example scenario in the category of {category} that would use those tools.
+Generate an example user request message in the category of {category} that would use those tools.
 Then, provide an example API call that would be used to perform the task, and the result of the tool output.
 Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
 
@@ -242,10 +242,10 @@ Do not use any emoji or special characters in your response.
 
 For example:
 
-User: Convert 10 pounds to kilograms
+User: If I have 10 pounts of gold, how much is that in kilograms?
 Call: `ConvertWeight(10, "pounds", "kilograms")`
 Result: 4.53592
-Agent: 10 pounds is equal to 4.53592 kilograms.
+Agent: 10 pounds of gold is equal to 4.53592 kilograms of gold.
 
 User: Calculate the square root of 16
 Call: `Calculator("sqrt(16)")`
