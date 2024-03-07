@@ -123,7 +123,7 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 16,
+    batch_size: int = 4,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
     config_name: str = "synthetic_toolformer",
