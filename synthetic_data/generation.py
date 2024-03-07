@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import openai
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
-from typing import List, Dict, Optional, TypedDict
+from typing import List, Dict
 from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
@@ -97,7 +97,9 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("OPENROUTER_API_KEY")
         if api_key is None:
-            raise ValueError("OPENROUTER_API_KEY is required for OpenRouterGenerationWrapper")
+            raise ValueError(
+                "OPENROUTER_API_KEY is required for OpenRouterGenerationWrapper"
+            )
         self.oai_client = openai.AsyncOpenAI(
             api_key=api_key,
             base_url="https://openrouter.ai/api/v1",

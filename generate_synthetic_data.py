@@ -211,7 +211,7 @@ def main(
                         )
             elif config.dataset_task == DatasetTask.TOOLFORMER:
                 # Iterate through batches
-                random_categories = random.sample(TOOL_USE_CATEGORIES, batch_size)
+                random_categories = random.sample(TOOL_USE_CATEGORIES * batch_size, batch_size)
                 for category in random_categories:
                     prompt_conversations.append(get_toolformer_prompt(category))
 
@@ -249,10 +249,10 @@ def main(
                         user_prompt, tool_call, call_result, agent_output = (
                             extract_lines_with_prefixes(completion)
                         )
-                        reformatted_conversation: Conversation = [
+                        reformatted_conversation = [
                             {"role": "user", "content": user_prompt},
-                            {"role": "assistant", "content": tool_call},
-                            {"role": "assistant", "content": call_result},
+                            {"role": "tool", "content": tool_call},
+                            {"role": "tool", "content": call_result},
                             {"role": "assistant", "content": agent_output},
                         ]
                         # TODO validate output
