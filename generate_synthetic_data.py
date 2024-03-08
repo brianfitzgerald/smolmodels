@@ -17,6 +17,7 @@ from synthetic_data.generation import (
     SHAREGPT_TO_OPENAI_ROLE,
     Conversation,
     GenerationWrapper,
+    GroqGenerationWrapper,
     OpenRouterGenerationWrapper,
     VLLMWrapper,
     OpenAIGenerationWrapper,
@@ -42,6 +43,7 @@ class GenerationSource(str, Enum):
     OPENAI = "openai"
     VLLM = "vllm"
     OPENROUTER = "openrouter"
+    GROQ = "groq"
 
 
 class SeedDataFormat(Enum):
@@ -117,22 +119,26 @@ MODEL_WRAPPER_CLASSES = {
     GenerationSource.OPENAI: OpenAIGenerationWrapper,
     GenerationSource.VLLM: VLLMWrapper,
     GenerationSource.OPENROUTER: OpenRouterGenerationWrapper,
+    GenerationSource.GROQ: GroqGenerationWrapper,
 }
 
 
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 4,
+    batch_size: int = 16,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
     config_name: str = "synthetic_toolformer",
+    generate_dpo_negative_pairs: bool = False,
     **kwargs,
 ):
     """
     Generate synthetic preference data from a given dataset.
     Inputs a seed dataset, that is either given from a CSV or HF dataset,
     or generated from a synthetic source, such as a list of subjects.
+
+    generate_dpo_negative_pair - If true, generate a negative pair for the DPO dataset.
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
@@ -184,36 +190,90 @@ def main(
         )
 
     new_dataset_rows: List[Dict] = []
-
     print("Running...")
-    for epoch_idx in range(config.n_epochs):
 
-        # Seed dataset, so generate the prompt and negative sample
-        if config.dataset_task in (DatasetTask.TOOL_USAGE_DPO, DatasetTask.TOOLFORMER):
-            assert config.seed_data_location
-            prompt_conversations: List[Conversation] = []
-            if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                seed_data = pd.read_csv(config.seed_data_location, on_bad_lines="skip")
-                num_batches = len(seed_data) // batch_size + 1
+    if generate_dpo_negative_pairs:
 
-                # Iterate through batches
-                for i in range(num_batches):
-                    start_idx = i * batch_size
-                    end_idx = min((i + 1) * batch_size, len(seed_data))
-                    seed_data_batch = seed_data.iloc[start_idx:end_idx]
+        if config.dataset_task == DatasetTask.TOOLFORMER:
+            # Generate negative pairs for toolformer
+            # task, definition, tool_call, call_result, agent_output
+            output_dataset = Dataset.from_dict(
+                {
+                    "tool": [],
+                    "question": [],
+                    "call_result_accepted": [],
+                    "tool_call_accepted": [],
+                    "agent_output_accepted": [],
+                    "call_result_rejected": [],
+                    "tool_call_rejected": [],
+                    "agent_output_rejected": [],
+                }
+            )
+            for batch in input_dataset.iter(batch_size=batch_size):
+                new_rows_batch = []
+                # TODO sharegpt format to glaive format fn
+                for i, row in enumerate(batch):
+                    new_rows_batch.append(
+                        {
+                            "tool": row["tool"],
+                            "question": row["question"],
+                            "call_result_accepted": row["call_result"],
+                            "tool_call_accepted": row["tool_call"],
+                            "agent_output_accepted": row["agent_output"],
+                            "call_result_rejected": row["call_result"],
+                            "tool_call_rejected": row["tool_call"],
+                            "agent_output_rejected": row["agent_output"],
+                        }
+                    )
+                new_dataset_rows.extend(new_rows_batch)
+                upload_dataset(
+                    output_dataset, config.output_dataset_name, new_dataset_rows
+                )
 
-                    for _, seed_data_row in seed_data_batch.iterrows():
-                        prompt_conversations.append(
-                            get_tool_usage_prompt(
-                                seed_data_row["Category"],
-                                seed_data_row["Task"],
+        else:
+            raise ValueError(
+                "generate_dpo_negative_pairs is only supported for TOOLFORMER."
+            )
+    else:
+        for epoch_idx in range(config.n_epochs):
+
+            # Create conversations to complete
+
+            # Seed dataset, so generate the prompt and negative sample
+            if config.dataset_task in (
+                DatasetTask.TOOL_USAGE_DPO,
+                DatasetTask.TOOLFORMER,
+            ):
+                assert config.seed_data_location
+                prompt_conversations: List[Conversation] = []
+                if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                    seed_data = pd.read_csv(
+                        config.seed_data_location, on_bad_lines="skip"
+                    )
+                    num_batches = len(seed_data) // batch_size + 1
+
+                    # Iterate through batches
+                    for i in range(num_batches):
+                        start_idx = i * batch_size
+                        end_idx = min((i + 1) * batch_size, len(seed_data))
+                        seed_data_batch = seed_data.iloc[start_idx:end_idx]
+
+                        for _, seed_data_row in seed_data_batch.iterrows():
+                            prompt_conversations.append(
+                                get_tool_usage_prompt(
+                                    seed_data_row["Category"],
+                                    seed_data_row["Task"],
+                                )
                             )
-                        )
-            elif config.dataset_task == DatasetTask.TOOLFORMER:
-                # Iterate through batches
-                random_categories = random.sample(TOOL_USE_CATEGORIES * batch_size, batch_size)
-                for category in random_categories:
-                    prompt_conversations.append(get_toolformer_prompt(category))
+                elif config.dataset_task == DatasetTask.TOOLFORMER:
+                    # Iterate through batches
+                    random_categories = random.sample(
+                        TOOL_USE_CATEGORIES * batch_size, batch_size
+                    )
+                    for category in random_categories:
+                        prompt_conversations.append(get_toolformer_prompt(category))
+
+            # Generate completions
 
             try:
                 print(
@@ -280,91 +340,91 @@ def main(
                     output_dataset, config.output_dataset_name, new_dataset_rows
                 )
 
-        # Generate completions for existing prompts
-        else:
-            for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
-                new_rows_batch = []
-                if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
-                    prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
-                    full_conversations_batch: List[Conversation] = [
-                        format_dalle_prompt_template(prompt) for prompt in prompts
-                    ]
-                    completions = asyncio.run(
-                        model_wrapper.generate(full_conversations_batch)
-                    )
-
-                    for category, original_prompt, output in zip(
-                        categories_batch, prompts, completions
-                    ):
-                        new_rows_batch.append(
-                            {
-                                "Prompt": original_prompt,
-                                "Category": category,
-                                "Upsampled": output,
-                            }
+            # Generate completions for existing prompts
+            else:
+                for i, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+                    new_rows_batch = []
+                    if config.dataset_task == DatasetTask.PROMPT_UPSAMPLE:
+                        prompts, categories_batch = batch["Prompt"], batch["Category"]  # type: ignore
+                        full_conversations_batch: List[Conversation] = [
+                            format_dalle_prompt_template(prompt) for prompt in prompts
+                        ]
+                        completions = asyncio.run(
+                            model_wrapper.generate(full_conversations_batch)
                         )
 
-                        print(
-                            f"Epoch: {epoch_idx} idx: {i} ({category}): {original_prompt} -> {output}"
-                        )
-                elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                    full_conversations_batch: List[List[ChatCompletionMessageParam]] = (
-                        []
-                    )
-
-                    glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
-                    prompt_conversations: List[Conversation] = []
-                    for conversation in glaive_conversations:
-                        completion_conv = []
-                        for msg in conversation:
-                            if msg["from"] == "gpt":
-                                break
-                            completion_conv.append(
+                        for category, original_prompt, output in zip(
+                            categories_batch, prompts, completions
+                        ):
+                            new_rows_batch.append(
                                 {
-                                    "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
-                                    "content": msg["value"],
+                                    "Prompt": original_prompt,
+                                    "Category": category,
+                                    "Upsampled": output,
                                 }
                             )
-                        prompt_conversations.append(completion_conv)
 
-                    print(
-                        f"Generating {len(prompt_conversations)} completions for batch {i}..."
-                    )
-                    completions = asyncio.run(
-                        model_wrapper.generate(prompt_conversations)
-                    )
+                            print(
+                                f"Epoch: {epoch_idx} idx: {i} ({category}): {original_prompt} -> {output}"
+                            )
+                    elif config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
+                        full_conversations_batch: List[
+                            List[ChatCompletionMessageParam]
+                        ] = []
 
-                    for completion, glaive_conversation in zip(
-                        completions, glaive_conversations
-                    ):
+                        glaive_conversations = [chatml_to_conversation(chat, system) for chat, system in zip(batch["chat"], batch["system"])]  # type: ignore
+                        prompt_conversations: List[Conversation] = []
+                        for conversation in glaive_conversations:
+                            completion_conv = []
+                            for msg in conversation:
+                                if msg["from"] == "gpt":
+                                    break
+                                completion_conv.append(
+                                    {
+                                        "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
+                                        "content": msg["value"],
+                                    }
+                                )
+                            prompt_conversations.append(completion_conv)
 
-                        system_msg, user_msg, accepted_msg, rejected_msg = (
-                            "",
-                            "",
-                            "",
-                            "",
+                        print(
+                            f"Generating {len(prompt_conversations)} completions for batch {i}..."
                         )
-                        for msg in glaive_conversation:
-                            role, content = msg["from"], msg["value"]
-                            if role == "system":
-                                system_msg = clean_message(content)
-                            if role == "human":
-                                user_msg = clean_message(content)
-                            if role == "gpt":
-                                accepted_msg = clean_message(content)
-                                rejected_msg = completion
-                                break
-                        new_rows_batch.append(
-                            {
-                                "system": system_msg,
-                                "question": user_msg,
-                                "chosen": accepted_msg,
-                                "rejected": rejected_msg,
-                            }
+                        completions = asyncio.run(
+                            model_wrapper.generate(prompt_conversations)
                         )
 
-                    print_conversations_table(new_rows_batch)
-                    new_dataset_rows.extend(new_rows_batch)
+                        for completion, glaive_conversation in zip(
+                            completions, glaive_conversations
+                        ):
+
+                            system_msg, user_msg, accepted_msg, rejected_msg = (
+                                "",
+                                "",
+                                "",
+                                "",
+                            )
+                            for msg in glaive_conversation:
+                                role, content = msg["from"], msg["value"]
+                                if role == "system":
+                                    system_msg = clean_message(content)
+                                if role == "human":
+                                    user_msg = clean_message(content)
+                                if role == "gpt":
+                                    accepted_msg = clean_message(content)
+                                    rejected_msg = completion
+                                    break
+                            new_rows_batch.append(
+                                {
+                                    "system": system_msg,
+                                    "question": user_msg,
+                                    "chosen": accepted_msg,
+                                    "rejected": rejected_msg,
+                                }
+                            )
+
+                        print_conversations_table(new_rows_batch)
+                        new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:
                 upload_dataset(

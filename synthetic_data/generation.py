@@ -105,3 +105,18 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
             base_url="https://openrouter.ai/api/v1",
         )
         self.model_name = "nousresearch/nous-hermes-2-mixtral-8x7b-dpo"
+
+
+class GroqGenerationWrapper(OpenAIGenerationWrapper):
+
+    def __init__(self, dotenv: Dict[str, str]):
+        api_key = dotenv.get("GROQ_API_KEY")
+        if api_key is None:
+            raise ValueError(
+                "GROQ_API_KEY is required for OpenRouterGenerationWrapper"
+            )
+        self.oai_client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+        self.model_name = "mixtral-8x7b-32768"

@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import json
 import re
 import traceback
@@ -80,3 +81,13 @@ def clean_example(text):
         r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
     )
     return cleaned_paragraph.strip()
+
+async def gather_with_concurrency_limit(n, *coros):
+    semaphore = asyncio.Semaphore(n)
+
+    async def sem_coro(coro):
+        async with semaphore:
+            return await coro
+
+    return await asyncio.gather(*(sem_coro(c) for c in coros))
+
