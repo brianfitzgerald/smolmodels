@@ -232,6 +232,24 @@ TOOLFORMER_TOOL_DESCRIPTIONS = {
     "Calculator(expression)": "Evaluate a mathematical expression. Returns the result of the expression.",
 }
 
+TOOL_DESCRIPTIONS_TEXT = "\n".join(
+    [
+        f"- {tool}: {description}"
+        for tool, description in TOOLFORMER_TOOL_DESCRIPTIONS.items()
+    ]
+)
+
+TOOLFORMER_EXAMPLES = """
+User: If I have 10 pounts of gold, how much is that in kilograms?
+Call: `ConvertWeight(10, "pounds", "kilograms")`
+Result: 4.53592
+Agent: 10 pounds of gold is equal to 4.53592 kilograms of gold.
+
+User: Calculate the square root of 16
+Call: `Calculator("sqrt(16)")`
+Result: 4
+"""
+
 JSON_TOOL_USAGE_GEN_PROMPT = """
 You are an agent that has access to the following tools: {tool_descriptions}
 Generate an example user request message in the category of {category} that would use those tools.
@@ -242,15 +260,17 @@ Do not use any emoji or special characters in your response.
 
 For example:
 
-User: If I have 10 pounts of gold, how much is that in kilograms?
-Call: `ConvertWeight(10, "pounds", "kilograms")`
-Result: 4.53592
-Agent: 10 pounds of gold is equal to 4.53592 kilograms of gold.
+{examples}
+"""
 
-User: Calculate the square root of 16
-Call: `Calculator("sqrt(16)")`
-Result: 4
+JSON_TOOL_USAGE_NEGATIVE_PROMPT = """
+You are an agent that has access to the following tools: {tool_descriptions}
 
+Do not use any emoji or special characters in your response.
+
+Examples of how to use the tools are provided below. You are given a JSON definition of an API and an example of a user query that would be used to perform the task.
+
+{examples}
 """
 
 
@@ -259,19 +279,29 @@ def get_toolformer_prompt(category: str) -> Conversation:
     Prepares the system and user-assistant style messages for inference.
     """
 
-    tool_descriptions = "\n".join(
-        [
-            f"- {tool}: {description}"
-            for tool, description in TOOLFORMER_TOOL_DESCRIPTIONS.items()
-        ]
-    )
-
     return [
         {
             "role": "system",
             "content": JSON_TOOL_USAGE_GEN_PROMPT.format(
                 category=category,
-                tool_descriptions=tool_descriptions,
+                tool_descriptions=TOOL_DESCRIPTIONS_TEXT,
+                examples=TOOLFORMER_EXAMPLES,
             ),
         }
+    ]
+
+
+def get_toolformer_dpo_negative_completion(task: str) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    return [
+        {
+            "role": "system",
+            "content": JSON_TOOL_USAGE_NEGATIVE_PROMPT.format(
+                tool_descriptions=TOOL_DESCRIPTIONS_TEXT, examples=TOOLFORMER_EXAMPLES
+            ),
+        },
+        {"role": "user", "content": task},
     ]

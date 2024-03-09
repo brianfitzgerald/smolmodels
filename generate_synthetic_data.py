@@ -29,6 +29,7 @@ from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
     get_tool_usage_prompt,
+    get_toolformer_dpo_negative_completion,
     get_toolformer_prompt,
 )
 from synthetic_data.utils import (
@@ -81,6 +82,7 @@ class Config:
     output_dataset_name: str
     n_epochs: int = 10
     seed_data_location: Optional[str] = None
+    is_negative_pair_completion: bool = False
 
 
 CONFIGS = {
@@ -90,7 +92,14 @@ CONFIGS = {
         seed_data_location="seed_data_files/domain_specific_tasks.csv",
         output_dataset_name="synthetic-toolformer-dpo",
         output_dataset_org="roborovski",
-        n_epochs=1000,
+    ),
+    "synthetic_toolformer_pairs": Config(
+        dataset_task=DatasetTask.TOOLFORMER,
+        seed_data_format=SeedDataFormat.HF_DATASET,
+        seed_data_location="roborovski/synthetic-toolformer-dpo",
+        output_dataset_name="synthetic-toolformer-dpo-pairs",
+        output_dataset_org="roborovski",
+        is_negative_pair_completion=True,
     ),
     "synthetic_tool_usage": Config(
         dataset_task=DatasetTask.TOOL_USAGE_DPO,
@@ -129,8 +138,7 @@ def main(
     batch_size: int = 16,
     restart: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
-    config_name: str = "synthetic_toolformer",
-    generate_dpo_negative_pairs: bool = False,
+    config_name: str = "synthetic_toolformer_pairs",
     **kwargs,
 ):
     """
@@ -155,7 +163,21 @@ def main(
 
     print("Loading existing data...")
     if restart:
-        output_dataset = Dataset.from_dict(EMPTY_DATASET_FORMATS[config.dataset_task])
+        if config.is_negative_pair_completion:
+            output_dataset = Dataset.from_dict(
+                {
+                    "tool": [],
+                    "question": [],
+                    "call_result_accepted": [],
+                    "tool_call_accepted": [],
+                    "agent_output_accepted": [],
+                    "call_result_rejected": [],
+                    "tool_call_rejected": [],
+                    "agent_output_rejected": [],
+                }
+            )
+        else:
+            output_dataset = Dataset.from_dict(EMPTY_DATASET_FORMATS[config.dataset_task])
     else:
         try:
             output_dataset = cast(
@@ -192,26 +214,25 @@ def main(
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
-    if generate_dpo_negative_pairs:
+    if config.is_negative_pair_completion:
 
         if config.dataset_task == DatasetTask.TOOLFORMER:
             # Generate negative pairs for toolformer
             # task, definition, tool_call, call_result, agent_output
-            output_dataset = Dataset.from_dict(
-                {
-                    "tool": [],
-                    "question": [],
-                    "call_result_accepted": [],
-                    "tool_call_accepted": [],
-                    "agent_output_accepted": [],
-                    "call_result_rejected": [],
-                    "tool_call_rejected": [],
-                    "agent_output_rejected": [],
-                }
-            )
             for batch in input_dataset.iter(batch_size=batch_size):
+                full_conversations_batch = []
                 new_rows_batch = []
-                # TODO sharegpt format to glaive format fn
+                # TODO chance of dropping out tool definition
+                for conversation in batch["conversations"]: # type: ignore
+                    messages = [message["content"] for message in conversation]
+                    task, tool_call, call_result, agent_output = messages
+                    conversation = get_toolformer_dpo_negative_completion(task)
+                    full_conversations_batch.append(conversation)
+                    
+                completions = asyncio.run(
+                    model_wrapper.generate(full_conversations_batch)
+                )
+                breakpoint()
                 for i, row in enumerate(batch):
                     new_rows_batch.append(
                         {
