@@ -7,6 +7,8 @@ from typing import Dict, List
 
 from tabulate import tabulate
 
+from synthetic_data.generation import Conversation
+
 
 def clean_message(message: str) -> str:
     """
@@ -90,4 +92,3 @@ async def gather_with_concurrency_limit(n, *coros):
             return await coro
 
     return await asyncio.gather(*(sem_coro(c) for c in coros))
-
