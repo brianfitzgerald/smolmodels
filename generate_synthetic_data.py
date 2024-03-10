@@ -40,7 +40,7 @@ from synthetic_data.utils import (
     extract_toolformer_dpo_row,
     extract_toolformer_row,
     assert_valid_python_code,
-    print_conversations_table,
+    print_result_dicts,
 )
 
 
@@ -218,7 +218,7 @@ def main(
         if config.dataset_task == DatasetTask.TOOLFORMER:
             # Generate negative pairs for toolformer
             # task, definition, tool_call, call_result, agent_output
-            for batch in input_dataset.iter(batch_size=batch_size):
+            for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
                 full_conversations_batch = []
                 new_rows_batch = []
                 original_rows = []
@@ -237,22 +237,29 @@ def main(
                     conversation = get_toolformer_dpo_negative_completion_prompt(task)
                     full_conversations_batch.append(conversation)
 
+                print(f"Generating {len(full_conversations_batch)} completions...")
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)
                 )
 
-                for i, completion in enumerate(completions):
-                    row = extract_toolformer_dpo_row(completion, original_rows[i])
+                for j, completion in enumerate(completions):
+                    try:
+                        row = extract_toolformer_dpo_row(completion, original_rows[j])
 
-                    assert_valid_python_code(row.tool_call_accepted)
-                    assert_valid_python_code(row.tool_call_rejected)
+                        assert_valid_python_code(row.tool_call_accepted)
+                        assert_valid_python_code(row.tool_call_rejected)
 
-                    row_dict = row.__dict__
-                    new_rows_batch.append(row_dict)
+                        row_dict = row.__dict__
+                        new_rows_batch.append(row_dict)
+                    except Exception as e:
+                        traceback.print_exc()
+                        continue
+                print_result_dicts(new_rows_batch)
                 new_dataset_rows.extend(new_rows_batch)
-                upload_dataset(
-                    output_dataset, config.output_dataset_name, new_dataset_rows
-                )
+                if batch_idx % upload_every == 0 and batch_idx > 0:
+                    upload_dataset(
+                        output_dataset, config.output_dataset_name, new_dataset_rows
+                    )
 
         else:
             raise ValueError(
@@ -352,7 +359,7 @@ def main(
                 }
                 for row in new_rows_batch
             ]
-            print_conversations_table(dict_of_steps)
+            print_result_dicts(dict_of_steps)
             new_dataset_rows.extend(new_rows_batch)
 
             if epoch_idx % upload_every == 0 and epoch_idx > 0:
@@ -443,7 +450,7 @@ def main(
                                 }
                             )
 
-                        print_conversations_table(new_rows_batch)
+                        print_result_dicts(new_rows_batch)
                         new_dataset_rows.extend(new_rows_batch)
 
             if i % upload_every == 0 and i > 0:

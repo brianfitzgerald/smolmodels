@@ -50,22 +50,28 @@ def clean_message(message: str) -> str:
     return message
 
 
-def print_conversations_table(
+def print_result_dicts(
     results: List[Dict],
 ):
     if len(results) == 0:
-        print("No conversations found, skipping print.")
+        print("No results found, skipping print.")
         return
     columns = list(results[0].keys())
     new_dataset_row_elements = [
         [clean_message(row[column]) for column in columns] for row in results
     ]
+
+    col_widths = [35] * len(columns)
+    for i, column in enumerate(columns):
+        if results[0][column].isdigit():
+            col_widths[i] = 10
+
     print(
         tabulate(
             new_dataset_row_elements,
             headers=columns,
             tablefmt="simple",
-            maxcolwidths=[40] * len(columns),
+            maxcolwidths=col_widths,
         )
     )
 
