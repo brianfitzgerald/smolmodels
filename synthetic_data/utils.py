@@ -112,9 +112,9 @@ def extract_toolformer_row(text: str) -> ToolFormerRow:
 def extract_toolformer_dpo_row(
     text: str, original_row: ToolFormerRow
 ) -> ToolFormerDPORow:
-    question, tool_call, call_result, agent_output = get_matches(text)
+    tool_call, call_result, agent_output = get_matches(text)
     return ToolFormerDPORow(
-        question,
+        original_row.question,
         original_row.call_result,
         original_row.tool_call,
         original_row.agent_output,
@@ -130,8 +130,11 @@ def extract_tool_usage_dpo_row(text: str) -> ToolUsageDPORow:
 
 
 def assert_valid_python_code(json_str: str):
-    evaluated = ast.literal_eval(json_str)
-    assert isinstance(evaluated, (dict, list, str, int, float))
+    json_str = json_str.strip().replace("`", "")
+    try:
+        compile(json_str, "<string>", "single")
+    except SyntaxError as e:
+        raise ValueError(f"Invalid Python code: {e}")
 
 
 def clean_example(text):
