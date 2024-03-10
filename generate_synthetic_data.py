@@ -29,13 +29,17 @@ from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
     get_tool_usage_prompt,
-    get_toolformer_dpo_negative_completion,
+    get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
 )
 from synthetic_data.utils import (
+    ToolFormerDPORow,
+    ToolFormerRow,
     clean_message,
-    extract_lines_with_prefixes,
-    assert_valid_python_value,
+    extract_tool_usage_dpo_row,
+    extract_toolformer_dpo_row,
+    extract_toolformer_row,
+    assert_valid_python_code,
     print_conversations_table,
 )
 
@@ -164,20 +168,15 @@ def main(
     print("Loading existing data...")
     if restart:
         if config.is_negative_pair_completion:
-            output_dataset = Dataset.from_dict(
-                {
-                    "tool": [],
-                    "question": [],
-                    "call_result_accepted": [],
-                    "tool_call_accepted": [],
-                    "agent_output_accepted": [],
-                    "call_result_rejected": [],
-                    "tool_call_rejected": [],
-                    "agent_output_rejected": [],
-                }
-            )
+            dpo_row_keys = ToolFormerDPORow.__dataclass_fields__.keys()
+            row_dict = {}
+            for key in dpo_row_keys:
+                row_dict[key] = []
+            output_dataset = Dataset.from_dict(row_dict)
         else:
-            output_dataset = Dataset.from_dict(EMPTY_DATASET_FORMATS[config.dataset_task])
+            output_dataset = Dataset.from_dict(
+                EMPTY_DATASET_FORMATS[config.dataset_task]
+            )
     else:
         try:
             output_dataset = cast(
@@ -222,30 +221,35 @@ def main(
             for batch in input_dataset.iter(batch_size=batch_size):
                 full_conversations_batch = []
                 new_rows_batch = []
+                original_rows = []
                 # TODO chance of dropping out tool definition
-                for conversation in batch["conversations"]: # type: ignore
+                for conversation in batch["conversations"]:  # type: ignore
                     messages = [message["content"] for message in conversation]
+                    task = messages[0]
                     task, tool_call, call_result, agent_output = messages
-                    conversation = get_toolformer_dpo_negative_completion(task)
+                    original_row = ToolFormerRow(
+                        question=task,
+                        call_result=call_result,
+                        tool_call=tool_call,
+                        agent_output=agent_output,
+                    )
+                    original_rows.append(original_row)
+                    conversation = get_toolformer_dpo_negative_completion_prompt(task)
                     full_conversations_batch.append(conversation)
-                    
+
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)
                 )
-                breakpoint()
-                for i, row in enumerate(batch):
-                    new_rows_batch.append(
-                        {
-                            "tool": row["tool"],
-                            "question": row["question"],
-                            "call_result_accepted": row["call_result"],
-                            "tool_call_accepted": row["tool_call"],
-                            "agent_output_accepted": row["agent_output"],
-                            "call_result_rejected": row["call_result"],
-                            "tool_call_rejected": row["tool_call"],
-                            "agent_output_rejected": row["agent_output"],
-                        }
-                    )
+
+                for i, completion in enumerate(completions):
+                    row = extract_toolformer_dpo_row(completion, original_rows[i])
+
+                    assert_valid_python_code(row.tool_call_accepted)
+                    assert_valid_python_code(row.tool_call_rejected)
+
+                    row_dict = row.__dict__
+                    breakpoint()
+                    new_rows_batch.append(row_dict)
                 new_dataset_rows.extend(new_rows_batch)
                 upload_dataset(
                     output_dataset, config.output_dataset_name, new_dataset_rows
@@ -309,32 +313,28 @@ def main(
             for completion in completions:
                 try:
                     if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                        task, definition, tool_call, call_result, agent_output = (
-                            extract_lines_with_prefixes(completion)
-                        )
+                        row = extract_tool_usage_dpo_row(completion)
 
-                        assert_valid_python_value(definition)
-                        assert_valid_python_value(call_result)
-                        assert_valid_python_value(tool_call)
+                        assert_valid_python_code(row.definition)
+                        assert_valid_python_code(row.call_result)
+                        assert_valid_python_code(row.tool_call)
 
                         new_rows_batch.append(
                             {
-                                "tool": definition,
-                                "question": task,
-                                "call_result": call_result,
-                                "tool_call": tool_call,
-                                "agent_output": agent_output,
+                                "tool": row.definition,
+                                "question": row.task,
+                                "call_result": row.call_result,
+                                "tool_call": row.tool_call,
+                                "agent_output": row.agent_output,
                             }
                         )
                     elif config.dataset_task == DatasetTask.TOOLFORMER:
-                        user_prompt, tool_call, call_result, agent_output = (
-                            extract_lines_with_prefixes(completion)
-                        )
+                        row = extract_toolformer_row(completion)
                         reformatted_conversation = [
-                            {"role": "user", "content": user_prompt},
-                            {"role": "tool", "content": tool_call},
-                            {"role": "tool", "content": call_result},
-                            {"role": "assistant", "content": agent_output},
+                            {"role": "user", "content": row.question},
+                            {"role": "tool", "content": row.tool_call},
+                            {"role": "tool", "content": row.call_result},
+                            {"role": "assistant", "content": row.agent_output},
                         ]
                         # TODO validate output
                         new_rows_batch.append(

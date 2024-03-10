@@ -1,20 +1,46 @@
 import ast
 import asyncio
-import json
 import re
-import traceback
 from typing import Dict, List
+from pydantic import BaseModel
 
 from tabulate import tabulate
+from pydantic.dataclasses import dataclass
 
-from synthetic_data.generation import Conversation
+
+@dataclass
+class ToolFormerRow:
+    question: str
+    call_result: str
+    tool_call: str
+    agent_output: str
+
+
+@dataclass
+class ToolFormerDPORow:
+    question: str
+    call_result_accepted: str
+    tool_call_accepted: str
+    agent_output_accepted: str
+    call_result_rejected: str
+    tool_call_rejected: str
+    agent_output_rejected: str
+
+
+@dataclass
+class ToolUsageDPORow:
+    definition: str
+    task: str
+    tool_call: str
+    call_result: str
+    agent_output: str
 
 
 def clean_message(message: str) -> str:
     """
     Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
     """
-    
+
     # Handle odd edge case where textwrap evaluates the value as a bool
     if message == "True" or message == "False":
         message = message.lower()
@@ -58,31 +84,62 @@ def extract_code_blocks(text):
     return code_blocks_str
 
 
-def extract_lines_with_prefixes(text: str) -> List[str]:
-    # Define the regular expression pattern to match lines starting with Task:, API:, Call:, and Output:
-    pattern = re.compile(r"(User:|Task:|API:|Call:|Result:|Agent:)\s*(.*)", re.IGNORECASE)
+LINE_REFIX_PATTERN = re.compile(
+    r"(User:|Task:|API:|Call:|Result:|Agent:)\s*(.*)", re.IGNORECASE
+)
 
-    # Find all matches
-    matches = pattern.findall(text)
 
-    # Filter out empty matches and remove prefixes
+def get_matches(text: str):
+    matches = LINE_REFIX_PATTERN.findall(text)
+
     extracted_lines = []
     for match in matches:
         if match[1]:
             extracted_lines.append(match[1])
-
     return extracted_lines
 
 
-def assert_valid_python_value(json_str: str):
+# TODO refactor this into a base class with methods for prompting, parsing, etc.
+# Would also have properties used for the dataclass
+# don't want to do this yet until we have the full flow working
+
+
+def extract_toolformer_row(text: str) -> ToolFormerRow:
+    question, tool_call, call_result, agent_output = get_matches(text)
+    return ToolFormerRow(question, call_result, tool_call, agent_output)
+
+
+def extract_toolformer_dpo_row(
+    text: str, original_row: ToolFormerRow
+) -> ToolFormerDPORow:
+    question, tool_call, call_result, agent_output = get_matches(text)
+    return ToolFormerDPORow(
+        question,
+        original_row.call_result,
+        original_row.tool_call,
+        original_row.agent_output,
+        call_result,
+        tool_call,
+        agent_output,
+    )
+
+
+def extract_tool_usage_dpo_row(text: str) -> ToolUsageDPORow:
+    definition, task, tool_call, call_result, agent_output = get_matches(text)
+    return ToolUsageDPORow(definition, task, tool_call, call_result, agent_output)
+
+
+def assert_valid_python_code(json_str: str):
     evaluated = ast.literal_eval(json_str)
     assert isinstance(evaluated, (dict, list, str, int, float))
+
 
 def clean_example(text):
     cleaned_paragraph = re.sub(
         r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
     )
     return cleaned_paragraph.strip()
+
 
 async def gather_with_concurrency_limit(n, *coros):
     semaphore = asyncio.Semaphore(n)
