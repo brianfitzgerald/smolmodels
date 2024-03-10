@@ -248,7 +248,6 @@ def main(
                     assert_valid_python_code(row.tool_call_rejected)
 
                     row_dict = row.__dict__
-                    breakpoint()
                     new_rows_batch.append(row_dict)
                 new_dataset_rows.extend(new_rows_batch)
                 upload_dataset(
