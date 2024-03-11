@@ -1,5 +1,6 @@
 import ast
 import asyncio
+from enum import Enum
 import re
 from typing import Dict, List
 from pydantic import BaseModel
@@ -34,6 +35,24 @@ class ToolUsageDPORow:
     tool_call: str
     call_result: str
     agent_output: str
+
+class DatasetTaskFormat(str, Enum):
+    SFT = "SFT"
+    DPO = "DPO"
+
+
+class GenerationSource(str, Enum):
+    OPENAI = "openai"
+    VLLM = "vllm"
+    OPENROUTER = "openrouter"
+    GROQ = "groq"
+
+
+class SeedDataFormat(Enum):
+    TSV = "tsv"
+    HF_DATASET = "hf_dataset"
+    # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
+    SYNTHETIC = "synthetic"
 
 
 def clean_message(message: str) -> str:

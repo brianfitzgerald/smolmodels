@@ -291,7 +291,7 @@ def get_toolformer_prompt(category: str) -> Conversation:
     ]
 
 
-def get_toolformer_dpo_negative_completion_prompt(task: str) -> Conversation:
+def get_toolformer_dpo_negative_completion_prompt(question: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
     """
@@ -303,5 +303,5 @@ def get_toolformer_dpo_negative_completion_prompt(task: str) -> Conversation:
                 tool_descriptions=TOOL_DESCRIPTIONS_TEXT, examples=TOOLFORMER_EXAMPLES
             ),
         },
-        {"role": "user", "content": task},
+        {"role": "user", "content": question},
     ]
