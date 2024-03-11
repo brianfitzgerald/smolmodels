@@ -1,30 +1,35 @@
-from dataclasses import dataclass
+import asyncio
 import os
 import random
 import traceback
+from dataclasses import dataclass
 from typing import Dict, List, Optional, cast
-import asyncio
 
+import fire
 import pandas as pd
-from enum import Enum
 from datasets import Dataset, load_dataset
 from datasets.data_files import EmptyDatasetError
-import fire
-from huggingface_hub import login
 from dotenv import dotenv_values
+from huggingface_hub import login
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+from synthetic_data.tasks import (
+    PromptUpsample,
+    SyntheticDataTask,
+    Toolformer,
+    Toolformer,
+)
+
 from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import (
     SHAREGPT_TO_OPENAI_ROLE,
     Conversation,
     GenerationWrapper,
     GroqGenerationWrapper,
+    OpenAIGenerationWrapper,
     OpenRouterGenerationWrapper,
     VLLMWrapper,
-    OpenAIGenerationWrapper,
     upload_dataset,
 )
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
@@ -33,99 +38,22 @@ from synthetic_data.prompts import (
     get_toolformer_prompt,
 )
 from synthetic_data.utils import (
+    DatasetTaskFormat,
+    GenerationSource,
+    SeedDataFormat,
     ToolFormerDPORow,
     ToolFormerRow,
+    assert_valid_python_code,
     clean_message,
     extract_tool_usage_dpo_row,
     extract_toolformer_dpo_row,
     extract_toolformer_row,
-    assert_valid_python_code,
     print_result_dicts,
 )
 
-
-class GenerationSource(str, Enum):
-    OPENAI = "openai"
-    VLLM = "vllm"
-    OPENROUTER = "openrouter"
-    GROQ = "groq"
-
-
-class SeedDataFormat(Enum):
-    TSV = "tsv"
-    HF_DATASET = "hf_dataset"
-    # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
-    SYNTHETIC = "synthetic"
-
-
-class DatasetTask(Enum):
-    GLAIVE_COMPLETION = "dpo_generation"
-    TOOL_USAGE_DPO = "dpo_generation"
-    TOOLFORMER = "toolformer"
-    PROMPT_UPSAMPLE = "upsample"
-
-
-EMPTY_DATASET_FORMATS = {
-    DatasetTask.PROMPT_UPSAMPLE: {"Prompt": [], "Category": [], "Upsampled": []},
-    DatasetTask.TOOL_USAGE_DPO: {
-        "system": [],
-        "question": [],
-        "chosen": [],
-        "rejected": [],
-    },
-    DatasetTask.TOOLFORMER: {"conversations": []},
-}
-
-
-@dataclass
-class Config:
-    dataset_task: DatasetTask
-    seed_data_format: SeedDataFormat
-    # Either the name of the HF dataset or the path to the CSV file
-    output_dataset_org: str
-    output_dataset_name: str
-    n_epochs: int = 10
-    seed_data_location: Optional[str] = None
-    is_negative_pair_completion: bool = False
-
-
-CONFIGS = {
-    "synthetic_toolformer": Config(
-        dataset_task=DatasetTask.TOOLFORMER,
-        seed_data_format=SeedDataFormat.SYNTHETIC,
-        seed_data_location="seed_data_files/domain_specific_tasks.csv",
-        output_dataset_name="synthetic-toolformer-dpo",
-        output_dataset_org="roborovski",
-    ),
-    "synthetic_toolformer_pairs": Config(
-        dataset_task=DatasetTask.TOOLFORMER,
-        seed_data_format=SeedDataFormat.HF_DATASET,
-        seed_data_location="roborovski/synthetic-toolformer-dpo",
-        output_dataset_name="synthetic-toolformer-dpo-pairs",
-        output_dataset_org="roborovski",
-        is_negative_pair_completion=True,
-    ),
-    "synthetic_tool_usage": Config(
-        dataset_task=DatasetTask.TOOL_USAGE_DPO,
-        seed_data_format=SeedDataFormat.SYNTHETIC,
-        seed_data_location="seed_data_files/domain_specific_tasks.csv",
-        output_dataset_name="synthetic-tool-use-dpo",
-        output_dataset_org="roborovski",
-    ),
-    "glaive_tool_usage": Config(
-        dataset_task=DatasetTask.GLAIVE_COMPLETION,
-        seed_data_format=SeedDataFormat.HF_DATASET,
-        seed_data_location="glaiveai/glaive-function-calling-v2",
-        output_dataset_name="glaive-tool-usage-dpo",
-        output_dataset_org="roborovski",
-    ),
-    "prompt_upsample": Config(
-        dataset_task=DatasetTask.PROMPT_UPSAMPLE,
-        seed_data_format=SeedDataFormat.TSV,
-        seed_data_location="data/PartiPrompts.tsv",
-        output_dataset_name="upsampled-prompts-parti",
-        output_dataset_org="roborovski",
-    ),
+DATA_TASKS: Dict[str, type[SyntheticDataTask]] = {
+    "toolformer": Toolformer,
+    "prompt_upsample": PromptUpsample,
 }
 
 MODEL_WRAPPER_CLASSES = {
@@ -140,9 +68,11 @@ def main(
     # n batches
     upload_every: int = 10,
     batch_size: int = 16,
+    n_epochs: int = 10,
     restart: bool = False,
+    generate_pairs: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
-    config_name: str = "synthetic_toolformer_pairs",
+    task_name: str = "toolformer_pairs",
     **kwargs,
 ):
     """
@@ -154,7 +84,10 @@ def main(
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
-    config = CONFIGS[config_name]
+    task = DATA_TASKS[task_name]()
+
+    if generate_pairs and task.dataset_task_format != DatasetTaskFormat.DPO:
+        raise ValueError("generate_pairs is only supported for DPO tasks.")
 
     print("Logging into the Hub...")
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -165,49 +98,32 @@ def main(
 
     model_wrapper: GenerationWrapper = MODEL_WRAPPER_CLASSES[generation_source](dotenv)
 
-    print("Loading existing data...")
+    print("Loading output dataset...")
     if restart:
-        if config.is_negative_pair_completion:
-            dpo_row_keys = ToolFormerDPORow.__dataclass_fields__.keys()
-            row_dict = {}
-            for key in dpo_row_keys:
-                row_dict[key] = []
-            output_dataset = Dataset.from_dict(row_dict)
-        else:
-            output_dataset = Dataset.from_dict(
-                EMPTY_DATASET_FORMATS[config.dataset_task]
-            )
+        output_dataset = Dataset.from_dict(task.empty_dataset_format)
     else:
         try:
             output_dataset = cast(
                 Dataset,
                 load_dataset(
-                    f"{config.output_dataset_org}/{config.output_dataset_name}",
+                    f"{task.output_dataset_org}/{task.output_dataset_name}",
                     split="train",
                 ),
             )
         except (EmptyDatasetError, ValueError):
             print("No existing dataset found, starting from scratch...")
-            output_dataset = Dataset.from_dict(
-                EMPTY_DATASET_FORMATS[config.dataset_task]
-            )
+            output_dataset = Dataset.from_dict(task.empty_dataset_format)
 
+    print("Loading input dataset...")
     input_dataset: Dataset
-    if config.seed_data_format == SeedDataFormat.HF_DATASET:
-        assert config.seed_data_location
+    if task.seed_data_format == SeedDataFormat.HF_DATASET:
+        assert task.seed_data_location
         input_dataset = cast(
             Dataset, load_dataset(config.seed_data_location, split="train")
         )
-    elif config.seed_data_format == SeedDataFormat.TSV:
+    elif task.seed_data_format == SeedDataFormat.TSV:
         input_dataset = cast(
             Dataset, load_dataset("tsv", data_files=config.seed_data_location)
-        )
-    elif config.seed_data_format == SeedDataFormat.SYNTHETIC:
-        input_dataset = Dataset.from_dict(
-            {
-                "chat": [],
-                "system": [],
-            }
         )
 
     new_dataset_rows: List[Dict] = []
@@ -218,23 +134,26 @@ def main(
         if config.dataset_task == DatasetTask.TOOLFORMER:
             # Generate negative pairs for toolformer
             # task, definition, tool_call, call_result, agent_output
-            for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+            for batch_idx, batch in enumerate(
+                input_dataset.iter(batch_size=batch_size)
+            ):
                 full_conversations_batch = []
                 new_rows_batch = []
                 original_rows = []
                 # TODO chance of dropping out tool definition
                 for conversation in batch["conversations"]:  # type: ignore
                     messages = [message["content"] for message in conversation]
-                    task = messages[0]
-                    task, tool_call, call_result, agent_output = messages
+                    question, tool_call, call_result, agent_output = messages
                     original_row = ToolFormerRow(
-                        question=task,
+                        question=question,
                         call_result=call_result,
                         tool_call=tool_call,
                         agent_output=agent_output,
                     )
                     original_rows.append(original_row)
-                    conversation = get_toolformer_dpo_negative_completion_prompt(task)
+                    conversation = get_toolformer_dpo_negative_completion_prompt(
+                        question
+                    )
                     full_conversations_batch.append(conversation)
 
                 print(f"Generating {len(full_conversations_batch)} completions...")
@@ -258,7 +177,7 @@ def main(
                 new_dataset_rows.extend(new_rows_batch)
                 if batch_idx % upload_every == 0 and batch_idx > 0:
                     upload_dataset(
-                        output_dataset, config.output_dataset_name, new_dataset_rows
+                        output_dataset, task.output_dataset_name, new_dataset_rows
                     )
 
         else:
@@ -266,43 +185,34 @@ def main(
                 "generate_dpo_negative_pairs is only supported for TOOLFORMER."
             )
     else:
-        for epoch_idx in range(config.n_epochs):
-
-            # Create conversations to complete
+        for epoch_idx in range(n_epochs):
 
             # Seed dataset, so generate the prompt and negative sample
-            if config.dataset_task in (
-                DatasetTask.TOOL_USAGE_DPO,
-                DatasetTask.TOOLFORMER,
-            ):
-                assert config.seed_data_location
-                prompt_conversations: List[Conversation] = []
-                if config.dataset_task == DatasetTask.TOOL_USAGE_DPO:
-                    seed_data = pd.read_csv(
-                        config.seed_data_location, on_bad_lines="skip"
-                    )
-                    num_batches = len(seed_data) // batch_size + 1
+            prompt_conversations: List[Conversation] = []
+            if task:
+                seed_data = pd.read_csv(task.seed_data_location, on_bad_lines="skip")
+                num_batches = len(seed_data) // batch_size + 1
 
-                    # Iterate through batches
-                    for i in range(num_batches):
-                        start_idx = i * batch_size
-                        end_idx = min((i + 1) * batch_size, len(seed_data))
-                        seed_data_batch = seed_data.iloc[start_idx:end_idx]
+                # Iterate through batches
+                for i in range(num_batches):
+                    start_idx = i * batch_size
+                    end_idx = min((i + 1) * batch_size, len(seed_data))
+                    seed_data_batch = seed_data.iloc[start_idx:end_idx]
 
-                        for _, seed_data_row in seed_data_batch.iterrows():
-                            prompt_conversations.append(
-                                get_tool_usage_prompt(
-                                    seed_data_row["Category"],
-                                    seed_data_row["Task"],
-                                )
+                    for _, seed_data_row in seed_data_batch.iterrows():
+                        prompt_conversations.append(
+                            get_tool_usage_prompt(
+                                seed_data_row["Category"],
+                                seed_data_row["Task"],
                             )
-                elif config.dataset_task == DatasetTask.TOOLFORMER:
-                    # Iterate through batches
-                    random_categories = random.sample(
-                        TOOL_USE_CATEGORIES * batch_size, batch_size
-                    )
-                    for category in random_categories:
-                        prompt_conversations.append(get_toolformer_prompt(category))
+                        )
+            elif config.dataset_task == DatasetTask.TOOLFORMER:
+                # Iterate through batches
+                random_categories = random.sample(
+                    TOOL_USE_CATEGORIES * batch_size, batch_size
+                )
+                for category in random_categories:
+                    prompt_conversations.append(get_toolformer_prompt(category))
 
             # Generate completions
 
