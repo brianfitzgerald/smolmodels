@@ -119,19 +119,17 @@ def main(
     if task.seed_data_format == SeedDataFormat.HF_DATASET:
         assert task.seed_data_location
         input_dataset = cast(
-            Dataset, load_dataset(config.seed_data_location, split="train")
+            Dataset, load_dataset(task.seed_data_location, split="train")
         )
     elif task.seed_data_format == SeedDataFormat.TSV:
         input_dataset = cast(
-            Dataset, load_dataset("tsv", data_files=config.seed_data_location)
+            Dataset, load_dataset("tsv", data_files=task.seed_data_location)
         )
 
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
-    if config.is_negative_pair_completion:
-
-        if config.dataset_task == DatasetTask.TOOLFORMER:
+    if generate_pairs:
             # Generate negative pairs for toolformer
             # task, definition, tool_call, call_result, agent_output
             for batch_idx, batch in enumerate(
