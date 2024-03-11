@@ -1,5 +1,6 @@
 from synthetic_data.generation import Conversation
 
+
 def format_dalle_prompt_template(user_prompt: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
@@ -49,3 +50,258 @@ There are a few rules to follow:
     ]
     return user_conversation
 
+
+CONVERT_WEIGHT_API_EXAMPLE = {
+    "name": "convert_weight",
+    "description": "Convert weight from one unit to another. Returns the converted weight.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "weight": {"type": "number", "description": "The weight value"},
+            "from_unit": {"type": "string", "description": "The unit to convert from"},
+            "to_unit": {"type": "string", "description": "The unit to convert to"},
+        },
+        "required": ["weight", "from_unit", "to_unit"],
+    },
+}
+
+CONVERT_WEIGHT_USAGE_EXAMPLE = {
+    "weight": 10,
+    "from_unit": "pounds",
+    "to_unit": "kilograms",
+}
+
+HISTORICAL_WEATHER_API_EXAMPLE = {
+    "name": "historical_weather_data",
+    "description": "Retrieve historical weather data for a location. Returns the weather data for a specific date.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "The location for which to retrieve weather data",
+            },
+            "date": {
+                "type": "string",
+                "description": "The date for which to retrieve historical weather data",
+            },
+        },
+        "required": ["location", "date"],
+    },
+}
+
+HISTORICAL_WEATHER_USAGE_EXAMPLE = {"location": "New York", "date": "2022-01-01"}
+HISTORICAL_WEATHER_RESULT_EXAMPLE = {
+    "temperature": 32,
+    "weather_condition": "Snow",
+    "wind_speed": 10,
+}
+
+JSON_TOOL_USE_EXAMPLES = """
+Task: Convert weight
+API: {CONVERT_WEIGHT_API_EXAMPLE}
+User: Convert 10 pounds to kilograms
+Call: {CONVERT_WEIGHT_USAGE_EXAMPLE}
+Result: 4.53592
+Agent: 10 pounds is equal to 4.53592 kilograms.
+
+Task: Retrieve historical weather data
+API: {HISTORICAL_WEATHER_API_EXAMPLE}
+User: Convert 10 pounds to kilograms
+Call: {HISTORICAL_WEATHER_USAGE_EXAMPLE}
+Result: {HISTORICAL_WEATHER_RESULT_EXAMPLE}
+Agent: On January 1, 2020, in New York City, the temperature was 32°F with snowfall and a wind speed of 10 mph.
+"""
+
+JSON_TOOL_USAGE_GEN_PROMPT = """
+Generate an example of an API in the category of {category} that could be used to {task}.
+Provide the API in the form of a JSON definition. Follow the example below.
+Then, provide an example of a user query that would be used to perform the task.
+Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
+
+Do not use any emoji or special characters in your response.
+
+For example:
+
+{tool_use_examples}
+"""
+
+JSON_TOOL_USAGE_NEGATIVE_SAMPLE_PROMPT = """
+Generate an example of an API in the category of {category} that could be used to {task}.
+You are given a JSON definition of an API and an example of a user query that would be used to perform the task.
+Provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Do not use any emoji or special characters in your response.
+
+For example:
+{tool_use_examples}
+
+Task: {task}
+API: {api_definition}
+User: {user_query}
+
+"""
+
+
+CATEGORY_GENERATION_PROMPT = """
+Generate 100 examples of tasks that an API would perform, such as calculating distance, searching for recipes, or generating a random color.
+Do not mention any brands or specific programs. Return the answer in CSV format with a category for each
+"""
+
+
+def get_tool_use_examples():
+    return JSON_TOOL_USE_EXAMPLES.format(
+        CONVERT_WEIGHT_API_EXAMPLE=CONVERT_WEIGHT_API_EXAMPLE,
+        CONVERT_WEIGHT_USAGE_EXAMPLE=CONVERT_WEIGHT_USAGE_EXAMPLE,
+        HISTORICAL_WEATHER_API_EXAMPLE=HISTORICAL_WEATHER_API_EXAMPLE,
+        HISTORICAL_WEATHER_USAGE_EXAMPLE=HISTORICAL_WEATHER_USAGE_EXAMPLE,
+        HISTORICAL_WEATHER_RESULT_EXAMPLE=HISTORICAL_WEATHER_RESULT_EXAMPLE,
+    )
+
+
+def get_tool_usage_prompt(category: str, task: str) -> Conversation:
+    """
+    Format the original tool use generation.
+    """
+
+    tool_use_examples = get_tool_use_examples()
+
+    return [
+        {
+            "role": "system",
+            "content": JSON_TOOL_USAGE_GEN_PROMPT.format(
+                task=task,
+                category=category,
+                tool_use_examples=tool_use_examples,
+            ),
+        }
+    ]
+
+
+def get_tool_use_secondary_prompt(
+    category: str, task: str, api_definition: str, user_query: str
+) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    tool_use_examples = get_tool_use_examples()
+
+    return [
+        {
+            "role": "system",
+            "content": JSON_TOOL_USAGE_NEGATIVE_SAMPLE_PROMPT.format(
+                task=task,
+                category=category,
+                tool_use_examples=tool_use_examples,
+                api_definition=api_definition,
+                user_query=user_query,
+            ),
+        }
+    ]
+
+
+TOOL_USE_CATEGORIES = [
+    "Finance",
+    "Physics",
+    "Chemistry",
+    "Engineering",
+    "Statistics",
+    "Geometry",
+    "Health & Nutrition",
+    "Time & Distance",
+    "Retail",
+    "Real Estate",
+    "Science",
+    "Technology",
+    "Mathematics",
+    "Business",
+    "Education",
+    "Healthcare",
+    "Art & Design",
+    "Social Sciences",
+    "Humanities",
+    "Sports & Recreation",
+    "Entertainment",
+    "Politics & Governance",
+    "Environment & Sustainability",
+]
+
+TOOLFORMER_TOOL_DESCRIPTIONS = {
+    "ConvertUnits(amount, from, to)": "Convert a quantity from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, meters, feet, inches, centimeters, and kilometers.",
+    "Calculator(expression)": "Evaluate a mathematical expression. Returns the result of the expression.",
+}
+
+TOOL_DESCRIPTIONS_TEXT = "\n".join(
+    [
+        f"- {tool}: {description}"
+        for tool, description in TOOLFORMER_TOOL_DESCRIPTIONS.items()
+    ]
+)
+
+TOOLFORMER_EXAMPLES = """
+User: If I have 10 pounts of gold, how much is that in kilograms?
+Call: `ConvertWeight(10, "pounds", "kilograms")`
+Result: 4.53592
+Agent: 10 pounds of gold is equal to 4.53592 kilograms of gold.
+
+User: Calculate the square root of 16
+Call: `Calculator("sqrt(16)")`
+Result: 4
+"""
+
+JSON_TOOL_USAGE_GEN_PROMPT = """
+You are an agent that has access to the following tools: {tool_descriptions}
+Generate an example user request message in the category of {category} that would use those tools.
+Then, provide an example API call that would be used to perform the task, and the result of the tool output.
+Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
+
+Do not use any emoji or special characters in your response.
+
+For example:
+
+{examples}
+"""
+
+JSON_TOOL_USAGE_NEGATIVE_PROMPT = """
+You are an agent that has access to the following tools: {tool_descriptions}
+
+Do not use any emoji or special characters in your response.
+
+Examples of how to use the tools are provided below. You are given a JSON definition of an API and an example of a user query that would be used to perform the task.
+
+{examples}
+"""
+
+
+def get_toolformer_prompt(category: str) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    return [
+        {
+            "role": "system",
+            "content": JSON_TOOL_USAGE_GEN_PROMPT.format(
+                category=category,
+                tool_descriptions=TOOL_DESCRIPTIONS_TEXT,
+                examples=TOOLFORMER_EXAMPLES,
+            ),
+        }
+    ]
+
+
+def get_toolformer_dpo_negative_completion_prompt(task: str) -> Conversation:
+    """
+    Prepares the system and user-assistant style messages for inference.
+    """
+
+    return [
+        {
+            "role": "system",
+            "content": JSON_TOOL_USAGE_NEGATIVE_PROMPT.format(
+                tool_descriptions=TOOL_DESCRIPTIONS_TEXT, examples=TOOLFORMER_EXAMPLES
+            ),
+        },
+        {"role": "user", "content": task},
+    ]
