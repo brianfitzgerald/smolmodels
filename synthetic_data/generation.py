@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
 import openai
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict
 from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
 
-Conversation = List[ChatCompletionMessageParam]
-ShareGPTConversation = List[Dict[str, str]]
+from synthetic_data.utils import Conversation
+
 
 SHAREGPT_TO_OPENAI_ROLE = {
     "system": "system",

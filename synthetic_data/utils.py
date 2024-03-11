@@ -1,13 +1,14 @@
-import ast
 import asyncio
 from enum import Enum
 import re
 from typing import Dict, List
-from pydantic import BaseModel
 
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
 from pydantic.dataclasses import dataclass
 
+Conversation = List[ChatCompletionMessageParam]
+ShareGPTConversation = List[Dict[str, str]]
 
 @dataclass
 class ToolFormerRow:
