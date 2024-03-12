@@ -1,4 +1,5 @@
 from synthetic_data.generation import Conversation
+from synthetic_data.tools import TOOL_DESCRIPTIONS_TEXT
 
 
 def format_dalle_prompt_template(user_prompt: str) -> Conversation:
@@ -226,18 +227,6 @@ TOOL_USE_CATEGORIES = [
     "Politics & Governance",
     "Environment & Sustainability",
 ]
-
-TOOLFORMER_TOOL_DESCRIPTIONS = {
-    "ConvertUnits(amount, from, to)": "Convert a quantity from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, meters, feet, inches, centimeters, and kilometers.",
-    "Calculator(expression)": "Evaluate a mathematical expression. Returns the result of the expression.",
-}
-
-TOOL_DESCRIPTIONS_TEXT = "\n".join(
-    [
-        f"- {tool}: {description}"
-        for tool, description in TOOLFORMER_TOOL_DESCRIPTIONS.items()
-    ]
-)
 
 TOOLFORMER_EXAMPLES = """
 User: If I have 10 pounts of gold, how much is that in kilograms?
