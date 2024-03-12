@@ -1,8 +1,13 @@
-from transformers.optimization import Adafactor, get_inverse_sqrt_schedule, AdafactorSchedule
+from transformers.optimization import (
+    Adafactor,
+    get_inverse_sqrt_schedule,
+    AdafactorSchedule,
+)
 from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
 from torchmetrics.text.perplexity import Perplexity
+import bitsandbytes as bnb
 
 import lightning.pytorch as pl
 
@@ -108,16 +113,26 @@ class T5FineTuner(pl.LightningModule):
                 "weight_decay": 0.0,
             },
         ]
-        if self.params.optimizer == "AdamW":
-            optimizer = AdamW(
-                optimizer_grouped_parameters,
-                lr=self.params.learning_rate,
-                eps=self.params.adam_epsilon,
-            )
+
+        optim_choice = self.params.optimizer
+
+        if optim_choice in ["AdamW", "AdamW8bit"]:
+            if optim_choice == "AdamW":
+                optimizer = AdamW(
+                    optimizer_grouped_parameters,
+                    lr=self.params.learning_rate,
+                    eps=self.params.adam_epsilon,
+                )
+            elif optim_choice == "AdamW8bit":
+                optimizer = bnb.optim.adamw.AdamW8bit(
+                    optimizer_grouped_parameters,
+                    lr=self.params.learning_rate,
+                    eps=self.params.adam_epsilon,
+                )
             scheduler = get_inverse_sqrt_schedule(
                 optimizer, num_warmup_steps=self.params.warmup_steps
             )
-        elif self.params.optimizer == "Adafactor":
+        elif optim_choice == "Adafactor":
             optimizer = Adafactor(
                 optimizer_grouped_parameters,
                 lr=self.params.learning_rate,

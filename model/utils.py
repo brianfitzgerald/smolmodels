@@ -14,7 +14,7 @@ SAFETY_TASK_PREFIX = "Rewrite the following prompt to remove any unsafe or copyr
 IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
-OptimizerChoice = Literal["AdamW", "Adafactor"]
+OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 
 @dataclass
 class HyperParams:
@@ -23,15 +23,15 @@ class HyperParams:
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 50
-    train_batch_size: int = 2
+    train_batch_size: int = 4
     eval_batch_size: int = 2
     num_train_epochs: int = 25
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 2
     n_gpus: int = 1
     max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
-    optimizer: OptimizerChoice = "AdamW"
+    optimizer: OptimizerChoice = "Adafactor"
 
 
 class FineTunerDataset(pl.LightningDataModule):
