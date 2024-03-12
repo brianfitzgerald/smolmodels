@@ -163,8 +163,9 @@ class Toolformer(SyntheticDataTask):
             fn_call = get_fn_call_metadata(fn_call)
             result = TOOL_FUNCTIONS[fn_call.fn_name](*fn_call.parameters)
         except Exception as e:
-            print(f"Error in completion {row.question}: {e}")
+            print(f"Error in scoring completion {row.question}: {e}")
             return 0
+        print(f"Call result: {result} Recorded: {row.call_result}")
         if str(result) == row.call_result:
             score += 0.3
         if str(result) in row.agent_output:
@@ -194,7 +195,7 @@ class Toolformer(SyntheticDataTask):
                     )
                     dpo_rows_batch.append(dpo_row)
             except Exception as e:
-                print(f"Error in completion {i}: {e}")
+                print(f"Error in parsing completion {i}: {e}")
                 continue
 
             row_scores = [self._score_dpo_completion(row) for row in dpo_rows_batch]

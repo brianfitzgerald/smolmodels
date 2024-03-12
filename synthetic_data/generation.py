@@ -73,25 +73,29 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.max_concurrent = 16
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
-        completion_requests = []
-        for conversation in conversations:
-            request = self.oai_client.chat.completions.create(
-                model=self.model_name,
-                messages=conversation,
-                temperature=0,
-                max_tokens=512,
-                timeout=30,
+        try:
+            completion_requests = []
+            for conversation in conversations:
+                request = self.oai_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=conversation,
+                    temperature=0.2,
+                    max_tokens=512,
+                    timeout=30,
+                )
+                completion_requests.append(request)
+            results: List[ChatCompletion] = await gather_with_concurrency_limit(
+                self.max_concurrent, *completion_requests
             )
-            completion_requests.append(request)
-        results: List[ChatCompletion] = await gather_with_concurrency_limit(
-            self.max_concurrent, *completion_requests
-        )
-        completions = [
-            result.choices[0].message.content
-            for result in results
-            if result.choices[0].message.content is not None
-        ]
-        return completions
+            completions = [
+                result.choices[0].message.content
+                for result in results
+                if result.choices[0].message.content is not None
+            ]
+            return completions
+        except openai.OpenAIError as e:
+            print(f"Error while generating: {e}")
+            return []
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
