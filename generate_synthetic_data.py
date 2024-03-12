@@ -1,6 +1,5 @@
 import asyncio
 import os
-import traceback
 from typing import Dict, List, cast
 
 import fire
@@ -27,8 +26,6 @@ from synthetic_data.utils import (
     DatasetTaskFormat,
     GenerationSource,
     SeedDataFormat,
-    assert_valid_python_code,
-    extract_toolformer_dpo_row,
     print_result_dicts,
 )
 
@@ -94,21 +91,25 @@ def main(
             print("No existing dataset found, starting from scratch...")
             output_dataset = Dataset.from_dict(task.empty_dataset_format)
 
-    print("Loading input dataset...")
     input_dataset: Dataset
-    if task.seed_data_format == SeedDataFormat.HF_DATASET:
-        assert task.seed_data_location
+    input_dataset_location: str = task.seed_data_location
+    print(f"Loading input dataset: {input_dataset_location}")
+    if (
+        task.seed_data_format == SeedDataFormat.SYNTHETIC
+        and task.dpo_task_cache_dataset_name
+        and generate_dpo_pairs
+    ):
+        input_dataset_location = task.dpo_task_cache_dataset_name
+    if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
         input_dataset = cast(
-            Dataset, load_dataset(task.seed_data_location, split="train")
+            Dataset, load_dataset(input_dataset_location, split="train")
         )
     elif task.seed_data_format == SeedDataFormat.TSV:
         input_dataset = cast(
-            Dataset, load_dataset("tsv", data_files=task.seed_data_location)
+            Dataset, load_dataset("tsv", data_files=input_dataset_location)
         )
-    elif task.seed_data_format == SeedDataFormat.SYNTHETIC and task.dpo_task_cache_dataset_name:
-        input_dataset = cast(
-            Dataset, load_dataset(task.dpo_task_cache_dataset_name, split="train")
-        )
+    else:
+        raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
     new_dataset_rows: List[Dict] = []
     print("Running...")
@@ -116,36 +117,21 @@ def main(
     if generate_dpo_pairs:
         # Generate negative pairs for toolformer
         # task, definition, tool_call, call_result, agent_output
-        for batch_idx, batch in enumerate(
-            input_dataset.iter(batch_size=batch_size)
-        ):
-            full_conversations_batch = []
-            new_rows_batch = []
-            original_rows = []
+        for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+            batch = cast(Dict, batch)
+            full_conversations_batch = task.format_dpo_input_conversation(batch)
 
             print(f"Generating {len(full_conversations_batch)} completions...")
-            completions = asyncio.run(
-                model_wrapper.generate(full_conversations_batch)
-            )
+            completions = asyncio.run(model_wrapper.generate(full_conversations_batch))
 
-            for j, completion in enumerate(completions):
-                try:
-                    row = extract_toolformer_dpo_row(completion, original_rows[j])
-
-                    assert_valid_python_code(row.tool_call_accepted)
-                    assert_valid_python_code(row.tool_call_rejected)
-
-                    row_dict = row.__dict__
-                    new_rows_batch.append(row_dict)
-                except Exception as e:
-                    traceback.print_exc()
-                    continue
-            print_result_dicts(new_rows_batch)
-            new_dataset_rows.extend(new_rows_batch)
+            output_rows_batch = task.get_dpo_dataset_output_batch(completions)
+            print_result_dicts(output_rows_batch)
+            new_dataset_rows.extend(output_rows_batch)
             if batch_idx % upload_every == 0 and batch_idx > 0:
                 upload_dataset(
                     output_dataset, task.output_dataset_name, new_dataset_rows
                 )
+
 
 if __name__ == "__main__":
     fire.Fire(main)

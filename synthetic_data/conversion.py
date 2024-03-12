@@ -1,6 +1,7 @@
 import re
 
-from synthetic_data.generation import ShareGPTConversation
+from synthetic_data.utils import ShareGPTConversation
+
 
 
 GLAIVE_ROLES = ["USER", "ASSISTANT", "FUNCTION RESPONSE"]

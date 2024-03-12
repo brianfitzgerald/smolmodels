@@ -10,6 +10,7 @@ from pydantic.dataclasses import dataclass
 Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
+
 @dataclass
 class ToolFormerRow:
     question: str
@@ -37,6 +38,7 @@ class ToolUsageDPORow:
     call_result: str
     agent_output: str
 
+
 class DatasetTaskFormat(str, Enum):
     SFT = "SFT"
     DPO = "DPO"
@@ -58,7 +60,7 @@ class SeedDataFormat(Enum):
 
 def clean_message(message: str) -> str:
     """
-    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
+    Clean up spaces, tabs, and newlines in a message with a JSON dict, so the dict is formatted nicely.
     """
 
     # Handle odd edge case where textwrap evaluates the value as a bool
@@ -133,26 +135,6 @@ def get_matches(text: str):
 def extract_toolformer_row(text: str) -> ToolFormerRow:
     question, tool_call, call_result, agent_output = get_matches(text)
     return ToolFormerRow(question, call_result, tool_call, agent_output)
-
-
-def extract_toolformer_dpo_row(
-    text: str, original_row: ToolFormerRow
-) -> ToolFormerDPORow:
-    tool_call, call_result, agent_output = get_matches(text)
-    return ToolFormerDPORow(
-        original_row.question,
-        original_row.call_result,
-        original_row.tool_call,
-        original_row.agent_output,
-        call_result,
-        tool_call,
-        agent_output,
-    )
-
-
-def extract_tool_usage_dpo_row(text: str) -> ToolUsageDPORow:
-    definition, task, tool_call, call_result, agent_output = get_matches(text)
-    return ToolUsageDPORow(definition, task, tool_call, call_result, agent_output)
 
 
 def assert_valid_python_code(json_str: str):
