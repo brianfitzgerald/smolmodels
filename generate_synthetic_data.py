@@ -45,7 +45,7 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 16,
+    batch_size: int = 5,
     restart: bool = False,
     generate_dpo_pairs: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
@@ -123,7 +123,7 @@ def main(
         # task, definition, tool_call, call_result, agent_output
         for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
             batch = cast(Dict, batch)
-            full_conversations_batch = task.format_dpo_input_conversation(batch)
+            full_conversations_batch = task.format_dpo_input_conversations(batch)
 
             print(f"Generating {len(full_conversations_batch)} completions...")
             completions = asyncio.run(model_wrapper.generate(full_conversations_batch))

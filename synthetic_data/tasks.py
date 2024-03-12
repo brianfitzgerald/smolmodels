@@ -58,7 +58,7 @@ class SyntheticDataTask(ABC):
         """
         raise NotImplementedError
 
-    def format_dpo_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
         """
         Format conversation for DPO completion
         """
@@ -101,7 +101,7 @@ class Toolformer(SyntheticDataTask):
     dataset_task_format = DatasetTaskFormat.DPO
 
     dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
-    no_dpo_completions = 5
+    no_dpo_completions = 3
 
     output_dataset_name = "synthetic-toolformer-dpo"
     dataset_org = "roborovski"
@@ -136,7 +136,7 @@ class Toolformer(SyntheticDataTask):
             "agent_output": row.agent_output,
         }
 
-    def format_dpo_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
         # TODO chance of dropping out tool definition
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
@@ -159,13 +159,15 @@ class Toolformer(SyntheticDataTask):
     def _score_dpo_completion(self, row: ToolFormerRow) -> float:
         score = 0
         try:
-            fn_call = get_fn_call_metadata(row.tool_call)
+            fn_call = row.tool_call.replace("`", "").strip()
+            fn_call = get_fn_call_metadata(fn_call)
             result = TOOL_FUNCTIONS[fn_call.fn_name](*fn_call.parameters)
-        except:
+        except Exception as e:
+            print(f"Error in completion {row.question}: {e}")
             return 0
-        if result == row.call_result:
-            score += 0.1
-        if result in row.agent_output:
+        if str(result) == row.call_result:
+            score += 0.3
+        if str(result) in row.agent_output:
             score += 0.2
         return score
 
@@ -179,15 +181,25 @@ class Toolformer(SyntheticDataTask):
                 i : i + self.no_dpo_completions
             ]
             dpo_rows_batch = []
-            for completion, original_row in zip(completion_batch, original_rows_batch):
-                tool_call, call_result, agent_output = get_matches(completion)
-                dpo_row = ToolFormerRow(
-                    original_row.question,
-                    call_result,
-                    tool_call,
-                    agent_output,
-                )
-                dpo_rows_batch.append(dpo_row)
+            try:
+                for completion, original_row in zip(
+                    completion_batch, original_rows_batch
+                ):
+                    tool_call, call_result, agent_output = get_matches(completion)
+                    dpo_row = ToolFormerRow(
+                        original_row.question,
+                        call_result,
+                        tool_call,
+                        agent_output,
+                    )
+                    dpo_rows_batch.append(dpo_row)
+            except Exception as e:
+                print(f"Error in completion {i}: {e}")
+                continue
+
+            row_scores = [self._score_dpo_completion(row) for row in dpo_rows_batch]
+
+            print(f"Scores: {row_scores}")
 
             top_2_dpo_rows: List[ToolFormerRow] = sorted(
                 dpo_rows_batch, key=self._score_dpo_completion, reverse=True
