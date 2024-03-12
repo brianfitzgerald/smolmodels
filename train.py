@@ -171,7 +171,10 @@ CONFIGS = {
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
     "prompt_safety": ModelConfig(
-        T5FineTuner, PromptSafetyDataModule, PROMPT_SAFETY_PROJECT, HyperParams(base_model_checkpoint="google/flan-t5-base")
+        T5FineTuner,
+        PromptSafetyDataModule,
+        PROMPT_SAFETY_PROJECT,
+        HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
 }
 
@@ -213,7 +216,7 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.1,
+        val_check_interval=0.01,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,
