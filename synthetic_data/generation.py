@@ -6,7 +6,7 @@ from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
 
-from synthetic_data.utils import Conversation
+from synthetic_data.utils import Conversation, gather_with_concurrency_limit
 
 
 SHAREGPT_TO_OPENAI_ROLE = {
@@ -70,6 +70,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError("OPENAI_API_KEY is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
         self.model_name = "gpt-3.5-turbo"
+        self.max_concurrent = 16
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
         completion_requests = []
@@ -82,7 +83,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 timeout=30,
             )
             completion_requests.append(request)
-        results: List[ChatCompletion] = await asyncio.gather(*completion_requests)
+        results: List[ChatCompletion] = await gather_with_concurrency_limit(*completion_requests, self.max_concurrent)
         completions = [
             result.choices[0].message.content
             for result in results
@@ -104,6 +105,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
             base_url="https://openrouter.ai/api/v1",
         )
         self.model_name = "nousresearch/nous-hermes-2-mixtral-8x7b-dpo"
+        self.max_concurrent = 32
 
 
 class GroqGenerationWrapper(OpenAIGenerationWrapper):

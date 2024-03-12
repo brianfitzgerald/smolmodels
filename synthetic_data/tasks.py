@@ -10,6 +10,7 @@ from synthetic_data.prompts import (
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
 )
+from synthetic_data.tools import TOOL_FUNCTIONS
 
 from synthetic_data.utils import (
     Conversation,
@@ -18,7 +19,8 @@ from synthetic_data.utils import (
     ToolFormerDPORow,
     ToolFormerRow,
     ToolUsageDPORow,
-    assert_valid_python_code,
+    get_fn_call_metadata,
+    is_valid_python,
     clean_message,
     get_matches,
 )
@@ -34,11 +36,13 @@ class SyntheticDataTask(ABC):
 
     # Name for the dataset used to cache the seed data.
     # Once all the seed data is generated, this dataset will be used to cache the seed data.
-    dpo_task_cache_dataset_name: Optional[str] = None
+    dpo_seed_cache_dataset_name: Optional[str] = None
+
+    no_dpo_completions: int = 2
 
     seed_data_location: str
     output_dataset_name: str
-    output_dataset_org: str
+    dataset_org: str
 
     empty_dataset_format: Dict[str, List]
 
@@ -53,12 +57,6 @@ class SyntheticDataTask(ABC):
         Take the completed conversation and format it into the final dataset format.
         """
         raise NotImplementedError
-
-    def dpo_scoring_function(self, dataset_row: Dict) -> float:
-        """
-        Score a set of completions.
-        """
-        return 1
 
     def format_dpo_input_conversation(self, batch: Dict) -> List[Conversation]:
         """
@@ -100,10 +98,13 @@ class Toolformer(SyntheticDataTask):
     seed_data_format = SeedDataFormat.SYNTHETIC
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
-    dataset_format = DatasetTaskFormat.DPO
+    dataset_task_format = DatasetTaskFormat.DPO
 
-    dpo_task_cache_dataset_name = "synthetic-toolformer-dpo-pairs"
-    output_dataset_org = "roborovski"
+    dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
+    no_dpo_completions = 5
+
+    output_dataset_name = "synthetic-toolformer-dpo"
+    dataset_org = "roborovski"
 
     empty_dataset_format = {
         "system": [],
@@ -121,34 +122,13 @@ class Toolformer(SyntheticDataTask):
             prompt_conversations.append(get_toolformer_prompt(category))
         return prompt_conversations
 
-    def format_dpo_input_conversation(self, batch: Dict) -> List[Conversation]:
-        # TODO chance of dropping out tool definition
-        conversations_batch: List[Conversation] = []
-        original_rows_batch: List[ToolFormerRow] = []
-        for conversation in batch["conversations"]:
-            messages = [message["content"] for message in conversation]
-            question, tool_call, call_result, agent_output = messages
-            original_row = ToolFormerRow(
-                question=question,
-                call_result=call_result,
-                tool_call=tool_call,
-                agent_output=agent_output,
-            )
-            conversation = get_toolformer_dpo_negative_completion_prompt(question)
-            conversations_batch.append(conversation)
-            original_rows_batch.append(original_row)
-        self.original_rows_batch = original_rows_batch
-        return conversations_batch
-
     def get_seed_dataset_output_row(self, completions_batch: List[str]) -> Dict:
-        for i, completion in enumerate(completions_batch):
-            question, tool_call, call_result, agent_output = get_matches(
-                completion
-            )
+        for completion in completions_batch:
+            question, tool_call, call_result, agent_output = get_matches(completion)
             row = ToolFormerRow(question, tool_call, call_result, agent_output)
 
-            assert_valid_python_code(row.call_result)
-            assert_valid_python_code(row.tool_call)
+            is_valid_python(row.call_result)
+            is_valid_python(row.tool_call)
 
         return {
             "call_result": row.call_result,
@@ -156,30 +136,75 @@ class Toolformer(SyntheticDataTask):
             "agent_output": row.agent_output,
         }
 
+    def format_dpo_input_conversation(self, batch: Dict) -> List[Conversation]:
+        # TODO chance of dropping out tool definition
+        conversations_batch: List[Conversation] = []
+        original_rows_batch: List[ToolFormerRow] = []
+        for i, conversation in enumerate(batch["conversations"]):
+            messages = [message["content"] for message in conversation]
+            for _ in range(self.no_dpo_completions):
+                question, tool_call, call_result, agent_output = messages
+                original_row = ToolFormerRow(
+                    question=question,
+                    call_result=call_result,
+                    tool_call=tool_call,
+                    agent_output=agent_output,
+                )
+                conversation = get_toolformer_dpo_negative_completion_prompt(question)
+                conversations_batch.append(conversation)
+                original_rows_batch.append(original_row)
+        self.original_rows_batch = original_rows_batch
+        return conversations_batch
+
+    def _score_dpo_completion(self, row: ToolFormerRow) -> float:
+        score = 0
+        try:
+            fn_call = get_fn_call_metadata(row.tool_call)
+            result = TOOL_FUNCTIONS[fn_call.fn_name](*fn_call.parameters)
+        except:
+            return 0
+        if result == row.call_result:
+            score += 0.1
+        if result in row.agent_output:
+            score += 0.2
+        return score
+
     def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
         new_rows_batch = []
-        for i, completion in enumerate(completions_batch):
-            try:
+
+        # Get completions for each prompt, rank, and choos the 2 highest
+        for i in range(0, len(completions_batch), self.no_dpo_completions):
+            completion_batch = completions_batch[i : i + self.no_dpo_completions]
+            original_rows_batch = self.original_rows_batch[
+                i : i + self.no_dpo_completions
+            ]
+            dpo_rows_batch = []
+            for completion, original_row in zip(completion_batch, original_rows_batch):
                 tool_call, call_result, agent_output = get_matches(completion)
-                original_row = self.original_rows_batch[i]
-                dpo_row = ToolFormerDPORow(
+                dpo_row = ToolFormerRow(
                     original_row.question,
-                    original_row.call_result,
-                    original_row.tool_call,
-                    original_row.agent_output,
                     call_result,
                     tool_call,
                     agent_output,
                 )
+                dpo_rows_batch.append(dpo_row)
 
-                assert_valid_python_code(dpo_row.tool_call_accepted)
-                assert_valid_python_code(dpo_row.tool_call_rejected)
+            top_2_dpo_rows: List[ToolFormerRow] = sorted(
+                dpo_rows_batch, key=self._score_dpo_completion, reverse=True
+            )[:2]
 
-                row_dict = dpo_row.__dict__
-                new_rows_batch.append(row_dict)
-            except Exception as e:
-                print(f"Error processing DPO output row {i}: {e}")
-                continue
+            output_row = ToolFormerDPORow(
+                question=top_2_dpo_rows[0].question,
+                call_result_accepted=top_2_dpo_rows[0].call_result,
+                tool_call_accepted=top_2_dpo_rows[0].tool_call,
+                agent_output_accepted=top_2_dpo_rows[0].agent_output,
+                call_result_rejected=top_2_dpo_rows[1].call_result,
+                tool_call_rejected=top_2_dpo_rows[1].tool_call,
+                agent_output_rejected=top_2_dpo_rows[1].agent_output,
+            )
+
+            row_dict = output_row.__dict__
+            new_rows_batch.append(row_dict)
 
         return new_rows_batch
 

@@ -1,3 +1,4 @@
+import ast
 import asyncio
 from enum import Enum
 import re
@@ -37,6 +38,12 @@ class ToolUsageDPORow:
     tool_call: str
     call_result: str
     agent_output: str
+
+
+@dataclass
+class FunctionCall:
+    fn_name: str
+    parameters: List[str]
 
 
 class DatasetTaskFormat(str, Enum):
@@ -137,12 +144,13 @@ def extract_toolformer_row(text: str) -> ToolFormerRow:
     return ToolFormerRow(question, call_result, tool_call, agent_output)
 
 
-def assert_valid_python_code(json_str: str):
+def is_valid_python(json_str: str):
     json_str = json_str.strip().replace("`", "")
     try:
         compile(json_str, "<string>", "single")
     except SyntaxError as e:
-        raise ValueError(f"Invalid Python code: {e}")
+        return False
+    return True
 
 
 def clean_example(text):
@@ -150,6 +158,14 @@ def clean_example(text):
         r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
     )
     return cleaned_paragraph.strip()
+
+
+def get_fn_call_metadata(text: str) -> FunctionCall:
+    fn_call = ast.parse(text)
+    if not isinstance(fn_call, ast.Call):
+        raise ValueError("Expected a function call")
+    fn_args = [arg.value for arg in fn_call.args]  # type: ignore
+    return FunctionCall(fn_call.func.id, fn_args)  # type: ignore
 
 
 async def gather_with_concurrency_limit(n, *coros):

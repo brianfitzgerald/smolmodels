@@ -49,7 +49,7 @@ def main(
     restart: bool = False,
     generate_dpo_pairs: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
-    task_name: str = "toolformer_pairs",
+    task_name: str = "toolformer",
     **kwargs,
 ):
     """
@@ -57,7 +57,7 @@ def main(
     Inputs a seed dataset, that is either given from a CSV or HF dataset,
     or generated from a synthetic source, such as a list of subjects.
 
-    generate_dpo_negative_pair - If true, generate a negative pair for the DPO dataset.
+    generate_dpo_pairs - generate multiple completions and score them. Use the 2 widest scores
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
@@ -83,23 +83,26 @@ def main(
             output_dataset = cast(
                 Dataset,
                 load_dataset(
-                    f"{task.output_dataset_org}/{task.output_dataset_name}",
+                    f"{task.dataset_org}/{task.output_dataset_name}",
                     split="train",
                 ),
             )
+            # TODO filter for rows that don't need completion
         except (EmptyDatasetError, ValueError):
             print("No existing dataset found, starting from scratch...")
             output_dataset = Dataset.from_dict(task.empty_dataset_format)
 
+    print(f"Output dataset length: {len(output_dataset)}")
+
     input_dataset: Dataset
     input_dataset_location: str = task.seed_data_location
-    print(f"Loading input dataset: {input_dataset_location}")
     if (
         task.seed_data_format == SeedDataFormat.SYNTHETIC
-        and task.dpo_task_cache_dataset_name
+        and task.dpo_seed_cache_dataset_name
         and generate_dpo_pairs
     ):
-        input_dataset_location = task.dpo_task_cache_dataset_name
+        input_dataset_location = f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
+    print(f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}")
     if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
         input_dataset = cast(
             Dataset, load_dataset(input_dataset_location, split="train")
@@ -111,6 +114,7 @@ def main(
     else:
         raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
+    print(f"Input dataset length: {len(input_dataset)}")
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
