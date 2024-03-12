@@ -31,7 +31,7 @@ class HyperParams:
     max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
-    optimizer: OptimizerChoice = "Adafactor"
+    optimizer: OptimizerChoice = "AdamW8bit"
 
 
 class FineTunerDataset(pl.LightningDataModule):
