@@ -103,7 +103,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         new_rows = tabulate(
             rows,
             headers=columns,
-            maxcolwidths=[10, 10, 100, 100, 100],
+            maxcolwidths=[10, 10, 50, 50, 50],
         )
         print(new_rows)
         with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
@@ -148,7 +148,8 @@ class ModelConfig:
     hyperparams: HyperParams = HyperParams()
 
 
-T5_WANDB_PROJECT = "t5-prompt-upsampling"
+PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
+PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -160,28 +161,25 @@ CONFIGS = {
     "prompt_upsample_small": ModelConfig(
         T5FineTuner,
         PromptUpsampleDataModule,
-        T5_WANDB_PROJECT,
+        PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
     "prompt_upsample": ModelConfig(
         T5FineTuner,
         PromptUpsampleDataModule,
-        T5_WANDB_PROJECT,
+        PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
-    "prompt_upsample_adafactor": ModelConfig(
-        T5FineTuner,
-        PromptUpsampleDataModule,
-        T5_WANDB_PROJECT,
-        HyperParams(optimizer="Adafactor", learning_rate=1e-3),
-    ),
     "prompt_safety": ModelConfig(
-        T5FineTuner, PromptSafetyDataModule, "t5-prompt-safety"
+        T5FineTuner,
+        PromptSafetyDataModule,
+        PROMPT_SAFETY_PROJECT,
+        HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
 }
 
 
-def main(wandb: bool = False, config: str = "prompt_upsample"):
+def main(wandb: bool = False, config: str = "prompt_safety"):
     loggers = []
 
     model_config = CONFIGS[config]
@@ -218,7 +216,7 @@ def main(wandb: bool = False, config: str = "prompt_upsample"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.25,
+        val_check_interval=0.01,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,
