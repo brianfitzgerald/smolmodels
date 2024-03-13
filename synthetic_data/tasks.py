@@ -185,39 +185,31 @@ class Toolformer(SyntheticDataTask):
         return score
 
     def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
-        new_rows_batch = []
 
         # Get completions for each prompt, rank, and choos the 2 highest
-        for i in range(0, len(completions_batch), self.no_dpo_completions):
-            completion_batch = completions_batch[i : i + self.no_dpo_completions]
-            original_rows_batch = self.original_rows_batch[
-                i : i + self.no_dpo_completions
-            ]
-            dpo_rows_batch: List[ToolFormerRow] = []
+        new_rows_batch = []
+        dpo_rows_batch: List[ToolFormerRow] = []
+        for i, (completion, original_row) in enumerate(
+            zip(completions_batch, self.original_rows_batch)
+        ):
             try:
-                for completion, original_row in zip(
-                    completion_batch, original_rows_batch
-                ):
-                    tool_call, call_result, agent_output = get_matches(completion)
-                    dpo_row = ToolFormerRow(
-                        original_row.question,
-                        call_result,
-                        tool_call,
-                        agent_output,
-                    )
-                    dpo_rows_batch.append(dpo_row)
+                tool_call, call_result, agent_output = get_matches(completion)
+                dpo_row = ToolFormerRow(
+                    original_row.question,
+                    call_result,
+                    tool_call,
+                    agent_output,
+                )
+                dpo_rows_batch.append(dpo_row)
             except Exception as e:
-                print(f"Error in parsing completion {i}: {e}")
+                print(f"Error in parsing completion: {e}")
                 continue
 
-            if not len(dpo_rows_batch) == len(original_rows_batch):
-                breakpoint()
-
             output_row = ToolFormerDPORow(
-                question=original_rows_batch[i].question,
-                call_result_accepted=original_rows_batch[i].call_result,
-                tool_call_accepted=original_rows_batch[i].tool_call,
-                agent_output_accepted=original_rows_batch[i].agent_output,
+                question=self.original_rows_batch[i].question,
+                call_result_accepted=self.original_rows_batch[i].call_result,
+                tool_call_accepted=self.original_rows_batch[i].tool_call,
+                agent_output_accepted=self.original_rows_batch[i].agent_output,
                 call_result_rejected=dpo_rows_batch[i].call_result,
                 tool_call_rejected=dpo_rows_batch[i].tool_call,
                 agent_output_rejected=dpo_rows_batch[i].agent_output,
