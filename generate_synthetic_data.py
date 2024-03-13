@@ -45,10 +45,10 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 5,
+    batch_size: int = 4,
     restart: bool = False,
     generate_dpo_pairs: bool = False,
-    generation_source: GenerationSource = GenerationSource.OPENROUTER,
+    generation_source: GenerationSource = GenerationSource.OPENAI,
     task_name: str = "toolformer",
     **kwargs,
 ):

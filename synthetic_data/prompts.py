@@ -254,6 +254,10 @@ For example:
 JSON_TOOL_USAGE_NEGATIVE_PROMPT = """
 You are an agent that has access to the following tools: {tool_descriptions}
 
+To use a tool, first, provide an example API call that would be used to perform the task, prefixed with Call:.
+Then, provide an example of the tool's output to the API call, prefixed with Result:. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Then, provide an example of the agent's output to the user query, prefixed with Agent:. Always integrate the result of the tool output into the agent's response.
+
 Do not use any emoji or special characters in your response.
 
 Examples of how to use the tools are provided below. You are given a JSON definition of an API and an example of a user query that would be used to perform the task.
