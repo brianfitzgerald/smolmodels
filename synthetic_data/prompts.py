@@ -1,5 +1,4 @@
 from synthetic_data.generation import Conversation
-from synthetic_data.tools import TOOL_DESCRIPTIONS_TEXT
 
 
 def format_dalle_prompt_template(user_prompt: str) -> Conversation:
@@ -263,7 +262,7 @@ Examples of how to use the tools are provided below. You are given a JSON defini
 """
 
 
-def get_toolformer_prompt(category: str) -> Conversation:
+def get_toolformer_prompt(category: str, tool_descriptions: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
     """
@@ -273,14 +272,14 @@ def get_toolformer_prompt(category: str) -> Conversation:
             "role": "system",
             "content": JSON_TOOL_USAGE_GEN_PROMPT.format(
                 category=category,
-                tool_descriptions=TOOL_DESCRIPTIONS_TEXT,
+                tool_descriptions=tool_descriptions,
                 examples=TOOLFORMER_EXAMPLES,
             ),
         }
     ]
 
 
-def get_toolformer_dpo_negative_completion_prompt(question: str) -> Conversation:
+def get_toolformer_dpo_negative_completion_prompt(question: str, tool_descriptions: str) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
     """
@@ -289,7 +288,7 @@ def get_toolformer_dpo_negative_completion_prompt(question: str) -> Conversation
         {
             "role": "system",
             "content": JSON_TOOL_USAGE_NEGATIVE_PROMPT.format(
-                tool_descriptions=TOOL_DESCRIPTIONS_TEXT, examples=TOOLFORMER_EXAMPLES
+                tool_descriptions=tool_descriptions, examples=TOOLFORMER_EXAMPLES
             ),
         },
         {"role": "user", "content": question},
