@@ -92,8 +92,6 @@ def main(
             print("No existing dataset found, starting from scratch...")
             output_dataset = Dataset.from_dict(task.empty_dataset_format)
 
-    print(f"Output dataset length: {len(output_dataset)}")
-
     input_dataset: Dataset
     input_dataset_location: str = task.seed_data_location
     if (
@@ -101,11 +99,18 @@ def main(
         and task.dpo_seed_cache_dataset_name
         and generate_dpo_pairs
     ):
-        input_dataset_location = f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
-    print(f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}")
+        input_dataset_location = (
+            f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
+        )
+    print(
+        f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
+    )
+    split = "train"
+    if len(output_dataset) > 0:
+        split = f"train[{len(output_dataset)}:]"
     if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
         input_dataset = cast(
-            Dataset, load_dataset(input_dataset_location, split="train")
+            Dataset, load_dataset(input_dataset_location, split=split)
         )
     elif task.seed_data_format == SeedDataFormat.TSV:
         input_dataset = cast(
@@ -114,7 +119,7 @@ def main(
     else:
         raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
-    print(f"Input dataset length: {len(input_dataset)}")
+    print(f"Input dataset length: {len(input_dataset)} output: {len(output_dataset)}")
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
