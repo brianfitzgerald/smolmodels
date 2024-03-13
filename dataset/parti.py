@@ -1,7 +1,7 @@
 from datasets import load_dataset
 from typing import Optional
 from transformers.tokenization_utils import PreTrainedTokenizer
-import os
+from typing import Dict
 
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
@@ -49,6 +49,17 @@ class PromptUpsampleDataModule(FineTunerDataset):
 
         ensure_directory(self.cache_dir, clear=False)
 
+        self.train_dataset = self.train_dataset.filter(
+            filter_row,
+            cache_file_name=f"{self.cache_dir}/training_filtered.parquet",
+            num_proc=self.cpu_count,
+        )
+        self.val_dataset = self.val_dataset.filter(
+            filter_row,
+            cache_file_name=f"{self.cache_dir}/validation_filtered.parquet",
+            num_proc=self.cpu_count,
+        )
+
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,
             batched=True,
@@ -61,7 +72,7 @@ class PromptUpsampleDataModule(FineTunerDataset):
             self.prepare_sample,
             batched=True,
             load_from_cache_file=True,
-            cache_file_name=f"{self.cache_dir}/validation.parquewt",
+            cache_file_name=f"{self.cache_dir}/validation.parquet",
             num_proc=self.cpu_count,
         )
 
@@ -104,6 +115,19 @@ class PromptUpsampleDataModule(FineTunerDataset):
         }
 
 
+def filter_row(row: Dict) -> bool:
+    prompt, upsampled = row["Prompt"], row["Upsampled"]
+    if len(prompt) == 0 or len(upsampled) == 0:
+        return False
+    if "\n" in prompt or "\n" in upsampled:
+        return False
+    if len(upsampled.split(" ")) > 10:
+        return False
+    if len(upsampled) > 128:
+        return False
+    return True
+
+
 class PromptSafetyDataModule(PromptUpsampleDataModule):
     def __init__(
         self,
@@ -117,3 +141,6 @@ class PromptSafetyDataModule(PromptUpsampleDataModule):
         self.input_column, self.target_column = "Prompt", "Upsampled"
         self.cache_dir = "dataset_caches/safety_workflows"
         self.dataset_name = "roborovski/safety-workflows-upsampled"
+
+    def setup(self, stage: Optional[str] = None):
+        super().setup(stage)
