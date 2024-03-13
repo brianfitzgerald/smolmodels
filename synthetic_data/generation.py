@@ -79,9 +79,8 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 request = self.oai_client.chat.completions.create(
                     model=self.model_name,
                     messages=conversation,
-                    temperature=0.2,
+                    temperature=0,
                     max_tokens=512,
-                    timeout=30,
                 )
                 completion_requests.append(request)
             results: List[ChatCompletion] = await gather_with_concurrency_limit(

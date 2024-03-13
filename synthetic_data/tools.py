@@ -2,6 +2,7 @@ import ast
 import inspect
 from typing import List, Optional
 from pydantic.dataclasses import dataclass
+import random
 
 
 def ConvertUnits(amount, from_unit, to_unit):
@@ -64,7 +65,7 @@ TOOL_DESCRIPTIONS = {
 }
 
 
-DROPOUT_TYPES = ["tool_description", "tool_parameter", "available_tools"]
+DROPOUT_TYPES = ["tool_description", "tool_parameter", "available_tools", "reorder_params"]
 
 
 @dataclass
@@ -117,6 +118,8 @@ def get_tool_descriptions(dropout_type: Optional[str] = None):
         tool_name, tool_args = get_function_info(TOOL_FUNCTIONS[tool_name])
         if dropout_type == "tool_parameter":
             tool_args = []
+        if dropout_type == "reorder_params":
+            random.shuffle(tool_args)
         tool_description_lines += [
             f"{tool_name}({', '.join(tool_args)}): {description}"
         ]
