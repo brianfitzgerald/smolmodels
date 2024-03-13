@@ -177,7 +177,6 @@ class Toolformer(SyntheticDataTask):
         except Exception as e:
             print(f"Error in scoring completion {row.question}: {e}")
             return 0
-        print(f"Call result: {result} Recorded: {row.call_result}")
         if str(result) == row.call_result:
             score += 0.3
         if str(result) in row.agent_output:
@@ -194,29 +193,34 @@ class Toolformer(SyntheticDataTask):
         ):
             try:
                 tool_call, call_result, agent_output = get_matches(completion)
+
                 dpo_row = ToolFormerRow(
                     original_row.question,
                     call_result,
                     tool_call,
                     agent_output,
                 )
+
                 dpo_rows_batch.append(dpo_row)
+
+                if dpo_row.tool_call == original_row.tool_call:
+                    continue
+
+                output_row = ToolFormerDPORow(
+                    question=self.original_rows_batch[i].question,
+                    call_result_accepted=self.original_rows_batch[i].call_result,
+                    tool_call_accepted=self.original_rows_batch[i].tool_call,
+                    agent_output_accepted=self.original_rows_batch[i].agent_output,
+                    call_result_rejected=dpo_rows_batch[i].call_result,
+                    tool_call_rejected=dpo_rows_batch[i].tool_call,
+                    agent_output_rejected=dpo_rows_batch[i].agent_output,
+                )
+
+                row_dict = output_row.__dict__
+                new_rows_batch.append(row_dict)
             except Exception as e:
                 print(f"Error in parsing completion: {e}")
                 continue
-
-            output_row = ToolFormerDPORow(
-                question=self.original_rows_batch[i].question,
-                call_result_accepted=self.original_rows_batch[i].call_result,
-                tool_call_accepted=self.original_rows_batch[i].tool_call,
-                agent_output_accepted=self.original_rows_batch[i].agent_output,
-                call_result_rejected=dpo_rows_batch[i].call_result,
-                tool_call_rejected=dpo_rows_batch[i].tool_call,
-                agent_output_rejected=dpo_rows_batch[i].agent_output,
-            )
-
-            row_dict = output_row.__dict__
-            new_rows_batch.append(row_dict)
 
         return new_rows_batch
 
