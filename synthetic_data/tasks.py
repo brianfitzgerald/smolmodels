@@ -9,7 +9,12 @@ from synthetic_data.prompts import (
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
 )
-from synthetic_data.tools import DROPOUT_TYPES, TOOL_FUNCTIONS, get_fn_call_metadata, get_tool_descriptions
+from synthetic_data.tools import (
+    DROPOUT_TYPES,
+    TOOL_FUNCTIONS,
+    get_fn_call_metadata,
+    get_tool_descriptions,
+)
 
 from synthetic_data.utils import (
     Conversation,
@@ -116,7 +121,9 @@ class Toolformer(SyntheticDataTask):
         random_categories = random.sample(TOOL_USE_CATEGORIES * batch_size, batch_size)
         tool_descriptions = get_tool_descriptions()
         for category in random_categories:
-            prompt_conversations.append(get_toolformer_prompt(category, tool_descriptions))
+            prompt_conversations.append(
+                get_toolformer_prompt(category, tool_descriptions)
+            )
         return prompt_conversations
 
     def get_seed_dataset_output_row(self, completions_batch: List[str]) -> Dict:
@@ -137,10 +144,7 @@ class Toolformer(SyntheticDataTask):
 
         conversations = batch["conversations"]
 
-        weights = [0.3, 0.3, 0.3]
-        dropout_types_batch = random.choices(
-            DROPOUT_TYPES, weights=weights, k=len(conversations)
-        )
+        dropout_types_batch = random.choices(DROPOUT_TYPES, k=len(conversations))
 
         # TODO chance of dropping out tool definition
         conversations_batch: List[Conversation] = []
@@ -189,7 +193,7 @@ class Toolformer(SyntheticDataTask):
             original_rows_batch = self.original_rows_batch[
                 i : i + self.no_dpo_completions
             ]
-            dpo_rows_batch = []
+            dpo_rows_batch: List[ToolFormerRow] = []
             try:
                 for completion, original_row in zip(
                     completion_batch, original_rows_batch
@@ -206,22 +210,17 @@ class Toolformer(SyntheticDataTask):
                 print(f"Error in parsing completion {i}: {e}")
                 continue
 
-            row_scores = [self._score_dpo_completion(row) for row in dpo_rows_batch]
-
-            print(f"Scores: {row_scores}")
-
-            top_2_dpo_rows: List[ToolFormerRow] = sorted(
-                dpo_rows_batch, key=self._score_dpo_completion, reverse=True
-            )[:2]
+            if not len(dpo_rows_batch) == len(original_rows_batch):
+                breakpoint()
 
             output_row = ToolFormerDPORow(
-                question=top_2_dpo_rows[0].question,
-                call_result_accepted=top_2_dpo_rows[0].call_result,
-                tool_call_accepted=top_2_dpo_rows[0].tool_call,
-                agent_output_accepted=top_2_dpo_rows[0].agent_output,
-                call_result_rejected=top_2_dpo_rows[1].call_result,
-                tool_call_rejected=top_2_dpo_rows[1].tool_call,
-                agent_output_rejected=top_2_dpo_rows[1].agent_output,
+                question=original_rows_batch[i].question,
+                call_result_accepted=original_rows_batch[i].call_result,
+                tool_call_accepted=original_rows_batch[i].tool_call,
+                agent_output_accepted=original_rows_batch[i].agent_output,
+                call_result_rejected=dpo_rows_batch[i].call_result,
+                tool_call_rejected=dpo_rows_batch[i].tool_call,
+                agent_output_rejected=dpo_rows_batch[i].agent_output,
             )
 
             row_dict = output_row.__dict__
