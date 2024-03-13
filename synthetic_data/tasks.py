@@ -1,5 +1,4 @@
 from abc import ABC
-from enum import Enum
 import random
 from typing import Dict, List, Optional
 from synthetic_data.conversion import chatml_to_conversation
@@ -10,7 +9,7 @@ from synthetic_data.prompts import (
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
 )
-from synthetic_data.tools import TOOL_FUNCTIONS
+from synthetic_data.tools import DROPOUT_TYPES, TOOL_FUNCTIONS, get_fn_call_metadata, get_tool_descriptions
 
 from synthetic_data.utils import (
     Conversation,
@@ -18,8 +17,6 @@ from synthetic_data.utils import (
     SeedDataFormat,
     ToolFormerDPORow,
     ToolFormerRow,
-    ToolUsageDPORow,
-    get_fn_call_metadata,
     is_valid_python,
     clean_message,
     get_matches,
@@ -101,7 +98,6 @@ class Toolformer(SyntheticDataTask):
     dataset_task_format = DatasetTaskFormat.DPO
 
     dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
-    no_dpo_completions = 3
 
     output_dataset_name = "synthetic-toolformer-dpo"
     dataset_org = "roborovski"
@@ -118,8 +114,9 @@ class Toolformer(SyntheticDataTask):
     def format_seed_input_conversation(self, batch_size: int) -> List[Conversation]:
         prompt_conversations: List[Conversation] = []
         random_categories = random.sample(TOOL_USE_CATEGORIES * batch_size, batch_size)
+        tool_descriptions = get_tool_descriptions()
         for category in random_categories:
-            prompt_conversations.append(get_toolformer_prompt(category))
+            prompt_conversations.append(get_toolformer_prompt(category, tool_descriptions))
         return prompt_conversations
 
     def get_seed_dataset_output_row(self, completions_batch: List[str]) -> Dict:
@@ -137,10 +134,18 @@ class Toolformer(SyntheticDataTask):
         }
 
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
+
+        conversations = batch["conversations"]
+
+        weights = [0.3, 0.3, 0.3]
+        dropout_types_batch = random.choices(
+            DROPOUT_TYPES, weights=weights, k=len(conversations)
+        )
+
         # TODO chance of dropping out tool definition
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
-        for i, conversation in enumerate(batch["conversations"]):
+        for i, conversation in enumerate(conversations):
             messages = [message["content"] for message in conversation]
             for _ in range(self.no_dpo_completions):
                 question, tool_call, call_result, agent_output = messages
@@ -150,7 +155,10 @@ class Toolformer(SyntheticDataTask):
                     tool_call=tool_call,
                     agent_output=agent_output,
                 )
-                conversation = get_toolformer_dpo_negative_completion_prompt(question)
+                tool_descriptions = get_tool_descriptions(dropout_types_batch[i])
+                conversation = get_toolformer_dpo_negative_completion_prompt(
+                    question, tool_descriptions
+                )
                 conversations_batch.append(conversation)
                 original_rows_batch.append(original_row)
         self.original_rows_batch = original_rows_batch

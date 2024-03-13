@@ -1,14 +1,7 @@
-TOOLFORMER_TOOL_DESCRIPTIONS = {
-    "ConvertUnits(amount, from, to)": "Convert a quantity from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, meters, feet, inches, centimeters, and kilometers.",
-    "Calculator(expression)": "Evaluate a mathematical expression. Returns the result of the expression.",
-}
-
-TOOL_DESCRIPTIONS_TEXT = "\n".join(
-    [
-        f"- {tool}: {description}"
-        for tool, description in TOOLFORMER_TOOL_DESCRIPTIONS.items()
-    ]
-)
+import ast
+import inspect
+from typing import List, Optional
+from pydantic.dataclasses import dataclass
 
 
 def ConvertUnits(amount, from_unit, to_unit):
@@ -64,3 +57,68 @@ TOOL_FUNCTIONS = {
     "ConvertUnits": ConvertUnits,
     "Calculator": Calculator,
 }
+
+TOOL_DESCRIPTIONS = {
+    "ConvertUnits": "Convert a quantity from one unit to another. Returns the converted weight. Available formats are pounds, kilograms, ounces, grams, meters, feet, inches, centimeters, and kilometers.",
+    "Calculator": "Evaluate a mathematical expression. Returns the result of the expression.",
+}
+
+
+DROPOUT_TYPES = ["tool_description", "tool_parameter", "available_tools"]
+
+
+@dataclass
+class FunctionCall:
+    fn_name: str
+    parameters: List[str | int | float | bool]
+
+
+class FunctionCallVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.function_calls = []
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name):
+            arguments = []
+            for arg in node.args:
+                if isinstance(arg, ast.Constant):
+                    arguments.append(arg.value)
+
+            self.function_calls.append((node.func.id, arguments))
+
+
+def get_fn_call_metadata(text: str) -> FunctionCall:
+    parsed = ast.parse(text)
+    visitor = FunctionCallVisitor()
+    visitor.visit(parsed)
+    call = FunctionCall(visitor.function_calls[0][0], visitor.function_calls[0][1])
+    return call
+
+
+def get_function_info(func):
+    func_name = func.__name__
+    sig = inspect.signature(func)
+    args = [
+        param.name
+        for param in sig.parameters.values()
+        if param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ]
+    return func_name, args
+
+
+def get_tool_descriptions(dropout_type: Optional[str] = None):
+    tool_description_lines = []
+    if dropout_type == "available_tools":
+        return ""
+    for tool_name in TOOL_FUNCTIONS.keys():
+        description = TOOL_DESCRIPTIONS[tool_name]
+        if dropout_type == "tool_description":
+            description = ""
+        tool_name, tool_args = get_function_info(TOOL_FUNCTIONS[tool_name])
+        if dropout_type == "tool_parameter":
+            tool_args = []
+        tool_description_lines += [
+            f"{tool_name}({', '.join(tool_args)}): {description}"
+        ]
+
+    return "\n".join(tool_description_lines)

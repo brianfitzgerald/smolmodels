@@ -1,4 +1,3 @@
-import ast
 import asyncio
 from enum import Enum
 import re
@@ -38,12 +37,6 @@ class ToolUsageDPORow:
     tool_call: str
     call_result: str
     agent_output: str
-
-
-@dataclass
-class FunctionCall:
-    fn_name: str
-    parameters: List[str | int | float | bool]
 
 
 class DatasetTaskFormat(str, Enum):
@@ -158,28 +151,6 @@ def clean_example(text):
         r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
     )
     return cleaned_paragraph.strip()
-
-
-class FunctionCallVisitor(ast.NodeVisitor):
-    def __init__(self):
-        self.function_calls = []
-
-    def visit_Call(self, node):
-        if isinstance(node.func, ast.Name):
-            arguments = []
-            for arg in node.args:
-                if isinstance(arg, ast.Constant):
-                    arguments.append(arg.value)
-
-            self.function_calls.append((node.func.id, arguments))
-
-
-def get_fn_call_metadata(text: str) -> FunctionCall:
-    parsed = ast.parse(text)
-    visitor = FunctionCallVisitor()
-    visitor.visit(parsed)
-    call = FunctionCall(visitor.function_calls[0][0], visitor.function_calls[0][1])
-    return call
 
 
 async def gather_with_concurrency_limit(n: int, *coros):
