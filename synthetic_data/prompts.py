@@ -116,8 +116,8 @@ Agent: On January 1, 2020, in New York City, the temperature was 32°F with snow
 JSON_TOOL_USAGE_GEN_PROMPT = """
 Generate an example of an API in the category of {category} that could be used to {task}.
 Provide the API in the form of a JSON definition. Follow the example below.
-Then, provide an example of a user query that would be used to perform the task.
-Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URls, references, or names.
+Then, provide an example of a user query that would require the API to be called to answer. Phrase the query as a question a real user would ask, such as "What is the weather in New York on January 1, 2020?"
+Then, provide an example of the tool's output to the API call. Always use realistic places and names when providing examples. Do not make up fake URLs, references, or names.
 Finally, provide an example of the agent's output to the user query. Always integrate the result of the tool output into the agent's response.
 
 Do not use any emoji or special characters in your response.
@@ -238,7 +238,7 @@ Call: `Calculator("sqrt(16)")`
 Result: 4
 """
 
-JSON_TOOL_USAGE_GEN_PROMPT = """
+TOOLFORMER_TOOL_USAGE_PROMPT = """
 You are an agent that has access to the following tools: {tool_descriptions}
 Generate an example user request message in the category of {category} that would use those tools.
 Then, provide an example API call that would be used to perform the task, and the result of the tool output.

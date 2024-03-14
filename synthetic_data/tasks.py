@@ -6,6 +6,7 @@ from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
+    get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
 )
@@ -56,7 +57,7 @@ class SyntheticDataTask(ABC):
         """
         raise NotImplementedError
 
-    def get_seed_dataset_output_row(self, completion: str) -> Dict:
+    def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
         """
         Take the completed conversation and format it into the final dataset format.
         """
@@ -128,7 +129,7 @@ class Toolformer(SyntheticDataTask):
             )
         return prompt_conversations
 
-    def get_seed_dataset_output_row(self, completions_batch: List[str]) -> Dict:
+    def get_seed_dataset_output_rows_batch(self, completions_batch: List[str]) -> Dict:
         for completion in completions_batch:
             question, tool_call, call_result, agent_output = get_matches(completion)
             row = ToolFormerRow(question, tool_call, call_result, agent_output)
@@ -214,10 +215,11 @@ class Toolformer(SyntheticDataTask):
 class SyntheticToolCalls(SyntheticDataTask):
 
     dataset_task_format = DatasetTaskFormat.DPO
-    seed_data_format = SeedDataFormat.SYNTHETIC
+    seed_data_format = SeedDataFormat.TSV
+    seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
     dataset_org = "roborovski"
-    dpo_seed_cache_dataset_name = "synthetic-tool-calls"
+    dpo_seed_cache_dataset_name = "synthetic-tool-calls-v2"
 
     output_dataset_name = "synthetic-tool-calls-dpo-pairs"
 
@@ -229,6 +231,43 @@ class SyntheticToolCalls(SyntheticDataTask):
     }
 
     original_rows_batch: List[SyntheticToolCallRow] = []
+
+    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+        conversations = []
+        for category, task in zip(batch["Category"], batch["Task"]):
+            conversations.append(get_tool_usage_prompt(category, task))
+        return conversations
+
+    def get_seed_dataset_output_rows_batch(
+        self, completions_batch: List[str]
+    ) -> List[Dict]:
+        batch = []
+        for completion in completions_batch:
+            try:
+                _, tool, question, tool_call, call_result, agent_output = get_matches(
+                    completion
+                )
+
+                row = SyntheticToolCallRow(
+                    tool, question, tool_call, call_result, agent_output
+                )
+
+                assert is_valid_python(row.call_result)
+                assert is_valid_python(row.tool_call)
+
+                batch.append(
+                    {
+                        "tool": row.tool,
+                        "question": row.question,
+                        "call_result": row.call_result,
+                        "tool_call": row.tool_call,
+                        "agent_output": row.agent_output,
+                    }
+                )
+            except Exception as e:
+                print(f"Error in parsing seed completion: {e}")
+                continue
+        return batch
 
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
 
