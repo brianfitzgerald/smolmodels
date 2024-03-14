@@ -7,6 +7,7 @@ from openai.types.chat.chat_completion_message_param import ChatCompletionMessag
 from tabulate import tabulate
 from pydantic.dataclasses import dataclass
 
+
 Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
@@ -31,13 +32,24 @@ class ToolFormerDPORow:
 
 
 @dataclass
-class ToolUsageDPORow:
-    definition: str
-    task: str
+class SyntheticToolCallRow:
+    tool: str
+    question: str
     tool_call: str
     call_result: str
     agent_output: str
 
+
+@dataclass
+class SyntheticToolCallDPORow:
+    tool: str
+    question: str
+    tool_call_accepted: str
+    call_result_accepted: str
+    agent_output_accepted: str
+    tool_call_rejected: str
+    call_result_rejected: str
+    agent_output_rejected: str
 
 class DatasetTaskFormat(str, Enum):
     SFT = "SFT"
