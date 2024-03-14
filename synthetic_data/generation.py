@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
 import openai
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict
 from datasets import Dataset, concatenate_datasets
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 import asyncio
 
-Conversation = List[ChatCompletionMessageParam]
-ShareGPTConversation = List[Dict[str, str]]
+from synthetic_data.utils import Conversation, gather_with_concurrency_limit
+
 
 SHAREGPT_TO_OPENAI_ROLE = {
     "system": "system",
@@ -71,25 +70,31 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError("OPENAI_API_KEY is required for OpenAIGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(api_key=api_key)
         self.model_name = "gpt-3.5-turbo"
+        self.max_concurrent = 16
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
-        completion_requests = []
-        for conversation in conversations:
-            request = self.oai_client.chat.completions.create(
-                model=self.model_name,
-                messages=conversation,
-                temperature=0,
-                max_tokens=512,
-                timeout=30,
+        try:
+            completion_requests = []
+            for conversation in conversations:
+                request = self.oai_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=conversation,
+                    temperature=0,
+                    max_tokens=512,
+                )
+                completion_requests.append(request)
+            results: List[ChatCompletion] = await gather_with_concurrency_limit(
+                self.max_concurrent, *completion_requests
             )
-            completion_requests.append(request)
-        results: List[ChatCompletion] = await asyncio.gather(*completion_requests)
-        completions = [
-            result.choices[0].message.content
-            for result in results
-            if result.choices[0].message.content is not None
-        ]
-        return completions
+            completions = [
+                result.choices[0].message.content
+                for result in results
+                if result.choices[0].message.content is not None
+            ]
+            return completions
+        except openai.OpenAIError as e:
+            print(f"Error while generating: {e}")
+            return []
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
@@ -105,6 +110,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
             base_url="https://openrouter.ai/api/v1",
         )
         self.model_name = "nousresearch/nous-hermes-2-mixtral-8x7b-dpo"
+        self.max_concurrent = 32
 
 
 class GroqGenerationWrapper(OpenAIGenerationWrapper):
@@ -112,9 +118,7 @@ class GroqGenerationWrapper(OpenAIGenerationWrapper):
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("GROQ_API_KEY")
         if api_key is None:
-            raise ValueError(
-                "GROQ_API_KEY is required for OpenRouterGenerationWrapper"
-            )
+            raise ValueError("GROQ_API_KEY is required for OpenRouterGenerationWrapper")
         self.oai_client = openai.AsyncOpenAI(
             api_key=api_key,
             base_url="https://api.groq.com/openai/v1",

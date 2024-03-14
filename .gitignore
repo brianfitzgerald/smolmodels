@@ -178,3 +178,5 @@ dataset_caches/*
 dataset_samples/*
 submit.sh
 submit_datagen.sh
+
+*DS_Store*
