@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Dict, List, cast
+from typing import Dict, List, Optional, cast
 
 import fire
 from datasets import Dataset, load_dataset
@@ -11,7 +11,7 @@ from synthetic_data.tasks import (
     PromptUpsample,
     SyntheticDataTask,
     Toolformer,
-    Toolformer,
+    SyntheticToolCalls,
 )
 
 from synthetic_data.generation import (
@@ -32,6 +32,7 @@ from synthetic_data.utils import (
 DATA_TASKS: Dict[str, type[SyntheticDataTask]] = {
     "toolformer": Toolformer,
     "prompt_upsample": PromptUpsample,
+    "synthetic_tool_calls": SyntheticToolCalls,
 }
 
 MODEL_WRAPPER_CLASSES = {
@@ -47,9 +48,9 @@ def main(
     upload_every: int = 10,
     batch_size: int = 4,
     restart: bool = False,
-    generate_dpo_pairs: bool = False,
+    pairs: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
-    task_name: str = "toolformer",
+    task_name: str = "synthetic_tool_calls",
     **kwargs,
 ):
     """
@@ -57,13 +58,13 @@ def main(
     Inputs a seed dataset, that is either given from a CSV or HF dataset,
     or generated from a synthetic source, such as a list of subjects.
 
-    generate_dpo_pairs - generate multiple completions and score them. Use the 2 widest scores
+    pairs - generate multiple completions and score them. Use the 2 widest scores
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
     task = DATA_TASKS[task_name]()
 
-    if generate_dpo_pairs and task.dataset_task_format != DatasetTaskFormat.DPO:
+    if pairs and task.dataset_task_format != DatasetTaskFormat.DPO:
         raise ValueError("generate_pairs is only supported for DPO tasks.")
 
     print("Logging into the Hub...")
@@ -93,15 +94,18 @@ def main(
             output_dataset = Dataset.from_dict(task.empty_dataset_format)
 
     input_dataset: Dataset
-    input_dataset_location: str = task.seed_data_location
+    input_dataset_location: Optional[str] = None
     if (
-        task.seed_data_format == SeedDataFormat.SYNTHETIC
+        task.seed_data_format and task.seed_data_format == SeedDataFormat.SYNTHETIC
         and task.dpo_seed_cache_dataset_name
-        and generate_dpo_pairs
+        and pairs
     ):
         input_dataset_location = (
             f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
         )
+    else:
+        input_dataset_location = f"{task.dataset_org}/{task.seed_data_location}"
+
     print(
         f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
     )
@@ -109,9 +113,7 @@ def main(
     if len(output_dataset) > 0:
         split = f"train[{len(output_dataset)}:]"
     if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
-        input_dataset = cast(
-            Dataset, load_dataset(input_dataset_location, split=split)
-        )
+        input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == SeedDataFormat.TSV:
         input_dataset = cast(
             Dataset, load_dataset("tsv", data_files=input_dataset_location)
@@ -123,7 +125,7 @@ def main(
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
-    if generate_dpo_pairs:
+    if pairs:
         # Generate negative pairs for toolformer
         # task, definition, tool_call, call_result, agent_output
         for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):

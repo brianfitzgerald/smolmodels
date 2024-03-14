@@ -125,3 +125,10 @@ def get_tool_descriptions(dropout_type: Optional[str] = None):
         ]
 
     return "\n".join(tool_description_lines)
+
+
+def replicate_tool_call(tool_call: str):
+    fn_call = tool_call.replace("`", "").strip()
+    fn_call = get_fn_call_metadata(fn_call)
+    result = TOOL_FUNCTIONS[fn_call.fn_name](*fn_call.parameters)
+    return result

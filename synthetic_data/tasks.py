@@ -20,6 +20,8 @@ from synthetic_data.utils import (
     Conversation,
     DatasetTaskFormat,
     SeedDataFormat,
+    SyntheticToolCallRow,
+    SyntheticToolCallDPORow,
     ToolFormerDPORow,
     ToolFormerRow,
     is_valid_python,
@@ -30,7 +32,7 @@ from synthetic_data.utils import (
 
 class SyntheticDataTask(ABC):
 
-    seed_data_format: SeedDataFormat
+    seed_data_format: SeedDataFormat = SeedDataFormat.SYNTHETIC
     dataset_task_format: DatasetTaskFormat = DatasetTaskFormat.SFT
 
     # Only used for the toolformer DPO dataset. # TODO remove this when that project is finished.
@@ -131,8 +133,8 @@ class Toolformer(SyntheticDataTask):
             question, tool_call, call_result, agent_output = get_matches(completion)
             row = ToolFormerRow(question, tool_call, call_result, agent_output)
 
-            is_valid_python(row.call_result)
-            is_valid_python(row.tool_call)
+            assert is_valid_python(row.call_result)
+            assert is_valid_python(row.tool_call)
 
         return {
             "call_result": row.call_result,
@@ -146,7 +148,6 @@ class Toolformer(SyntheticDataTask):
 
         dropout_types_batch = random.choices(DROPOUT_TYPES, k=len(conversations))
 
-        # TODO chance of dropping out tool definition
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
         for i, conversation in enumerate(conversations):
@@ -168,28 +169,13 @@ class Toolformer(SyntheticDataTask):
         self.original_rows_batch = original_rows_batch
         return conversations_batch
 
-    def _score_dpo_completion(self, row: ToolFormerRow) -> float:
-        score = 0
-        try:
-            fn_call = row.tool_call.replace("`", "").strip()
-            fn_call = get_fn_call_metadata(fn_call)
-            result = TOOL_FUNCTIONS[fn_call.fn_name](*fn_call.parameters)
-        except Exception as e:
-            print(f"Error in scoring completion {row.question}: {e}")
-            return 0
-        if str(result) == row.call_result:
-            score += 0.3
-        if str(result) in row.agent_output:
-            score += 0.2
-        return score
-
     def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
 
         # Get completions for each prompt, rank, and choos the 2 highest
         new_rows_batch = []
         dpo_rows_batch: List[ToolFormerRow] = []
-        for i, (completion, original_row) in enumerate(
-            zip(completions_batch, self.original_rows_batch)
+        for completion, original_row in zip(
+            completions_batch, self.original_rows_batch
         ):
             try:
                 tool_call, call_result, agent_output = get_matches(completion)
@@ -207,17 +193,101 @@ class Toolformer(SyntheticDataTask):
                     continue
 
                 output_row = ToolFormerDPORow(
-                    question=self.original_rows_batch[i].question,
-                    call_result_accepted=self.original_rows_batch[i].call_result,
-                    tool_call_accepted=self.original_rows_batch[i].tool_call,
-                    agent_output_accepted=self.original_rows_batch[i].agent_output,
-                    call_result_rejected=dpo_rows_batch[i].call_result,
-                    tool_call_rejected=dpo_rows_batch[i].tool_call,
-                    agent_output_rejected=dpo_rows_batch[i].agent_output,
+                    question=original_row.question,
+                    call_result_accepted=original_row.call_result,
+                    tool_call_accepted=original_row.tool_call,
+                    agent_output_accepted=original_row.agent_output,
+                    call_result_rejected=call_result,
+                    tool_call_rejected=tool_call,
+                    agent_output_rejected=agent_output,
                 )
 
                 row_dict = output_row.__dict__
                 new_rows_batch.append(row_dict)
+            except Exception as e:
+                print(f"Error in parsing completion: {e}")
+                continue
+
+        return new_rows_batch
+
+
+class SyntheticToolCalls(SyntheticDataTask):
+
+    dataset_task_format = DatasetTaskFormat.DPO
+    seed_data_format = SeedDataFormat.SYNTHETIC
+
+    dataset_org = "roborovski"
+    dpo_seed_cache_dataset_name = "synthetic-tool-calls"
+
+    output_dataset_name = "synthetic-tool-calls-dpo-pairs"
+
+    empty_dataset_format = {
+        "tool": [],
+        "question": [],
+        "call_result": [],
+        "tool_call": [],
+    }
+
+    original_rows_batch: List[SyntheticToolCallRow] = []
+
+    def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
+
+        n_samples = len(batch["tool"])
+        dropout_types_batch = random.choices(DROPOUT_TYPES, k=n_samples)
+
+        conversations_batch: List[Conversation] = []
+        original_rows_batch: List[SyntheticToolCallRow] = []
+        for i in range(n_samples):
+            for _ in range(self.no_dpo_completions):
+                question = batch["question"][i]
+                original_row = SyntheticToolCallRow(
+                    tool=batch["tool"][i],
+                    question=question,
+                    tool_call=batch["tool_call"][i],
+                    call_result=batch["call_result"][i],
+                    agent_output=batch["agent_output"][i],
+                )
+                tool_descriptions = get_tool_descriptions(dropout_types_batch[i])
+                conversation = get_toolformer_dpo_negative_completion_prompt(
+                    question, tool_descriptions
+                )
+                conversations_batch.append(conversation)
+                original_rows_batch.append(original_row)
+        self.original_rows_batch = original_rows_batch
+        return conversations_batch
+
+    def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
+
+        # Get completions for each prompt, rank, and choos the 2 highest
+        new_rows_batch = []
+        dpo_rows_batch: List[SyntheticToolCallDPORow] = []
+        for completion, original_row in zip(
+            completions_batch, self.original_rows_batch
+        ):
+            try:
+                tool_call, call_result, agent_output = get_matches(completion)
+
+                dpo_rows_batch.append(dpo_row)
+
+                if (
+                    tool_call == original_row.tool_call
+                    and agent_output == original_row.agent_output
+                ):
+                    continue
+
+                dpo_row = SyntheticToolCallDPORow(
+                    original_row.tool,
+                    original_row.question,
+                    original_row.tool_call,
+                    original_row.call_result,
+                    original_row.agent_output,
+                    tool_call,
+                    call_result,
+                    agent_output,
+                )
+                row_dict = dpo_row.__dict__
+                new_rows_batch.append(row_dict)
+
             except Exception as e:
                 print(f"Error in parsing completion: {e}")
                 continue
