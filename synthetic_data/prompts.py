@@ -149,7 +149,7 @@ Do not mention any brands or specific programs. Return the answer in CSV format 
 """
 
 
-def get_tool_use_examples():
+def get_json_tool_use_examples():
     return JSON_TOOL_USE_EXAMPLES.format(
         CONVERT_WEIGHT_API_EXAMPLE=CONVERT_WEIGHT_API_EXAMPLE,
         CONVERT_WEIGHT_USAGE_EXAMPLE=CONVERT_WEIGHT_USAGE_EXAMPLE,
@@ -164,7 +164,7 @@ def get_tool_usage_prompt(category: str, task: str) -> Conversation:
     Format the original tool use generation.
     """
 
-    tool_use_examples = get_tool_use_examples()
+    tool_use_examples = get_json_tool_use_examples()
 
     return [
         {
@@ -185,7 +185,7 @@ def get_tool_use_secondary_prompt(
     Prepares the system and user-assistant style messages for inference.
     """
 
-    tool_use_examples = get_tool_use_examples()
+    tool_use_examples = get_json_tool_use_examples()
 
     return [
         {
@@ -283,16 +283,20 @@ def get_toolformer_prompt(category: str, tool_descriptions: str) -> Conversation
     ]
 
 
-def get_toolformer_dpo_negative_completion_prompt(question: str, tool_descriptions: str) -> Conversation:
+def get_toolformer_dpo_negative_completion_prompt(
+    question: str, tool_descriptions: str, use_json_examples: bool = False
+) -> Conversation:
     """
     Prepares the system and user-assistant style messages for inference.
     """
+
+    examples = get_json_tool_use_examples() if use_json_examples else TOOLFORMER_EXAMPLES
 
     return [
         {
             "role": "system",
             "content": JSON_TOOL_USAGE_NEGATIVE_PROMPT.format(
-                tool_descriptions=tool_descriptions, examples=TOOLFORMER_EXAMPLES
+                tool_descriptions=tool_descriptions, examples=examples
             ),
         },
         {"role": "user", "content": question},
