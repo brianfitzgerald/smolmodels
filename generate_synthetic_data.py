@@ -50,6 +50,7 @@ def main(
     batch_size: int = 8,
     restart: bool = False,
     pairs: bool = False,
+    resume_input_position: bool = True,
     generation_source: GenerationSource = GenerationSource.OPENAI,
     task_name: str = "synthetic_tool_calls",
     **kwargs,
@@ -77,9 +78,11 @@ def main(
 
     model_wrapper: GenerationWrapper = MODEL_WRAPPER_CLASSES[generation_source](dotenv)
 
+    empty_dataset_format = task.empty_dpo_dataset_format if pairs else task.empty_dataset_format
+
     print("Loading output dataset...")
     if restart:
-        output_dataset = Dataset.from_dict(task.empty_dataset_format)
+        output_dataset = Dataset.from_dict(empty_dataset_format)
     else:
         try:
             output_dataset = cast(
@@ -92,16 +95,11 @@ def main(
             # TODO filter for rows that don't need completion
         except (EmptyDatasetError, ValueError):
             print("No existing dataset found, starting from scratch...")
-            output_dataset = Dataset.from_dict(task.empty_dataset_format)
+            output_dataset = Dataset.from_dict(empty_dataset_format)
 
     input_dataset: Dataset
     input_dataset_location: Optional[str] = None
-    if (
-        task.seed_data_format
-        and task.seed_data_format == SeedDataFormat.SYNTHETIC
-        and task.dpo_seed_cache_dataset_name
-        and pairs
-    ):
+    if task.dpo_seed_cache_dataset_name and pairs:
         input_dataset_location = (
             f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
         )
@@ -115,9 +113,12 @@ def main(
     )
     split = "train"
     assert input_dataset_location
-    if len(output_dataset) > 0:
-        split = f"train[{len(output_dataset)}:]"
-    if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
+    if (
+        task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC)
+        or pairs
+    ):
+        if len(output_dataset) > 0 and resume_input_position:
+            split = f"train[{len(output_dataset)}:]"
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == SeedDataFormat.TSV:
         seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
