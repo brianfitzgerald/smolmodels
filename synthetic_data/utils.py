@@ -1,11 +1,15 @@
-import ast
 import asyncio
+from enum import Enum
 import re
 from typing import Dict, List
-from pydantic import BaseModel
 
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
 from pydantic.dataclasses import dataclass
+
+
+Conversation = List[ChatCompletionMessageParam]
+ShareGPTConversation = List[Dict[str, str]]
 
 
 @dataclass
@@ -28,17 +32,47 @@ class ToolFormerDPORow:
 
 
 @dataclass
-class ToolUsageDPORow:
-    definition: str
-    task: str
+class SyntheticToolCallRow:
+    tool: str
+    question: str
     tool_call: str
     call_result: str
     agent_output: str
 
 
+@dataclass
+class SyntheticToolCallDPORow:
+    tool: str
+    question: str
+    tool_call_accepted: str
+    call_result_accepted: str
+    agent_output_accepted: str
+    tool_call_rejected: str
+    call_result_rejected: str
+    agent_output_rejected: str
+
+class DatasetTaskFormat(str, Enum):
+    SFT = "SFT"
+    DPO = "DPO"
+
+
+class GenerationSource(str, Enum):
+    OPENAI = "openai"
+    VLLM = "vllm"
+    OPENROUTER = "openrouter"
+    GROQ = "groq"
+
+
+class SeedDataFormat(Enum):
+    TSV = "tsv"
+    HF_DATASET = "hf_dataset"
+    # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
+    SYNTHETIC = "synthetic"
+
+
 def clean_message(message: str) -> str:
     """
-    Clean up spaces, tabs, and newlines in a message, so the JSON is formatted nicely.
+    Clean up spaces, tabs, and newlines in a message with a JSON dict, so the dict is formatted nicely.
     """
 
     # Handle odd edge case where textwrap evaluates the value as a bool
@@ -115,32 +149,13 @@ def extract_toolformer_row(text: str) -> ToolFormerRow:
     return ToolFormerRow(question, call_result, tool_call, agent_output)
 
 
-def extract_toolformer_dpo_row(
-    text: str, original_row: ToolFormerRow
-) -> ToolFormerDPORow:
-    tool_call, call_result, agent_output = get_matches(text)
-    return ToolFormerDPORow(
-        original_row.question,
-        original_row.call_result,
-        original_row.tool_call,
-        original_row.agent_output,
-        call_result,
-        tool_call,
-        agent_output,
-    )
-
-
-def extract_tool_usage_dpo_row(text: str) -> ToolUsageDPORow:
-    definition, task, tool_call, call_result, agent_output = get_matches(text)
-    return ToolUsageDPORow(definition, task, tool_call, call_result, agent_output)
-
-
-def assert_valid_python_code(json_str: str):
+def is_valid_python(json_str: str):
     json_str = json_str.strip().replace("`", "")
     try:
         compile(json_str, "<string>", "single")
     except SyntaxError as e:
-        raise ValueError(f"Invalid Python code: {e}")
+        return False
+    return True
 
 
 def clean_example(text):
@@ -150,7 +165,7 @@ def clean_example(text):
     return cleaned_paragraph.strip()
 
 
-async def gather_with_concurrency_limit(n, *coros):
+async def gather_with_concurrency_limit(n: int, *coros):
     semaphore = asyncio.Semaphore(n)
 
     async def sem_coro(coro):
