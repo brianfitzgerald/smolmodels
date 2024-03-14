@@ -1,6 +1,7 @@
 import asyncio
 import os
 from typing import Dict, List, Optional, cast
+import pandas as pd
 
 import fire
 from datasets import Dataset, load_dataset
@@ -46,7 +47,7 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     upload_every: int = 10,
-    batch_size: int = 4,
+    batch_size: int = 8,
     restart: bool = False,
     pairs: bool = False,
     generation_source: GenerationSource = GenerationSource.OPENAI,
@@ -96,28 +97,31 @@ def main(
     input_dataset: Dataset
     input_dataset_location: Optional[str] = None
     if (
-        task.seed_data_format and task.seed_data_format == SeedDataFormat.SYNTHETIC
+        task.seed_data_format
+        and task.seed_data_format == SeedDataFormat.SYNTHETIC
         and task.dpo_seed_cache_dataset_name
         and pairs
     ):
         input_dataset_location = (
             f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
         )
-    else:
+    elif task.seed_data_format == SeedDataFormat.HF_DATASET:
         input_dataset_location = f"{task.dataset_org}/{task.seed_data_location}"
+    elif task.seed_data_format == SeedDataFormat.TSV:
+        input_dataset_location = task.seed_data_location
 
     print(
         f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
     )
     split = "train"
+    assert input_dataset_location
     if len(output_dataset) > 0:
         split = f"train[{len(output_dataset)}:]"
     if task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC):
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == SeedDataFormat.TSV:
-        input_dataset = cast(
-            Dataset, load_dataset("tsv", data_files=input_dataset_location)
-        )
+        seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
+        input_dataset = Dataset.from_pandas(seed_data)
     else:
         raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
@@ -136,6 +140,21 @@ def main(
             completions = asyncio.run(model_wrapper.generate(full_conversations_batch))
 
             output_rows_batch = task.get_dpo_dataset_output_batch(completions)
+            print_result_dicts(output_rows_batch)
+            new_dataset_rows.extend(output_rows_batch)
+            if batch_idx % upload_every == 0 and batch_idx > 0:
+                upload_dataset(
+                    output_dataset, task.output_dataset_name, new_dataset_rows
+                )
+    else:
+        for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
+            batch = cast(Dict, batch)
+            full_conversations_batch = task.format_seed_input_conversation(batch)
+
+            print(f"Generating {len(full_conversations_batch)} completions...")
+            completions = asyncio.run(model_wrapper.generate(full_conversations_batch))
+
+            output_rows_batch = task.get_seed_dataset_output_rows_batch(completions)
             print_result_dicts(output_rows_batch)
             new_dataset_rows.extend(output_rows_batch)
             if batch_idx % upload_every == 0 and batch_idx > 0:
