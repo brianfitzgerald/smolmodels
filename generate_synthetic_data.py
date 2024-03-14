@@ -53,6 +53,7 @@ def main(
     resume_input_position: bool = True,
     generation_source: GenerationSource = GenerationSource.OPENAI,
     task_name: str = "synthetic_tool_calls",
+    n_epochs: int = 10,
     **kwargs,
 ):
     """
@@ -78,7 +79,9 @@ def main(
 
     model_wrapper: GenerationWrapper = MODEL_WRAPPER_CLASSES[generation_source](dotenv)
 
-    empty_dataset_format = task.empty_dpo_dataset_format if pairs else task.empty_dataset_format
+    empty_dataset_format = (
+        task.empty_dpo_dataset_format if pairs else task.empty_dataset_format
+    )
 
     print("Loading output dataset...")
     if restart:
@@ -130,38 +133,47 @@ def main(
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
-    if pairs:
-        # Generate negative pairs for toolformer
-        # task, definition, tool_call, call_result, agent_output
-        for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
-            batch = cast(Dict, batch)
-            full_conversations_batch = task.format_dpo_input_conversations(batch)
+    for i in range(n_epochs):
+        if pairs:
+            # Generate negative pairs for toolformer
+            # task, definition, tool_call, call_result, agent_output
+            for batch_idx, batch in enumerate(
+                input_dataset.iter(batch_size=batch_size)
+            ):
+                batch = cast(Dict, batch)
+                full_conversations_batch = task.format_dpo_input_conversations(batch)
 
-            print(f"Generating {len(full_conversations_batch)} completions...")
-            completions = asyncio.run(model_wrapper.generate(full_conversations_batch))
-
-            output_rows_batch = task.get_dpo_dataset_output_batch(completions)
-            print_result_dicts(output_rows_batch)
-            new_dataset_rows.extend(output_rows_batch)
-            if batch_idx % upload_every == 0 and batch_idx > 0:
-                upload_dataset(
-                    output_dataset, task.output_dataset_name, new_dataset_rows
+                print(f"Generating {len(full_conversations_batch)} completions...")
+                completions = asyncio.run(
+                    model_wrapper.generate(full_conversations_batch)
                 )
-    else:
-        for batch_idx, batch in enumerate(input_dataset.iter(batch_size=batch_size)):
-            batch = cast(Dict, batch)
-            full_conversations_batch = task.format_seed_input_conversation(batch)
 
-            print(f"Generating {len(full_conversations_batch)} completions...")
-            completions = asyncio.run(model_wrapper.generate(full_conversations_batch))
+                output_rows_batch = task.get_dpo_dataset_output_batch(completions)
+                print_result_dicts(output_rows_batch)
+                new_dataset_rows.extend(output_rows_batch)
+                if batch_idx % upload_every == 0 and batch_idx > 0:
+                    upload_dataset(
+                        output_dataset, task.output_dataset_name, new_dataset_rows
+                    )
+        else:
+            for batch_idx, batch in enumerate(
+                input_dataset.iter(batch_size=batch_size)
+            ):
+                batch = cast(Dict, batch)
+                full_conversations_batch = task.format_seed_input_conversation(batch)
 
-            output_rows_batch = task.get_seed_dataset_output_rows_batch(completions)
-            print_result_dicts(output_rows_batch)
-            new_dataset_rows.extend(output_rows_batch)
-            if batch_idx % upload_every == 0 and batch_idx > 0:
-                upload_dataset(
-                    output_dataset, task.output_dataset_name, new_dataset_rows
+                print(f"Generating {len(full_conversations_batch)} completions...")
+                completions = asyncio.run(
+                    model_wrapper.generate(full_conversations_batch)
                 )
+
+                output_rows_batch = task.get_seed_dataset_output_rows_batch(completions)
+                print_result_dicts(output_rows_batch)
+                new_dataset_rows.extend(output_rows_batch)
+                if batch_idx % upload_every == 0 and batch_idx > 0:
+                    upload_dataset(
+                        output_dataset, task.output_dataset_name, new_dataset_rows
+                    )
 
 
 if __name__ == "__main__":
