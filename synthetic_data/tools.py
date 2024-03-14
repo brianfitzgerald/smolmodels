@@ -1,8 +1,9 @@
 import ast
 import inspect
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic.dataclasses import dataclass
 import random
+import json
 
 
 def ConvertUnits(amount, from_unit, to_unit):
@@ -65,7 +66,13 @@ TOOL_DESCRIPTIONS = {
 }
 
 
-DROPOUT_TYPES = ["tool_description", "tool_parameter", "available_tools", "reorder_params"]
+DROPOUT_TYPES_TOOLFORMER = [
+    "tool_description",
+    "tool_parameter",
+    "available_tools",
+    "reorder_params",
+]
+DROPOUT_TYPES_JSON = ["description", "name", "parameter_name", "tool"]
 
 
 @dataclass
@@ -125,6 +132,22 @@ def get_tool_descriptions(dropout_type: Optional[str] = None):
         ]
 
     return "\n".join(tool_description_lines)
+
+
+def get_tool_description_json(
+    definition_str: str, dropout_type: Optional[str] = None
+) -> str:
+    definition: Dict = ast.literal_eval(definition_str)
+    if "description" in definition and dropout_type == "description":
+        definition["description"] = ""
+    if "name" in definition and dropout_type == "name":
+        return definition["name"]
+    if dropout_type == "tool":
+        return ""
+    if "parameters" in definition:
+        if dropout_type == "parameter_name":
+            definition["parameters"] = []
+    return json.dumps(definition)
 
 
 def replicate_tool_call(tool_call: str):

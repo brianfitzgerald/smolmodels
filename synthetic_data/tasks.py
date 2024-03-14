@@ -1,5 +1,6 @@
 from abc import ABC
 import random
+import traceback
 from typing import Dict, List, Optional
 from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
@@ -11,9 +12,9 @@ from synthetic_data.prompts import (
     get_toolformer_prompt,
 )
 from synthetic_data.tools import (
-    DROPOUT_TYPES,
-    TOOL_FUNCTIONS,
-    get_fn_call_metadata,
+    DROPOUT_TYPES_JSON,
+    DROPOUT_TYPES_TOOLFORMER,
+    get_tool_description_json,
     get_tool_descriptions,
 )
 
@@ -50,6 +51,7 @@ class SyntheticDataTask(ABC):
     dataset_org: str
 
     empty_dataset_format: Dict[str, List]
+    empty_dpo_dataset_format: Dict[str, List]
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         """
@@ -147,7 +149,7 @@ class Toolformer(SyntheticDataTask):
 
         conversations = batch["conversations"]
 
-        dropout_types_batch = random.choices(DROPOUT_TYPES, k=len(conversations))
+        dropout_types_batch = random.choices(DROPOUT_TYPES_TOOLFORMER, k=len(conversations))
 
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
@@ -219,15 +221,27 @@ class SyntheticToolCalls(SyntheticDataTask):
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
     dataset_org = "roborovski"
-    dpo_seed_cache_dataset_name = "synthetic-tool-calls-v2"
+    # TODO swap this and the output dataset name
+    dpo_seed_cache_dataset_name = "synthetic-tool-calls-dpo-pairs"
 
-    output_dataset_name = "synthetic-tool-calls-dpo-pairs"
+    output_dataset_name = "synthetic-tool-calls-v2-dpo-pairs"
 
     empty_dataset_format = {
         "tool": [],
         "question": [],
         "call_result": [],
         "tool_call": [],
+    }
+
+    empty_dpo_dataset_format = {
+        "tool": [],
+        "question": [],
+        "tool_call_accepted": [],
+        "call_result_accepted": [],
+        "agent_output_accepted": [],
+        "tool_call_rejected": [],
+        "call_result_rejected": [],
+        "agent_output_rejected": [],
     }
 
     original_rows_batch: List[SyntheticToolCallRow] = []
@@ -272,26 +286,32 @@ class SyntheticToolCalls(SyntheticDataTask):
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
 
         n_samples = len(batch["tool"])
-        dropout_types_batch = random.choices(DROPOUT_TYPES, k=n_samples)
+        dropout_types_batch = random.choices(DROPOUT_TYPES_JSON, k=n_samples)
 
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[SyntheticToolCallRow] = []
         for i in range(n_samples):
             for _ in range(self.no_dpo_completions):
-                question = batch["question"][i]
-                original_row = SyntheticToolCallRow(
-                    tool=batch["tool"][i],
-                    question=question,
-                    tool_call=batch["tool_call"][i],
-                    call_result=batch["call_result"][i],
-                    agent_output=batch["agent_output"][i],
-                )
-                tool_descriptions = get_tool_descriptions(dropout_types_batch[i])
-                conversation = get_toolformer_dpo_negative_completion_prompt(
-                    question, tool_descriptions, True
-                )
-                conversations_batch.append(conversation)
-                original_rows_batch.append(original_row)
+                try:
+                    question = batch["question"][i]
+                    tool = batch["tool"][i]
+                    original_row = SyntheticToolCallRow(
+                        tool=tool,
+                        question=question,
+                        tool_call=batch["tool_call"][i],
+                        call_result=batch["call_result"][i],
+                        agent_output=batch["agent_output"][i],
+                    )
+                    tool_descriptions = get_tool_description_json(tool, dropout_types_batch[i])
+                    conversation = get_toolformer_dpo_negative_completion_prompt(
+                        question, tool_descriptions, True
+                    )
+                    conversations_batch.append(conversation)
+                    original_rows_batch.append(original_row)
+                except Exception as e:
+                    print(f"Error in formatting DPO input: {e}")
+                    traceback.print_exc()
+                    continue
         self.original_rows_batch = original_rows_batch
         return conversations_batch
 
@@ -299,14 +319,11 @@ class SyntheticToolCalls(SyntheticDataTask):
 
         # Get completions for each prompt, rank, and choos the 2 highest
         new_rows_batch = []
-        dpo_rows_batch: List[SyntheticToolCallDPORow] = []
         for completion, original_row in zip(
             completions_batch, self.original_rows_batch
         ):
             try:
                 tool_call, call_result, agent_output = get_matches(completion)
-
-                dpo_rows_batch.append(dpo_row)
 
                 if (
                     tool_call == original_row.tool_call
@@ -328,6 +345,7 @@ class SyntheticToolCalls(SyntheticDataTask):
                 new_rows_batch.append(row_dict)
 
             except Exception as e:
+                traceback.print_exc()
                 print(f"Error in parsing completion: {e}")
                 continue
 
