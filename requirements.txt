@@ -8,7 +8,7 @@ tensorboard
 safetensors
 huggingface_hub==0.20.3
 sentencepiece
-lightning==2.2.0
+lightning==2.2.1
 torchmetrics==1.2.1
 einops
 pydantic==2.6.3

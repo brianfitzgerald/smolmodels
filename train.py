@@ -31,6 +31,7 @@ from model.utils import (
     HyperParams,
     FineTunerDataset,
     compute_metrics,
+    ensure_directory,
 )
 
 
@@ -45,11 +46,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.wandb_logger = wandb_logger
         self.max_new_tokens = max_new_tokens
 
-        # TODO clear existing log files
         self.log_dir = Path("logs")
-        self.log_dir.mkdir(exist_ok=True)
-        shutil.rmtree(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx: int
@@ -174,12 +171,17 @@ CONFIGS = {
         T5FineTuner,
         PromptSafetyDataModule,
         PROMPT_SAFETY_PROJECT,
-        HyperParams(base_model_checkpoint="google/flan-t5-small"),
+        HyperParams(
+            base_model_checkpoint="google/flan-t5-base",
+            gradient_accumulation_steps=4,
+            train_batch_size=2,
+            optimizer="AdamW8bit",
+        ),
     ),
 }
 
 
-def main(wandb: bool = False, config: str = "prompt_safety"):
+def main(full: bool = False, config: str = "prompt_safety"):
     loggers = []
 
     model_config = CONFIGS[config]
@@ -193,12 +195,13 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
     run_name = f"{config}-{run_name}"
 
-    if wandb:
+    if full:
         project_name = model_config.wandb_project_name
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
+    ensure_directory("logs", clear=True)
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
 
     checkpoint_callback = HfModelCheckpoint(
@@ -211,12 +214,15 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     precision = "32" if model_config.model == T5FineTuner else "16-mixed"
 
+    strategy = "ddp" if full else "auto"
+
     trainer = pl.Trainer(
         accumulate_grad_batches=hparams.gradient_accumulation_steps,
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.01,
+        val_check_interval=0.25,
+        strategy=strategy,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,

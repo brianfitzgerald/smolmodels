@@ -121,9 +121,9 @@ def filter_row(row: Dict) -> bool:
         return False
     if "\n" in prompt or "\n" in upsampled:
         return False
-    if len(upsampled.split(" ")) > 10:
+    if len(upsampled.split(" ")) > 100:
         return False
-    if len(upsampled) > 128:
+    if len(upsampled) > 256:
         return False
     return True
 
