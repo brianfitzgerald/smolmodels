@@ -1,4 +1,4 @@
-print("Loading dependencies...")
+from transformers.models.t5.configuration_t5 import T5Config
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from huggingface_hub import login, HfApi
@@ -7,16 +7,16 @@ from dotenv import load_dotenv
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 import torch
 from PIL import Image
-from pathlib import Path
-import shutil
 
 
-from model.utils import PROMPT_EXPANSION_TASK_PREFIX
+from model.utils import PROMPT_EXPANSION_TASK_PREFIX, ensure_directory
 import pandas as pd
 from fire import Fire
 
+from train import CONFIGS
 
-def format_filename(string, limit=20):
+
+def format_filename(string: str, limit: int = 20):
     result = string.lower().replace(" ", "_")
     result = "".join(char if char.isalnum() or char == "_" else "" for char in result)
     result = result[:limit]
@@ -24,20 +24,25 @@ def format_filename(string, limit=20):
 
 
 def main(
-    checkpoint_dir: str = "checkpoints/best_model-v1.ckpt.dir",
+    checkpoint_dir: str = "checkpoints/prompt_safety-zCN6",
+    config: str = "prompt_safety",
     batch_size: int = 8,
     upload_to_hf: bool = False,
     generate_samples: bool = False,
     sdxl: bool = True,
 ):
 
+    model_config = CONFIGS[config]
     print("Loading model...")
-    tokenizer = T5Tokenizer.from_pretrained(checkpoint_dir)
+    state_dict = torch.load(checkpoint_dir)
+
+    tokenizer = T5Tokenizer.from_pretrained(model_config.hyperparams.base_model_checkpoint)
+    hf_config = T5Config.from_pretrained(model_config.hyperparams.base_model_checkpoint)
     model: T5ForConditionalGeneration = T5ForConditionalGeneration.from_pretrained(
-        checkpoint_dir
+        None, config=hf_config, state_dict=state_dict
     )
 
-    drawbench_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
+    validation_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
     if generate_samples:
         pipeline_name = (
             "stabilityai/stable-diffusion-xl-base-1.0"
@@ -72,17 +77,15 @@ def main(
         model.push_to_hub("superprompt-v1")
         return
 
-    out_dir = "samples/samples_mq"
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(out_dir, ignore_errors=True)
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out_dir = f"samples/{model_config.ckpt_name}"
+    ensure_directory(out_dir, clear=True)
 
-    for i in range(0, len(drawbench_df), batch_size):
+    for i in range(0, len(validation_df), batch_size):
 
-        chunk = drawbench_df[i : i + batch_size]
+        chunk = validation_df[i : i + batch_size]
 
         prompts_with_prefix = [
-            PROMPT_EXPANSION_TASK_PREFIX + sentence for sentence in chunk["Prompt"]
+            model_config.task_prefix + sentence for sentence in chunk["Prompt"]
         ]
 
         inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True)

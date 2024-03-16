@@ -22,7 +22,7 @@ model = T5ForConditionalGeneration.from_pretrained("roborovksi/superprompt-v1", 
 input_text = "Expand the following prompt to add more detail: A storefront with 'Text to Image' written on it."
 input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to("cuda")
 
-outputs = model.generate(input_ids)
+outputs = model.generate(input_ids, max_length=77)
 print(tokenizer.decode(outputs[0]))
 
 # The neon sign above the storefront reads "NeurIPS" in bold, white letters. The storefront is surrounded by a bustling cityscape, with skyscrapers and neon signs lining the walls. The sign is surrounded by a variety of colorful goods, including a variety of fruits, vegetables, and fruits, all arranged in a neat and organized manner. The storefront is surrounded by a bustling crowd of people, all chatting and laughing as they go about their daily routines.

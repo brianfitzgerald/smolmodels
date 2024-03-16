@@ -1,4 +1,3 @@
-print("Loading dependencies - torch...")
 from typing import Optional
 from fire import Fire
 from tabulate import tabulate
@@ -16,7 +15,6 @@ import string
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
 
-print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
@@ -24,7 +22,6 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.fabric.plugins.environments.lightning import LightningEnvironment
 
 
-print("Loading dependencies - project...")
 from dataset.parti import PromptSafetyDataModule, PromptUpsampleDataModule
 from model.utils import (
     IGNORE_TOKEN_INDEX,
@@ -33,6 +30,8 @@ from model.utils import (
     FineTunerDataset,
     compute_metrics,
     ensure_directory,
+    PROMPT_EXPANSION_TASK_PREFIX,
+    SAFETY_TASK_PREFIX
 )
 
 
@@ -122,11 +121,12 @@ class HfModelCheckpoint(ModelCheckpoint):
         self.FILE_EXTENSION = ""
 
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
-        super()._save_checkpoint(trainer, filepath)
-        print(f"Saving checkpoint at {filepath}")
+        filepath_folder = f"{filepath}/"
+        super()._save_checkpoint(trainer, filepath_folder)
+        print(f"Saving checkpoint at {filepath_folder}")
         if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pretrained(filepath)
-            trainer.lightning_module.tokenizer.save_pretrained(filepath)
+            trainer.lightning_module.model.save_pretrained(filepath_folder)
+            trainer.lightning_module.tokenizer.save_pretrained(filepath_folder)
 
     # https://github.com/Lightning-AI/lightning/pull/16067
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
@@ -144,6 +144,8 @@ class ModelConfig:
     data_module: type[FineTunerDataset]
     wandb_project_name: str
     hyperparams: HyperParams = HyperParams()
+    task_prefix: str = PROMPT_EXPANSION_TASK_PREFIX
+    ckpt_name: str = "superprompt-v1"
 
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
@@ -178,11 +180,15 @@ CONFIGS = {
             train_batch_size=2,
             optimizer="AdamW8bit",
         ),
+        task_prefix=SAFETY_TASK_PREFIX,
+        ckpt_name="saferprompt-v1",
     ),
 }
 
 
-def main(wandb: bool = False, distributed: bool = False, config: str = "prompt_safety"):
+def main(wandb: bool = False, distributed: bool = False, config: str = "prompt_safety", **kwargs):
+    assert not kwargs, f"Unrecognized arguments: {kwargs}"
+
     loggers = []
 
     model_config = CONFIGS[config]
