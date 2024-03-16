@@ -121,7 +121,8 @@ def main(
             batch_size, tokenizer, model_config.hyperparams.max_seq_length
         )
         data_module.setup("validate")
-        for inputs in data_module.val_dataloader():
+        rows = []
+        for i, inputs in enumerate(data_module.val_dataloader()):
             input_ids = inputs["input_ids"].to("cuda")
             attention_mask = inputs["attention_mask"].to("cuda")
             labels = inputs["labels"]
@@ -136,6 +137,13 @@ def main(
                 labels, skip_special_tokens=True
             )
             print(f"Prompts: {prompt_strings}\nSanitized: {out}\n\n")
+            for prompt, upsampled in zip(prompt_strings, out):
+                rows.append({"Prompt": prompt, "Upsampled": upsampled})
+        
+            if i % 100 == 0:
+                print(f"Processed {i} samples, saving...")
+                out_df = pd.DataFrame(rows)
+                out_df.to_csv(f"{out_dir}/saferprompt_out.csv", index=False)
 
 
 if __name__ == "__main__":
