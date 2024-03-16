@@ -1,3 +1,4 @@
+from typing import Optional
 from transformers.models.t5.configuration_t5 import T5Config
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
@@ -9,7 +10,7 @@ import torch
 from PIL import Image
 
 
-from model.utils import PROMPT_EXPANSION_TASK_PREFIX, ensure_directory
+from model.utils import ensure_directory
 import pandas as pd
 from fire import Fire
 
@@ -24,7 +25,8 @@ def format_filename(string: str, limit: int = 20):
 
 
 def main(
-    checkpoint_dir: str = "checkpoints/prompt_safety-zCN6",
+    checkpoint_file: str = "checkpoints/prompt_safety-zCN6",
+    samples_file: Optional[str] = None,
     config: str = "prompt_safety",
     batch_size: int = 8,
     upload_to_hf: bool = False,
@@ -33,16 +35,18 @@ def main(
 ):
 
     model_config = CONFIGS[config]
-    print("Loading model...")
-    state_dict = torch.load(checkpoint_dir)
+    loaded_checkpoint = torch.load(checkpoint_file)
+    model_state_dict = {key.replace('model.', ''): value for key, value in loaded_checkpoint["state_dict"].items()}
 
-    tokenizer = T5Tokenizer.from_pretrained(model_config.hyperparams.base_model_checkpoint)
+    tokenizer = T5Tokenizer.from_pretrained(
+        model_config.hyperparams.base_model_checkpoint
+    )
     hf_config = T5Config.from_pretrained(model_config.hyperparams.base_model_checkpoint)
     model: T5ForConditionalGeneration = T5ForConditionalGeneration.from_pretrained(
-        None, config=hf_config, state_dict=state_dict
+        None, config=hf_config, state_dict=model_state_dict
     )
+    model = model.to("cuda")  # type: ignore
 
-    validation_df: pd.DataFrame = pd.read_csv("data/drawbench.csv")
     if generate_samples:
         pipeline_name = (
             "stabilityai/stable-diffusion-xl-base-1.0"
@@ -80,34 +84,58 @@ def main(
     out_dir = f"samples/{model_config.ckpt_name}"
     ensure_directory(out_dir, clear=True)
 
-    for i in range(0, len(validation_df), batch_size):
+    if samples_file:
+        print(f"Reading samples from: {samples_file}")
+        validation_df: pd.DataFrame = pd.read_csv(samples_file)
+        for i in range(0, len(validation_df), batch_size):
 
-        chunk = validation_df[i : i + batch_size]
+            chunk = validation_df[i : i + batch_size]
 
-        prompts_with_prefix = [
-            model_config.task_prefix + sentence for sentence in chunk["Prompt"]
-        ]
+            prompts_with_prefix = [
+                model_config.task_prefix + sentence for sentence in chunk["Prompt"]
+            ]
 
-        inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True)
+            inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True)
 
-        output_sequences = model.generate(
-            input_ids=inputs["input_ids"],
-            attention_mask=inputs["attention_mask"],
-            max_length=77,
-            num_return_sequences=1,
+            output_sequences = model.generate(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                max_length=77,
+                num_return_sequences=1,
+            )
+
+            out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
+            for j, (prompt, upsampled) in enumerate(zip(chunk["Prompt"], out)):
+                print(f"Prompt: {prompt}\nUpsampled: {upsampled}\n\n")
+
+                if generate_samples:
+                    for k, txt in enumerate([prompt, upsampled]):
+                        print(f"Generating sample for: {txt}")
+                        image: Image.Image = pipe(txt, num_inference_steps=30, guidance_scale=20).images[0]  # type: ignore
+                        prompt_fmt = format_filename(txt)
+                        label = "prompt" if k == 0 else "upsampled"
+                        image.save(f"{out_dir}/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
+    else:
+        print("Loading samples from dataloader")
+        data_module = model_config.data_module(
+            batch_size, tokenizer, model_config.hyperparams.max_seq_length
         )
-
-        out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
-        for j, (prompt, upsampled) in enumerate(zip(chunk["Prompt"], out)):
-            print(f"Prompt: {prompt}\nUpsampled: {upsampled}\n\n")
-
-            if generate_samples:
-                for k, txt in enumerate([prompt, upsampled]):
-                    print(f"Generating sample for: {txt}")
-                    image: Image.Image = pipe(txt, num_inference_steps=30, guidance_scale=20).images[0]  # type: ignore
-                    prompt_fmt = format_filename(txt)
-                    label = "prompt" if k == 0 else "upsampled"
-                    image.save(f"{out_dir}/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
+        data_module.setup("validate")
+        for inputs in data_module.val_dataloader():
+            input_ids = inputs["input_ids"].to("cuda")
+            attention_mask = inputs["attention_mask"].to("cuda")
+            labels = inputs["labels"]
+            output_sequences = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_length=77,
+                num_return_sequences=1,
+            )
+            out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
+            prompt_strings = tokenizer.batch_decode(
+                labels, skip_special_tokens=True
+            )
+            print(f"Prompts: {prompt_strings}\nSanitized: {out}\n\n")
 
 
 if __name__ == "__main__":
