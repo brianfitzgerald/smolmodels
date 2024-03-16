@@ -21,6 +21,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar
+from lightning.fabric.plugins.environments.lightning import LightningEnvironment
 
 
 print("Loading dependencies - project...")
@@ -181,7 +182,7 @@ CONFIGS = {
 }
 
 
-def main(full: bool = False, config: str = "prompt_safety"):
+def main(wandb: bool = False, distributed: bool = False, config: str = "prompt_safety"):
     loggers = []
 
     model_config = CONFIGS[config]
@@ -195,7 +196,7 @@ def main(full: bool = False, config: str = "prompt_safety"):
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
     run_name = f"{config}-{run_name}"
 
-    if full:
+    if wandb:
         project_name = model_config.wandb_project_name
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
@@ -214,7 +215,7 @@ def main(full: bool = False, config: str = "prompt_safety"):
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     precision = "32" if model_config.model == T5FineTuner else "16-mixed"
 
-    strategy = "ddp" if full else "auto"
+    strategy = "ddp" if distributed else "auto"
 
     trainer = pl.Trainer(
         accumulate_grad_batches=hparams.gradient_accumulation_steps,
@@ -226,6 +227,9 @@ def main(full: bool = False, config: str = "prompt_safety"):
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,
+        num_nodes=1,
+        devices="auto",
+        plugins=LightningEnvironment(),
     )
     trainer.fit(model, datamodule=data_module)
 
