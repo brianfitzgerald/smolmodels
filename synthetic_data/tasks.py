@@ -1,3 +1,5 @@
+from datasets import Dataset
+import pandas as pd
 from abc import ABC
 import random
 import traceback
@@ -48,7 +50,7 @@ class SyntheticDataTask(ABC):
 
     seed_data_location: str
     output_dataset_name: str
-    dataset_org: str
+    dataset_org: str = "roborovski"
 
     empty_dataset_format: Dict[str, List]
     empty_dpo_dataset_format: Dict[str, List]
@@ -77,13 +79,18 @@ class SyntheticDataTask(ABC):
         """
         raise NotImplementedError
 
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        """
+        Perform any needed filtering or mapping to the dataset
+        """
+        return dataset
+
 
 class PromptUpsample(SyntheticDataTask):
 
     seed_data_format = SeedDataFormat.TSV
-    seed_data_location = "gs://openai-datasets/prompt-upsample/seed-data.tsv"
-    output_dataset_name = "prompt-upsample"
-    output_dataset_org = "openai"
+    seed_data_location = "data/PartiPrompts.tsv"
+    output_dataset_name = "upsampled-prompts-parti"
 
     empty_dataset_format = {
         "Prompt": [],
@@ -91,12 +98,24 @@ class PromptUpsample(SyntheticDataTask):
         "Upsampled": [],
     }
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.original_rows = []
-
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         prompts = batch["Prompt"]
+        return [format_dalle_prompt_template(prompt) for prompt in prompts]
+
+
+class SaferPrompt(SyntheticDataTask):
+
+    seed_data_format = SeedDataFormat.PARQUET
+    seed_data_location = ""
+    output_dataset_name = "prompt-upsample"
+
+    empty_dataset_format = {
+        "Prompt": [],
+        "Sanitized": [],
+    }
+
+    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+        prompts = batch["prompt"]
         return [format_dalle_prompt_template(prompt) for prompt in prompts]
 
 
@@ -110,7 +129,6 @@ class Toolformer(SyntheticDataTask):
     dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
 
     output_dataset_name = "synthetic-toolformer-dpo"
-    dataset_org = "roborovski"
 
     empty_dataset_format = {
         "system": [],
@@ -149,7 +167,9 @@ class Toolformer(SyntheticDataTask):
 
         conversations = batch["conversations"]
 
-        dropout_types_batch = random.choices(DROPOUT_TYPES_TOOLFORMER, k=len(conversations))
+        dropout_types_batch = random.choices(
+            DROPOUT_TYPES_TOOLFORMER, k=len(conversations)
+        )
 
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
@@ -220,7 +240,6 @@ class SyntheticToolCalls(SyntheticDataTask):
     seed_data_format = SeedDataFormat.TSV
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
-    dataset_org = "roborovski"
     # TODO swap this and the output dataset name
     dpo_seed_cache_dataset_name = "synthetic-tool-calls-dpo-pairs"
 
@@ -302,7 +321,9 @@ class SyntheticToolCalls(SyntheticDataTask):
                         call_result=batch["call_result"][i],
                         agent_output=batch["agent_output"][i],
                     )
-                    tool_descriptions = get_tool_description_json(tool, dropout_types_batch[i])
+                    tool_descriptions = get_tool_description_json(
+                        tool, dropout_types_batch[i]
+                    )
                     conversation = get_toolformer_dpo_negative_completion_prompt(
                         question, tool_descriptions, True
                     )

@@ -61,7 +61,21 @@ def main(
     Inputs a seed dataset, that is either given from a CSV or HF dataset,
     or generated from a synthetic source, such as a list of subjects.
 
-    pairs - generate multiple completions and score them. Use the 2 widest scores
+    Each task follows the format of:
+    - Format conversations to generate completions from seed data
+    - Generate completions using the LLM, then format them into dataset rows
+
+    For DPO tasks, we then:
+    - Format conversation to generate negative completions from the generated data, possibly performing dropout or perturbation of input data
+    - Generate completions and format negative and positive pairs into a single dataset row
+    So that each output row contains a prompt, and two completions, one positive and one negative.
+
+    Arguments:
+    - upload_every: Upload the dataset every n batches.
+    - batch_size: The batch size to use for generation.
+    - restart: Restart the dataset from scratch.
+    - pairs: Generate DPO pairs.
+    - resume_input_position: Resume generating from the current row in the input dataset, based on the output dataset length.
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
@@ -108,14 +122,14 @@ def main(
         )
     elif task.seed_data_format == SeedDataFormat.HF_DATASET:
         input_dataset_location = f"{task.dataset_org}/{task.seed_data_location}"
-    elif task.seed_data_format == SeedDataFormat.TSV:
+    elif task.seed_data_format in (SeedDataFormat.TSV, SeedDataFormat.PARQUET):
         input_dataset_location = task.seed_data_location
+    assert input_dataset_location, "No input dataset location provided."
 
     print(
         f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
     )
     split = "train"
-    assert input_dataset_location
     if (
         task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC)
         or pairs
@@ -126,17 +140,21 @@ def main(
     elif task.seed_data_format == SeedDataFormat.TSV:
         seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
         input_dataset = Dataset.from_pandas(seed_data)
+    elif task.seed_data_format == SeedDataFormat.PARQUET:
+        seed_data = pd.read_parquet(input_dataset_location)
+        input_dataset = Dataset.from_pandas(seed_data)
     else:
         raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
+
+    input_dataset = task.preprocess_dataset(input_dataset)
 
     print(f"Input dataset length: {len(input_dataset)} output: {len(output_dataset)}")
     new_dataset_rows: List[Dict] = []
     print("Running...")
 
     for i in range(n_epochs):
+        # Generate negative pairs for DPO
         if pairs:
-            # Generate negative pairs for toolformer
-            # task, definition, tool_call, call_result, agent_output
             for batch_idx, batch in enumerate(
                 input_dataset.iter(batch_size=batch_size)
             ):

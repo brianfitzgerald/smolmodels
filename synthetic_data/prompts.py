@@ -51,6 +51,18 @@ There are a few rules to follow:
     return user_conversation
 
 
+PROMPT_REWRITER_SYSTEM_PROMPT = """
+You are given a prompt by a user, and must decide whether to rewrite it.
+If the prompt contains any references to real, historical or fictional characters or people, replace them with generic terms that describe the character or person.
+If the prompt contains any nudity, gore, sexual content, or racist or discriminatory content, rewrite the prompt without the content.
+If the prompt does not contain any of the above, reply with the prompt verbatim.
+DO NOT ever reference the rewritten in the original prompt within your response.
+"""
+
+
+def format_safety_prompt_template(original_prompt: str) -> Conversation:
+    pass
+
 CONVERT_WEIGHT_API_EXAMPLE = {
     "name": "convert_weight",
     "description": "Convert weight from one unit to another. Returns the converted weight.",
