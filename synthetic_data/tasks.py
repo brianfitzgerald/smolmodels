@@ -33,7 +33,7 @@ from synthetic_data.utils import (
     is_valid_python,
     clean_message,
     get_matches,
-    ensure_directory
+    ensure_directory,
 )
 
 
@@ -111,6 +111,19 @@ class PromptUpsample(SyntheticDataTask):
         return [format_dalle_prompt_template(prompt) for prompt in prompts]
 
 
+def preprocess_saferprompt(row: Dict) -> bool:
+    prompt = row["prompt"]
+    if len(prompt) == 0:
+        return False
+    if "\n" in prompt:
+        return False
+    if len(prompt.split(" ")) > 64:
+        return False
+    if len(prompt) > 256:
+        return False
+    return row["nsfw_regex"] or row["nsfw_image"]
+
+
 class SaferPrompt(SyntheticDataTask):
 
     seed_data_format = DatasetFormat.PARQUET
@@ -125,6 +138,7 @@ class SaferPrompt(SyntheticDataTask):
     }
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        dataset = dataset.filter(preprocess_saferprompt)
         return dataset
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
@@ -135,9 +149,14 @@ class SaferPrompt(SyntheticDataTask):
     def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
         rows = []
         for completion, original_row in zip(completions, self.original_rows_batch):
+            if completion == "":
+                continue
+            if "I'm sorry" in completion:
+                continue
+            if "Rewrite: " in completion:
+                completion = completion.replace("Rewrite: ", "")
             rows.append({"Prompt": original_row, "Sanitized": completion})
         return rows
-
 
 
 class Toolformer(SyntheticDataTask):
@@ -452,6 +471,7 @@ class GlaiveDPO(SyntheticDataTask):
             for msg in new_rows_batch
         ]
 
+
 def save_dataset(
     hf_dataset: Dataset, task: SyntheticDataTask, new_dataset_rows: List[Dict]
 ):
@@ -466,4 +486,6 @@ def save_dataset(
     elif task.output_data_format == DatasetFormat.PARQUET:
         concatenated_dataset.to_parquet(f"{task.output_data_name}.parquet")
     elif task.output_data_format == DatasetFormat.CSV:
-        concatenated_dataset.to_csv(f"output_datasets/{task.output_data_name}.csv", index=False)
+        concatenated_dataset.to_csv(
+            f"output_datasets/{task.output_data_name}.csv", index=False
+        )

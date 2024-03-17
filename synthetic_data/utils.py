@@ -113,7 +113,7 @@ def print_result_dicts(
         tabulate(
             new_dataset_row_elements,
             headers=columns,
-            tablefmt="simple",
+            tablefmt="simple_grid",
             maxcolwidths=col_widths,
         )
     )
