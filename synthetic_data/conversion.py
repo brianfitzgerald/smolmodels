@@ -3,7 +3,6 @@ import re
 from synthetic_data.utils import ShareGPTConversation
 
 
-
 GLAIVE_ROLES = ["USER", "ASSISTANT", "FUNCTION RESPONSE"]
 GLAIVE_TO_SHAREGPT_ROLE = {
     "SYSTEM": "system",
@@ -11,6 +10,7 @@ GLAIVE_TO_SHAREGPT_ROLE = {
     "ASSISTANT": "gpt",
     "FUNCTION RESPONSE": "tool",
 }
+
 
 def chatml_to_conversation(chat_msg: str, system_msg: str) -> ShareGPTConversation:
     """

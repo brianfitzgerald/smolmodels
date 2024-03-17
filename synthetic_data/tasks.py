@@ -9,6 +9,7 @@ from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
+    format_safety_prompt_template,
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
@@ -23,7 +24,7 @@ from synthetic_data.tools import (
 from synthetic_data.utils import (
     Conversation,
     DatasetTaskFormat,
-    SeedDataFormat,
+    DatasetFormat,
     SyntheticToolCallRow,
     SyntheticToolCallDPORow,
     ToolFormerDPORow,
@@ -36,7 +37,7 @@ from synthetic_data.utils import (
 
 class SyntheticDataTask(ABC):
 
-    seed_data_format: SeedDataFormat = SeedDataFormat.SYNTHETIC
+    seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
     dataset_task_format: DatasetTaskFormat = DatasetTaskFormat.SFT
 
     # Only used for the toolformer DPO dataset. # TODO remove this when that project is finished.
@@ -49,7 +50,9 @@ class SyntheticDataTask(ABC):
     no_dpo_completions: int = 2
 
     seed_data_location: str
-    output_dataset_name: str
+    output_data_name: str
+    output_data_format: DatasetFormat = DatasetFormat.HF_DATASET
+
     dataset_org: str = "roborovski"
 
     empty_dataset_format: Dict[str, List]
@@ -88,9 +91,10 @@ class SyntheticDataTask(ABC):
 
 class PromptUpsample(SyntheticDataTask):
 
-    seed_data_format = SeedDataFormat.TSV
+    seed_data_format = DatasetFormat.CSV
     seed_data_location = "data/PartiPrompts.tsv"
-    output_dataset_name = "upsampled-prompts-parti"
+    output_data_name = "upsampled-prompts-parti"
+    dataset_task_format = DatasetTaskFormat.SFT
 
     empty_dataset_format = {
         "Prompt": [],
@@ -105,9 +109,11 @@ class PromptUpsample(SyntheticDataTask):
 
 class SaferPrompt(SyntheticDataTask):
 
-    seed_data_format = SeedDataFormat.PARQUET
-    seed_data_location = ""
-    output_dataset_name = "prompt-upsample"
+    seed_data_format = DatasetFormat.PARQUET
+    seed_data_location = "data/nsfw_prompts.parquet"
+    output_data_name = "safer-prompt"
+    output_data_format = DatasetFormat.CSV
+    dataset_task_format = DatasetTaskFormat.SFT
 
     empty_dataset_format = {
         "Prompt": [],
@@ -116,19 +122,19 @@ class SaferPrompt(SyntheticDataTask):
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         prompts = batch["prompt"]
-        return [format_dalle_prompt_template(prompt) for prompt in prompts]
+        return [format_safety_prompt_template(prompt) for prompt in prompts]
 
 
 class Toolformer(SyntheticDataTask):
 
-    seed_data_format = SeedDataFormat.SYNTHETIC
+    seed_data_format = DatasetFormat.SYNTHETIC
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
     dataset_task_format = DatasetTaskFormat.DPO
 
     dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
 
-    output_dataset_name = "synthetic-toolformer-dpo"
+    output_data_name = "synthetic-toolformer-dpo"
 
     empty_dataset_format = {
         "system": [],
@@ -237,13 +243,13 @@ class Toolformer(SyntheticDataTask):
 class SyntheticToolCalls(SyntheticDataTask):
 
     dataset_task_format = DatasetTaskFormat.DPO
-    seed_data_format = SeedDataFormat.TSV
+    seed_data_format = DatasetFormat.CSV
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
     # TODO swap this and the output dataset name
     dpo_seed_cache_dataset_name = "synthetic-tool-calls-dpo-pairs"
 
-    output_dataset_name = "synthetic-tool-calls-v2-dpo-pairs"
+    output_data_name = "synthetic-tool-calls-v2-dpo-pairs"
 
     empty_dataset_format = {
         "tool": [],
@@ -374,7 +380,6 @@ class SyntheticToolCalls(SyntheticDataTask):
 
 
 class GlaiveDPO(SyntheticDataTask):
-
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         glaive_conversations = [
             chatml_to_conversation(chat, system)

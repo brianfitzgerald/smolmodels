@@ -31,7 +31,7 @@ from model.utils import (
     compute_metrics,
     ensure_directory,
     PROMPT_EXPANSION_TASK_PREFIX,
-    SAFETY_TASK_PREFIX
+    SAFETY_TASK_PREFIX,
 )
 
 
@@ -115,7 +115,6 @@ class ModelChoice(Enum):
 
 # https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
 class HfModelCheckpoint(ModelCheckpoint):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.FILE_EXTENSION = ""
@@ -186,7 +185,12 @@ CONFIGS = {
 }
 
 
-def main(wandb: bool = False, distributed: bool = False, config: str = "prompt_safety", **kwargs):
+def main(
+    wandb: bool = False,
+    distributed: bool = False,
+    config: str = "prompt_safety",
+    **kwargs,
+):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
     loggers = []

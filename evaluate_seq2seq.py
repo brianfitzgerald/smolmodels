@@ -36,7 +36,10 @@ def main(
 
     model_config = CONFIGS[config]
     loaded_checkpoint = torch.load(checkpoint_file)
-    model_state_dict = {key.replace('model.', ''): value for key, value in loaded_checkpoint["state_dict"].items()}
+    model_state_dict = {
+        key.replace("model.", ""): value
+        for key, value in loaded_checkpoint["state_dict"].items()
+    }
 
     tokenizer = T5Tokenizer.from_pretrained(
         model_config.hyperparams.base_model_checkpoint
@@ -90,7 +93,10 @@ def main(
             validation_df: pd.DataFrame = pd.read_csv(dataset_file)
         elif dataset_file.endswith(".parquet"):
             validation_df: pd.DataFrame = pd.read_parquet(dataset_file)
-            validation_df = validation_df[(validation_df['nsfw_regex'] == True) | (validation_df['nsfw_image'] == True)]
+            validation_df = validation_df[
+                (validation_df["nsfw_regex"] == True)
+                | (validation_df["nsfw_image"] == True)
+            ]
         for i in range(0, len(validation_df), batch_size):
 
             chunk = validation_df[i : i + batch_size]
@@ -99,7 +105,9 @@ def main(
                 model_config.task_prefix + sentence for sentence in chunk["prompt"]
             ]
 
-            inputs = tokenizer(prompts_with_prefix, return_tensors="pt", padding=True).to("cuda")
+            inputs = tokenizer(
+                prompts_with_prefix, return_tensors="pt", padding=True
+            ).to("cuda")
 
             output_sequences = model.generate(
                 input_ids=inputs["input_ids"],
@@ -137,13 +145,11 @@ def main(
                 num_return_sequences=1,
             )
             out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
-            prompt_strings = tokenizer.batch_decode(
-                labels, skip_special_tokens=True
-            )
+            prompt_strings = tokenizer.batch_decode(labels, skip_special_tokens=True)
             print(f"Prompts: {prompt_strings}\nSanitized: {out}\n\n")
             for prompt, generated in zip(prompt_strings, out):
                 rows.append({"Prompt": prompt, "Upsampled": generated})
-        
+
             if i % 100 == 0:
                 print(f"Processed {i} samples, saving...")
                 out_df = pd.DataFrame(rows)

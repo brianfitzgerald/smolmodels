@@ -2,6 +2,9 @@ import asyncio
 from enum import Enum
 import re
 from typing import Dict, List
+from datasets import Dataset, concatenate_datasets
+from synthetic_data.tasks import SyntheticDataTask
+
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
@@ -51,7 +54,12 @@ class SyntheticToolCallDPORow:
     call_result_rejected: str
     agent_output_rejected: str
 
+
 class DatasetTaskFormat(str, Enum):
+    """
+    Whether a task performs the DPO or SFT objectives.
+    """
+
     SFT = "SFT"
     DPO = "DPO"
 
@@ -63,8 +71,8 @@ class GenerationSource(str, Enum):
     GROQ = "groq"
 
 
-class SeedDataFormat(Enum):
-    TSV = "tsv"
+class DatasetFormat(Enum):
+    CSV = "tsv"
     HF_DATASET = "hf_dataset"
     # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
     SYNTHETIC = "synthetic"
@@ -174,3 +182,18 @@ async def gather_with_concurrency_limit(n: int, *coros):
             return await coro
 
     return await asyncio.gather(*(sem_coro(c) for c in coros))
+
+
+def save_dataset(
+    hf_dataset: Dataset, task: SyntheticDataTask, new_dataset_rows: List[Dict]
+):
+    dataset_new_rows = Dataset.from_list(new_dataset_rows)
+
+    concatenated_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
+    if task.output_data_format == DatasetFormat.HF_DATASET:
+        print(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
+        concatenated_dataset.push_to_hub(task.output_data_name)
+    elif task.output_data_format == DatasetFormat.PARQUET:
+        concatenated_dataset.to_parquet(f"{task.output_data_name}.parquet")
+    elif task.output_data_format == DatasetFormat.CSV:
+        concatenated_dataset.to_csv(f"{task.output_data_name}.csv", index=False)

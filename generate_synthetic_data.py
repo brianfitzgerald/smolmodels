@@ -10,6 +10,7 @@ from dotenv import dotenv_values
 from huggingface_hub import login
 from synthetic_data.tasks import (
     PromptUpsample,
+    SaferPrompt,
     SyntheticDataTask,
     Toolformer,
     SyntheticToolCalls,
@@ -21,12 +22,12 @@ from synthetic_data.generation import (
     OpenAIGenerationWrapper,
     OpenRouterGenerationWrapper,
     VLLMWrapper,
-    upload_dataset,
 )
 from synthetic_data.utils import (
     DatasetTaskFormat,
     GenerationSource,
-    SeedDataFormat,
+    DatasetFormat,
+    save_dataset,
     print_result_dicts,
 )
 
@@ -34,6 +35,7 @@ DATA_TASKS: Dict[str, type[SyntheticDataTask]] = {
     "toolformer": Toolformer,
     "prompt_upsample": PromptUpsample,
     "synthetic_tool_calls": SyntheticToolCalls,
+    "saferprompt": SaferPrompt,
 }
 
 MODEL_WRAPPER_CLASSES = {
@@ -52,7 +54,7 @@ def main(
     pairs: bool = False,
     resume_input_position: bool = True,
     generation_source: GenerationSource = GenerationSource.OPENAI,
-    task_name: str = "synthetic_tool_calls",
+    task_name: str = "saferprompt",
     n_epochs: int = 10,
     **kwargs,
 ):
@@ -105,7 +107,7 @@ def main(
             output_dataset = cast(
                 Dataset,
                 load_dataset(
-                    f"{task.dataset_org}/{task.output_dataset_name}",
+                    f"{task.dataset_org}/{task.output_data_name}",
                     split="train",
                 ),
             )
@@ -120,9 +122,9 @@ def main(
         input_dataset_location = (
             f"{task.dataset_org}/{task.dpo_seed_cache_dataset_name}"
         )
-    elif task.seed_data_format == SeedDataFormat.HF_DATASET:
+    elif task.seed_data_format == DatasetFormat.HF_DATASET:
         input_dataset_location = f"{task.dataset_org}/{task.seed_data_location}"
-    elif task.seed_data_format in (SeedDataFormat.TSV, SeedDataFormat.PARQUET):
+    elif task.seed_data_format in (DatasetFormat.CSV, DatasetFormat.PARQUET):
         input_dataset_location = task.seed_data_location
     assert input_dataset_location, "No input dataset location provided."
 
@@ -131,16 +133,16 @@ def main(
     )
     split = "train"
     if (
-        task.seed_data_format in (SeedDataFormat.HF_DATASET, SeedDataFormat.SYNTHETIC)
+        task.seed_data_format in (DatasetFormat.HF_DATASET, DatasetFormat.SYNTHETIC)
         or pairs
     ):
         if len(output_dataset) > 0 and resume_input_position:
             split = f"train[{len(output_dataset)}:]"
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
-    elif task.seed_data_format == SeedDataFormat.TSV:
+    elif task.seed_data_format == DatasetFormat.CSV:
         seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
         input_dataset = Dataset.from_pandas(seed_data)
-    elif task.seed_data_format == SeedDataFormat.PARQUET:
+    elif task.seed_data_format == DatasetFormat.PARQUET:
         seed_data = pd.read_parquet(input_dataset_location)
         input_dataset = Dataset.from_pandas(seed_data)
     else:
@@ -151,6 +153,9 @@ def main(
     print(f"Input dataset length: {len(input_dataset)} output: {len(output_dataset)}")
     new_dataset_rows: List[Dict] = []
     print("Running...")
+
+    # Test save
+    save_dataset(output_dataset, task, [])
 
     for i in range(n_epochs):
         # Generate negative pairs for DPO
@@ -170,9 +175,7 @@ def main(
                 print_result_dicts(output_rows_batch)
                 new_dataset_rows.extend(output_rows_batch)
                 if batch_idx % upload_every == 0 and batch_idx > 0:
-                    upload_dataset(
-                        output_dataset, task.output_dataset_name, new_dataset_rows
-                    )
+                    save_dataset(output_dataset, task, new_dataset_rows)
         else:
             for batch_idx, batch in enumerate(
                 input_dataset.iter(batch_size=batch_size)
@@ -189,9 +192,7 @@ def main(
                 print_result_dicts(output_rows_batch)
                 new_dataset_rows.extend(output_rows_batch)
                 if batch_idx % upload_every == 0 and batch_idx > 0:
-                    upload_dataset(
-                        output_dataset, task.output_dataset_name, new_dataset_rows
-                    )
+                    save_dataset(output_dataset, task, new_dataset_rows)
 
 
 if __name__ == "__main__":

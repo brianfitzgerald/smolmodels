@@ -61,7 +61,11 @@ DO NOT ever reference the rewritten in the original prompt within your response.
 
 
 def format_safety_prompt_template(original_prompt: str) -> Conversation:
-    pass
+    return [
+        {"role": "system", "content": PROMPT_REWRITER_SYSTEM_PROMPT},
+        {"role": "user", "content": original_prompt},
+    ]
+
 
 CONVERT_WEIGHT_API_EXAMPLE = {
     "name": "convert_weight",
@@ -302,7 +306,9 @@ def get_toolformer_dpo_negative_completion_prompt(
     Prepares the system and user-assistant style messages for inference.
     """
 
-    examples = get_json_tool_use_examples() if use_json_examples else TOOLFORMER_EXAMPLES
+    examples = (
+        get_json_tool_use_examples() if use_json_examples else TOOLFORMER_EXAMPLES
+    )
 
     return [
         {

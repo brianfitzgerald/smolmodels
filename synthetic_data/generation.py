@@ -2,11 +2,11 @@ from abc import ABC, abstractmethod
 import openai
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict
-from datasets import Dataset, concatenate_datasets
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-import asyncio
 
-from synthetic_data.utils import Conversation, gather_with_concurrency_limit
+from synthetic_data.utils import (
+    Conversation,
+    gather_with_concurrency_limit,
+)
 
 
 SHAREGPT_TO_OPENAI_ROLE = {
@@ -16,24 +16,12 @@ SHAREGPT_TO_OPENAI_ROLE = {
 }
 
 
-def upload_dataset(
-    hf_dataset: Dataset, dataset_name: str, new_dataset_rows: List[Dict]
-):
-    dataset_new_rows = Dataset.from_list(new_dataset_rows)
-    dataset_new_rows.to_csv(f"dataset_samples/{dataset_name}.csv")
-
-    concat_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
-
-    print(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
-    concat_dataset.push_to_hub(dataset_name)
-
-
 class GenerationWrapper(ABC):
     """
     Abstract method for various ways of generating data.
     """
 
-    tokenizer: PreTrainedTokenizerBase
+    tokenizer = None
 
     @abstractmethod
     async def generate(self, conversations: List[Conversation]) -> List[str]:
@@ -41,7 +29,6 @@ class GenerationWrapper(ABC):
 
 
 class VLLMWrapper(GenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
 
         from vllm import LLM, SamplingParams  # type: ignore
@@ -63,7 +50,6 @@ class VLLMWrapper(GenerationWrapper):
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("OPENAI_API_KEY")
         if api_key is None:
@@ -98,7 +84,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("OPENROUTER_API_KEY")
         if api_key is None:
@@ -114,7 +99,6 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 
 class GroqGenerationWrapper(OpenAIGenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("GROQ_API_KEY")
         if api_key is None:
