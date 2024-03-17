@@ -153,8 +153,7 @@ class SaferPrompt(SyntheticDataTask):
                 continue
             if "I'm sorry" in completion:
                 continue
-            if "Rewrite: " in completion:
-                completion = completion.replace("Rewrite: ", "")
+            completion = clean_message(completion)
             rows.append({"Prompt": original_row, "Sanitized": completion})
         return rows
 

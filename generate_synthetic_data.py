@@ -51,12 +51,12 @@ MODEL_WRAPPER_CLASSES = {
 
 def main(
     # n batches
-    upload_every: int = 10,
+    save_every: int = 2,
     batch_size: int = 8,
     restart: bool = False,
     pairs: bool = False,
     resume_input_position: bool = True,
-    generation_source: GenerationSource = GenerationSource.OPENAI,
+    generation_source: GenerationSource = GenerationSource.OPENROUTER,
     task_name: str = "saferprompt",
     n_epochs: int = 10,
     **kwargs,
@@ -179,7 +179,7 @@ def main(
                 output_rows_batch = task.get_dpo_dataset_output_batch(completions)
                 print_result_dicts(output_rows_batch)
                 new_dataset_rows.extend(output_rows_batch)
-                if batch_idx % upload_every == 0 and batch_idx > 0:
+                if batch_idx % save_every == 0 and batch_idx > 0:
                     save_dataset(output_dataset, task, new_dataset_rows)
         else:
             for batch_idx, batch in enumerate(
@@ -196,7 +196,7 @@ def main(
                 output_rows_batch = task.get_seed_dataset_output_rows_batch(completions)
                 print_result_dicts(output_rows_batch)
                 new_dataset_rows.extend(output_rows_batch)
-                if batch_idx % upload_every == 0 and batch_idx > 0:
+                if batch_idx % save_every == 0 and batch_idx > 0:
                     save_dataset(output_dataset, task, new_dataset_rows)
 
 

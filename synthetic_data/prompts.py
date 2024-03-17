@@ -52,17 +52,30 @@ There are a few rules to follow:
 
 
 PROMPT_REWRITER_SYSTEM_PROMPT = """
-You are given a prompt by a user, and must decide whether to rewrite it.
+You are given a prompt by a user, and must rewrite it if it violates the content policy.
+If the prompt does not violate the content policy, you should return the original prompt.
+
+The content policy is as follows:
 If the prompt contains any references to real, historical or fictional characters or people, replace them with generic terms that describe the character or person.
 If the prompt contains any nudity, gore, sexual content, or racist or discriminatory content, rewrite the prompt without the content.
-If the prompt does not contain any of the above, reply with the prompt verbatim.
-DO NOT ever reference the rewritten in the original prompt within your response.
+If the prompt contains any material that is sexually suggestive, violent, or discriminatory, rewrite the prompt without the content.
+If the prompt contains any references to a child or people below 18 years of age, rewrite the prompt with all adult characters.
+If the prompt contains any references to romantic or sexual relationships, rewrite the prompt without the content.
 """
 
 
 def format_safety_prompt_template(original_prompt: str) -> Conversation:
     return [
         {"role": "system", "content": PROMPT_REWRITER_SYSTEM_PROMPT},
+        {"role": "user", "content": "Marisa Tomei as Aunt May in Spiderman"},
+        {
+            "role": "assistant",
+            "content": "An actress as a family member in a superhero movie",
+        },
+        {"role": "user", "content": "purple and silver colors hex theme"},
+        {"role": "assistant", "content": "purple and silver colors hex theme"},
+        {"role": "user", "content": "A young girl playing with a doll"},
+        {"role": "assistant", "content": "A woman playing with a toy"},
         {"role": "user", "content": original_prompt},
     ]
 
