@@ -2,6 +2,9 @@ import asyncio
 import os
 from typing import Dict, List, Optional, cast
 import pandas as pd
+import asyncio
+from synthetic_data.tasks import SyntheticDataTask
+
 
 import fire
 from datasets import Dataset, load_dataset
@@ -14,6 +17,7 @@ from synthetic_data.tasks import (
     SyntheticDataTask,
     Toolformer,
     SyntheticToolCalls,
+    save_dataset
 )
 
 from synthetic_data.generation import (
@@ -27,7 +31,6 @@ from synthetic_data.utils import (
     DatasetTaskFormat,
     GenerationSource,
     DatasetFormat,
-    save_dataset,
     print_result_dicts,
 )
 
@@ -102,7 +105,7 @@ def main(
     print("Loading output dataset...")
     if restart:
         output_dataset = Dataset.from_dict(empty_dataset_format)
-    else:
+    elif task.output_data_format == DatasetFormat.HF_DATASET:
         try:
             output_dataset = cast(
                 Dataset,
@@ -115,6 +118,8 @@ def main(
         except (EmptyDatasetError, ValueError):
             print("No existing dataset found, starting from scratch...")
             output_dataset = Dataset.from_dict(empty_dataset_format)
+    else:
+        output_dataset = Dataset.from_dict(empty_dataset_format)
 
     input_dataset: Dataset
     input_dataset_location: Optional[str] = None

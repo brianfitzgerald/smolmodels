@@ -3,6 +3,7 @@ import openai
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict
 
+
 from synthetic_data.utils import (
     Conversation,
     gather_with_concurrency_limit,
@@ -108,3 +109,4 @@ class GroqGenerationWrapper(OpenAIGenerationWrapper):
             base_url="https://api.groq.com/openai/v1",
         )
         self.model_name = "mixtral-8x7b-32768"
+

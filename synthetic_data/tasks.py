@@ -1,5 +1,4 @@
 from datasets import Dataset
-import pandas as pd
 from abc import ABC
 import random
 import traceback
@@ -20,6 +19,8 @@ from synthetic_data.tools import (
     get_tool_description_json,
     get_tool_descriptions,
 )
+from datasets import Dataset, concatenate_datasets
+
 
 from synthetic_data.utils import (
     Conversation,
@@ -32,6 +33,7 @@ from synthetic_data.utils import (
     is_valid_python,
     clean_message,
     get_matches,
+    ensure_directory
 )
 
 
@@ -58,6 +60,8 @@ class SyntheticDataTask(ABC):
     empty_dataset_format: Dict[str, List]
     empty_dpo_dataset_format: Dict[str, List]
 
+    original_rows_batch: List = []
+
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         """
         Prompt template to use for generating initial seed data.
@@ -76,7 +80,7 @@ class SyntheticDataTask(ABC):
         """
         raise NotImplementedError
 
-    def get_dpo_dataset_output_batch(self, completion: List[str]) -> List[Dict]:
+    def get_dpo_dataset_output_batch(self, completions: List[str]) -> List[Dict]:
         """
         Take the completed conversation and format it into the final dataset format.
         """
@@ -120,9 +124,20 @@ class SaferPrompt(SyntheticDataTask):
         "Sanitized": [],
     }
 
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        return dataset
+
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         prompts = batch["prompt"]
+        self.original_rows_batch = prompts
         return [format_safety_prompt_template(prompt) for prompt in prompts]
+
+    def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
+        rows = []
+        for completion, original_row in zip(completions, self.original_rows_batch):
+            rows.append({"Prompt": original_row, "Sanitized": completion})
+        return rows
+
 
 
 class Toolformer(SyntheticDataTask):
@@ -436,3 +451,19 @@ class GlaiveDPO(SyntheticDataTask):
             {"role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]], "content": msg["value"]}
             for msg in new_rows_batch
         ]
+
+def save_dataset(
+    hf_dataset: Dataset, task: SyntheticDataTask, new_dataset_rows: List[Dict]
+):
+    dataset_new_rows = Dataset.from_list(new_dataset_rows)
+
+    ensure_directory("output_datasets")
+
+    concatenated_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
+    if task.output_data_format == DatasetFormat.HF_DATASET:
+        print(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
+        concatenated_dataset.push_to_hub(task.output_data_name)
+    elif task.output_data_format == DatasetFormat.PARQUET:
+        concatenated_dataset.to_parquet(f"{task.output_data_name}.parquet")
+    elif task.output_data_format == DatasetFormat.CSV:
+        concatenated_dataset.to_csv(f"output_datasets/{task.output_data_name}.csv", index=False)

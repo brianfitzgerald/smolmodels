@@ -1,9 +1,9 @@
 import asyncio
 from enum import Enum
+from pathlib import Path
 import re
+import shutil
 from typing import Dict, List
-from datasets import Dataset, concatenate_datasets
-from synthetic_data.tasks import SyntheticDataTask
 
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -184,16 +184,12 @@ async def gather_with_concurrency_limit(n: int, *coros):
     return await asyncio.gather(*(sem_coro(c) for c in coros))
 
 
-def save_dataset(
-    hf_dataset: Dataset, task: SyntheticDataTask, new_dataset_rows: List[Dict]
-):
-    dataset_new_rows = Dataset.from_list(new_dataset_rows)
-
-    concatenated_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
-    if task.output_data_format == DatasetFormat.HF_DATASET:
-        print(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
-        concatenated_dataset.push_to_hub(task.output_data_name)
-    elif task.output_data_format == DatasetFormat.PARQUET:
-        concatenated_dataset.to_parquet(f"{task.output_data_name}.parquet")
-    elif task.output_data_format == DatasetFormat.CSV:
-        concatenated_dataset.to_csv(f"{task.output_data_name}.csv", index=False)
+def ensure_directory(directory: str, clear: bool = True):
+    """
+    Create a directory and parents if it doesn't exist, and clear it if it does.
+    Duplicated between submodules to avoid importing torch
+    """
+    Path(directory).mkdir(exist_ok=True, parents=True)
+    if clear:
+        shutil.rmtree(directory)
+    Path(directory).mkdir(exist_ok=True, parents=True)

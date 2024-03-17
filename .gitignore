@@ -172,6 +172,7 @@ logs/*
 dataset_cache_parti/*
 dataset_cache_llava/*
 *.parquet
+output_datasets/*
 
 samples/*
 dataset_caches/*
