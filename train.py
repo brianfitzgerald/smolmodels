@@ -13,7 +13,6 @@ from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
 import torch.multiprocessing
-from weakref import proxy
 
 
 from model.t5 import T5Model
@@ -129,17 +128,12 @@ class HfModelCheckpoint(ModelCheckpoint):
         self.FILE_EXTENSION = ""
 
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        # TODO fix
         filepath_folder = f"{filepath}/"
-        self._last_global_step_saved = trainer.global_step
-        self._last_checkpoint_saved = filepath
-
-        # notify loggers
-        if trainer.is_global_zero:
-            for logger in trainer.loggers:
-                logger.after_save_checkpoint(proxy(self))
+        super()._save_checkpoint(trainer, filepath_folder)
         print(f"Saving checkpoint at {filepath_folder}")
         if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pre322830trained(filepath_folder)
+            trainer.lightning_module.model.save_pretrained(filepath_folder)
             trainer.lightning_module.tokenizer.save_pretrained(filepath_folder)
 
     # https://github.com/Lightning-AI/lightning/pull/16067
