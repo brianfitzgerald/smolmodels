@@ -208,6 +208,8 @@ class SafetyLabeling(SyntheticDataTask):
                 continue
             completion = clean_message(completion)
             class_label = extract_label(completion)
+            if not class_label:
+                continue
             rows.append(
                 {
                     "prompt": prompt,

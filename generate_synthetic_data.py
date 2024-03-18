@@ -166,7 +166,9 @@ def main(
     # Test save
     save_dataset(output_dataset, task, [])
 
-    for i in range(n_epochs):
+    total_batches = len(input_dataset) // batch_size
+
+    for epoch in range(n_epochs):
         # Generate negative pairs for DPO
         if pairs:
             for batch_idx, batch in enumerate(
@@ -192,7 +194,7 @@ def main(
                 batch = cast(Dict, batch)
                 full_conversations_batch = task.format_seed_input_conversation(batch)
 
-                print(f"Generating {len(full_conversations_batch)} completions...")
+                print(f"Epoch {epoch}, batch {batch_idx}/{total_batches}: generating {len(full_conversations_batch)} completions")
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)
                 )

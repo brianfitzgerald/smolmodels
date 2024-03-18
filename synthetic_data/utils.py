@@ -187,11 +187,17 @@ def ensure_directory(directory: str, clear: bool = True):
 
 LABEL_REGEX = re.compile(r"Label:\s*(.*)")
 
+VALID_LABELS = {"famous_figures", "nudity", "sexual_content", "violence", "discriminatory_content", "safe"}
 
 def extract_label(text: str) -> Optional[str]:
     match = LABEL_REGEX.search(text)
     if match:
         label = match.group(1).strip()
+        # remove labels with multiple words
+        if " " in label:
+            return None
+        if label not in VALID_LABELS:
+            return None
         return label
     else:
         return None
