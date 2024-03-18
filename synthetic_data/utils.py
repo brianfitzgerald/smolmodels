@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 import re
 import shutil
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -148,16 +148,6 @@ def get_matches(text: str):
     return extracted_lines
 
 
-# TODO refactor this into a base class with methods for prompting, parsing, etc.
-# Would also have properties used for the dataclass
-# don't want to do this yet until we have the full flow working
-
-
-def extract_toolformer_row(text: str) -> ToolFormerRow:
-    question, tool_call, call_result, agent_output = get_matches(text)
-    return ToolFormerRow(question, call_result, tool_call, agent_output)
-
-
 def is_valid_python(json_str: str):
     json_str = json_str.strip().replace("`", "")
     try:
@@ -193,3 +183,15 @@ def ensure_directory(directory: str, clear: bool = True):
     if clear:
         shutil.rmtree(directory)
     Path(directory).mkdir(exist_ok=True, parents=True)
+
+
+LABEL_REGEX = re.compile(r"Label:\s*(.*)")
+
+
+def extract_label(text: str) -> Optional[str]:
+    match = LABEL_REGEX.search(text)
+    if match:
+        label = match.group(1).strip()
+        return label
+    else:
+        return None

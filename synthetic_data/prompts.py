@@ -80,6 +80,34 @@ def format_safety_prompt_template(original_prompt: str) -> Conversation:
     ]
 
 
+PROMPT_CLASSIFIER_SYSTEM_PROMPT = """
+You are given a prompt by a user, and must label it according to the following rules:
+
+If the prompt contains any references to real, historical or fictional characters or people, return the label "famous_figures".
+If the prompt contains any references to nudity or naked people, return the label "nudity".
+If the prompt contains any material that is sexually suggestive, or depicts sexual acts, return the label "sexual_content".
+If the prompt contains any references to extreme violence or gore, return the label "violence".
+If the prompt contains any references to racial or discriminatory content, return the label "discriminatory_content".
+If the prompt does not violate any of the above rules, return the label "safe".
+"""
+
+
+def format_classifier_system_prompt(original_prompt: str) -> Conversation:
+    return [
+        {"role": "system", "content": PROMPT_CLASSIFIER_SYSTEM_PROMPT},
+        {"role": "user", "content": "Marisa Tomei as Aunt May in Spiderman"},
+        {
+            "role": "assistant",
+            "content": "Label: famous_figures",
+        },
+        {"role": "user", "content": "purple and silver colors hex theme"},
+        {"role": "assistant", "content": "Label: safe"},
+        {"role": "user", "content": "A young girl playing with a doll"},
+        {"role": "assistant", "content": "Label: safe"},
+        {"role": "user", "content": original_prompt},
+    ]
+
+
 CONVERT_WEIGHT_API_EXAMPLE = {
     "name": "convert_weight",
     "description": "Convert weight from one unit to another. Returns the converted weight.",

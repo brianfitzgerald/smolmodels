@@ -7,6 +7,7 @@ from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
+    format_classifier_system_prompt,
     format_dalle_prompt_template,
     format_safety_prompt_template,
     get_tool_usage_prompt,
@@ -20,6 +21,7 @@ from synthetic_data.tools import (
     get_tool_descriptions,
 )
 from datasets import Dataset, concatenate_datasets
+import pandas as pd
 
 
 from synthetic_data.utils import (
@@ -30,6 +32,7 @@ from synthetic_data.utils import (
     SyntheticToolCallDPORow,
     ToolFormerDPORow,
     ToolFormerRow,
+    extract_label,
     is_valid_python,
     clean_message,
     get_matches,
@@ -60,7 +63,7 @@ class SyntheticDataTask(ABC):
     empty_dataset_format: Dict[str, List]
     empty_dpo_dataset_format: Dict[str, List]
 
-    original_rows_batch: List = []
+    original_rows_batch = []
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         """
@@ -111,8 +114,10 @@ class PromptUpsample(SyntheticDataTask):
         return [format_dalle_prompt_template(prompt) for prompt in prompts]
 
 
-def preprocess_saferprompt(row: Dict) -> bool:
-    prompt = row["prompt"]
+def preprocess_prompts(row: Dict) -> bool:
+    prompt: str = row["prompt"]
+    if not prompt:
+        return False
     if len(prompt) == 0:
         return False
     if "\n" in prompt:
@@ -121,10 +126,9 @@ def preprocess_saferprompt(row: Dict) -> bool:
         return False
     if len(prompt) > 256:
         return False
-    return row["nsfw_regex"] or row["nsfw_image"]
+    return True
 
-
-class SaferPrompt(SyntheticDataTask):
+class PromptRewritingDPO(SyntheticDataTask):
 
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "data/nsfw_prompts.parquet"
@@ -138,7 +142,7 @@ class SaferPrompt(SyntheticDataTask):
     }
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.filter(preprocess_saferprompt)
+        dataset = dataset.filter(preprocess_prompts)
         return dataset
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
@@ -155,6 +159,62 @@ class SaferPrompt(SyntheticDataTask):
                 continue
             completion = clean_message(completion)
             rows.append({"Prompt": original_row, "Sanitized": completion})
+        return rows
+
+
+class SafetyLabeling(SyntheticDataTask):
+
+    seed_data_format = DatasetFormat.CSV
+    seed_data_location = "seed_data_files/160k_batch1.tsv"
+    output_data_name = "safer-prompt"
+    output_data_format = DatasetFormat.CSV
+    dataset_task_format = DatasetTaskFormat.SFT
+
+    empty_dataset_format = {
+        "prompt": [],
+        "annotated_label": [],
+        "class_label": [],
+    }
+
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        """
+        Evenly sample the dataset to have the same number of samples per class.
+        """
+        dataset = dataset.filter(preprocess_prompts)
+        pd_dataset: pd.DataFrame = dataset.to_pandas()  # type: ignore
+        max_samples_per_group: int = pd_dataset.groupby("tasks_label").size().min()  # type: ignore
+
+        def sample_group(group):
+            return group.sample(min(len(group), max_samples_per_group))
+
+        print(f"Sampling {max_samples_per_group} samples per class...")
+        sampled_df = pd_dataset.groupby("tasks_label", group_keys=False).apply(
+            sample_group
+        )
+
+        sampled_dataset = Dataset.from_pandas(sampled_df)  # type: ignore
+        return sampled_dataset
+
+    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+        self.original_rows_batch = batch
+        return [format_classifier_system_prompt(prompt) for prompt in batch["prompt"]]
+
+    def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
+        rows = []
+        for completion, prompt, task_label in zip(completions, self.original_rows_batch['prompt'], self.original_rows_batch['tasks_label']):
+            if completion == "":
+                continue
+            if "I'm sorry" in completion:
+                continue
+            completion = clean_message(completion)
+            class_label = extract_label(completion)
+            rows.append(
+                {
+                    "prompt": prompt,
+                    "annotated_label": task_label,
+                    "class_label": class_label,
+                }
+            )
         return rows
 
 

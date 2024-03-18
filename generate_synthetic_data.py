@@ -3,7 +3,7 @@ import os
 from typing import Dict, List, Optional, cast
 import pandas as pd
 import asyncio
-from synthetic_data.tasks import SyntheticDataTask
+from synthetic_data.tasks import SafetyLabeling, SyntheticDataTask
 
 
 import fire
@@ -13,7 +13,7 @@ from dotenv import dotenv_values
 from huggingface_hub import login
 from synthetic_data.tasks import (
     PromptUpsample,
-    SaferPrompt,
+    PromptRewritingDPO,
     SyntheticDataTask,
     Toolformer,
     SyntheticToolCalls,
@@ -38,7 +38,8 @@ DATA_TASKS: Dict[str, type[SyntheticDataTask]] = {
     "toolformer": Toolformer,
     "prompt_upsample": PromptUpsample,
     "synthetic_tool_calls": SyntheticToolCalls,
-    "saferprompt": SaferPrompt,
+    "prompt_rewriting_dpo": PromptRewritingDPO,
+    "safety_labeling": SafetyLabeling,
 }
 
 MODEL_WRAPPER_CLASSES = {
@@ -52,12 +53,12 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     save_every: int = 10,
-    batch_size: int = 8,
+    batch_size: int = 16,
     restart: bool = False,
     pairs: bool = False,
     resume_input_position: bool = True,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
-    task_name: str = "saferprompt",
+    task_name: str = "safety_labeling",
     n_epochs: int = 10,
     **kwargs,
 ):
@@ -145,7 +146,10 @@ def main(
             split = f"train[{len(output_dataset)}:]"
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == DatasetFormat.CSV:
-        seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
+        if input_dataset_location.endswith(".tsv"):
+            seed_data = pd.read_csv(input_dataset_location, sep="\t", on_bad_lines="skip")
+        else:
+            seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
         input_dataset = Dataset.from_pandas(seed_data)
     elif task.seed_data_format == DatasetFormat.PARQUET:
         seed_data = pd.read_parquet(input_dataset_location)
