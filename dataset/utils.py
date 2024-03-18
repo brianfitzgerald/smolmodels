@@ -17,7 +17,7 @@ class FineTunerDataset(pl.LightningDataModule):
         self.batch_size = batch_size
         self.tokenizer = tokenizer
         self.max_token_length = max_token_length
-        self.cpu_count = 16
+        self.cpu_count = 1
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.cpu_count)  # type: ignore

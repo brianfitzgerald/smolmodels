@@ -42,9 +42,9 @@ class RobertaClassifier(pl.LightningModule):
         labels: Tensor,
     ):
         return self.model(
-            input_ids,
+            input_ids=input_ids,
             attention_mask=attention_mask,
-            abels=labels,
+            labels=labels,
         )
 
     def _step(self, batch):

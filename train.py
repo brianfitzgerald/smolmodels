@@ -12,6 +12,9 @@ from dataset.prompt_classifier import PromptClassifierDataModule
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
+import torch.multiprocessing
+from weakref import proxy
+
 
 from model.t5 import T5Model
 from model.roberta import RobertaClassifier
@@ -36,6 +39,7 @@ from model.utils import (
 )
 from dataset.utils import FineTunerDataset
 
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
@@ -60,6 +64,9 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         if batch_idx > 0:
             return
+        
+        # TODO fix
+        return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
         labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -123,10 +130,16 @@ class HfModelCheckpoint(ModelCheckpoint):
 
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         filepath_folder = f"{filepath}/"
-        super()._save_checkpoint(trainer, filepath_folder)
+        self._last_global_step_saved = trainer.global_step
+        self._last_checkpoint_saved = filepath
+
+        # notify loggers
+        if trainer.is_global_zero:
+            for logger in trainer.loggers:
+                logger.after_save_checkpoint(proxy(self))
         print(f"Saving checkpoint at {filepath_folder}")
         if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pretrained(filepath_folder)
+            trainer.lightning_module.model.save_pre322830trained(filepath_folder)
             trainer.lightning_module.tokenizer.save_pretrained(filepath_folder)
 
     # https://github.com/Lightning-AI/lightning/pull/16067
@@ -194,6 +207,7 @@ CONFIGS = {
             gradient_accumulation_steps=4,
             train_batch_size=2,
             optimizer="AdamW",
+            max_seq_length=512
         ),
         ckpt_name="safer-prompt-classifier",
     ),

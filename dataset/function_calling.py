@@ -1,12 +1,13 @@
 from datasets import load_dataset
 from typing import Optional, List, Dict
 from transformers.tokenization_utils import PreTrainedTokenizer
-from model.utils import IGNORE_TOKEN_INDEX, ensure_directory, FineTunerDataset
+from model.utils import IGNORE_TOKEN_INDEX, ensure_directory
 import os
 import re
 import torch
 from torch import Tensor
 import torch.nn.functional as F
+from dataset.utils import FineTunerDataset
 
 from synthetic_data.conversion import chatml_to_conversation
 
@@ -61,7 +62,7 @@ class FunctionCallingDataModule(FineTunerDataset):
         input_ids, attention_masks, labels = [], [], []
         for system, chat in zip(examples["system"], examples["chat"]):
             conversation_string = system + chat
-            conversation_chatml = chatml_to_conversation(conversation_string)
+            conversation_chatml = chatml_to_conversation(conversation_string, system)
 
             # N-1 messages are the prompt, then the last message is the expected output
             prompt_str: str = self.tokenizer.apply_chat_template(

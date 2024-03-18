@@ -6,7 +6,7 @@ import torch
 
 
 from dataset.utils import FineTunerDataset
-from synthetic_data.utils import SAFE_PROMPT_LABEL_IDS
+from synthetic_data.utils import SAFE_PROMPT_LABEL_IDS, ensure_directory
 
 
 class PromptClassifierDataModule(FineTunerDataset):
@@ -24,7 +24,11 @@ class PromptClassifierDataModule(FineTunerDataset):
     def setup(self, stage: str):
         print(f"Loading dataset for stage {stage}")
         dataset_csv = pd.read_csv("data_files/classified_prompts_40k.csv")
-        self.dataset = Dataset.from_pandas(dataset_csv)
+        self.dataset = Dataset.from_pandas(dataset_csv).train_test_split(test_size=0.01)
+        self.train_dataset = self.dataset["train"]
+        self.val_dataset = self.dataset["test"]
+
+        ensure_directory(self.cache_dir, clear=False)
 
         self.train_dataset = self.train_dataset.map(
             self.prepare_sample,
@@ -41,6 +45,15 @@ class PromptClassifierDataModule(FineTunerDataset):
             cache_file_name=f"{self.cache_dir}/validation.parquet",
             num_proc=self.cpu_count,
         )
+
+        columns = [
+            "input_ids",
+            "attention_mask",
+            "labels",
+        ]
+
+        self.train_dataset.set_format(type="torch", columns=columns)
+        self.val_dataset.set_format(type="torch", columns=columns)
 
     def prepare_sample(self, examples: dict):
 
