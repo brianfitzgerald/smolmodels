@@ -17,7 +17,7 @@ from synthetic_data.tasks import (
     SyntheticDataTask,
     Toolformer,
     SyntheticToolCalls,
-    save_dataset
+    save_dataset,
 )
 
 from synthetic_data.generation import (
@@ -147,7 +147,9 @@ def main(
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == DatasetFormat.CSV:
         if input_dataset_location.endswith(".tsv"):
-            seed_data = pd.read_csv(input_dataset_location, sep="\t", on_bad_lines="skip")
+            seed_data = pd.read_csv(
+                input_dataset_location, sep="\t", on_bad_lines="skip"
+            )
         else:
             seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
         input_dataset = Dataset.from_pandas(seed_data)
@@ -194,7 +196,9 @@ def main(
                 batch = cast(Dict, batch)
                 full_conversations_batch = task.format_seed_input_conversation(batch)
 
-                print(f"Epoch {epoch}, batch {batch_idx}/{total_batches}: generating {len(full_conversations_batch)} completions")
+                print(
+                    f"Epoch {epoch}, batch {batch_idx}/{total_batches}: generating {len(full_conversations_batch)} completions ({len(new_dataset_rows)}/{len(input_dataset)} generated in run)"
+                )
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)
                 )

@@ -120,13 +120,12 @@ def preprocess_prompts(row: Dict) -> bool:
         return False
     if len(prompt) == 0:
         return False
-    if "\n" in prompt:
-        return False
-    if len(prompt.split(" ")) > 64:
+    if len(prompt.split(" ")) > 128:
         return False
     if len(prompt) > 256:
         return False
     return True
+
 
 class PromptRewritingDPO(SyntheticDataTask):
 
@@ -182,12 +181,18 @@ class SafetyLabeling(SyntheticDataTask):
         """
         dataset = dataset.filter(preprocess_prompts)
         pd_dataset: pd.DataFrame = dataset.to_pandas()  # type: ignore
+        pd_dataset["tasks_label"] = pd_dataset["tasks_label"].replace('borderline', 'unsafe')
         max_samples_per_group: int = pd_dataset.groupby("tasks_label").size().min()  # type: ignore
 
         def sample_group(group):
             return group.sample(min(len(group), max_samples_per_group))
 
-        print(f"Sampling {max_samples_per_group} samples per class...")
+        print(
+            f"Sampling {max_samples_per_group} samples per class from dataset of length {len(dataset)}"
+        )
+        print(
+            f"Original class distribution: {pd_dataset.groupby('tasks_label').size()}"
+        )
         sampled_df = pd_dataset.groupby("tasks_label", group_keys=False).apply(
             sample_group
         )
@@ -201,7 +206,11 @@ class SafetyLabeling(SyntheticDataTask):
 
     def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
         rows = []
-        for completion, prompt, task_label in zip(completions, self.original_rows_batch['prompt'], self.original_rows_batch['tasks_label']):
+        for completion, prompt, task_label in zip(
+            completions,
+            self.original_rows_batch["prompt"],
+            self.original_rows_batch["tasks_label"],
+        ):
             if completion == "":
                 continue
             if "I'm sorry" in completion:

@@ -60,28 +60,31 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.max_concurrent = 16
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
-        try:
-            completion_requests = []
-            for conversation in conversations:
-                request = self.oai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=conversation,
-                    temperature=0,
-                    max_tokens=512,
+        retries = 0
+        while retries < 3:
+            try:
+                completion_requests = []
+                for conversation in conversations:
+                    request = self.oai_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=conversation,
+                        temperature=0,
+                        max_tokens=512,
+                    )
+                    completion_requests.append(request)
+                results: List[ChatCompletion] = await gather_with_concurrency_limit(
+                    self.max_concurrent, *completion_requests
                 )
-                completion_requests.append(request)
-            results: List[ChatCompletion] = await gather_with_concurrency_limit(
-                self.max_concurrent, *completion_requests
-            )
-            completions = [
-                result.choices[0].message.content
-                for result in results
-                if result.choices[0].message.content is not None
-            ]
-            return completions
-        except openai.OpenAIError as e:
-            print(f"Error while generating: {e}")
-            return []
+                completions = [
+                    result.choices[0].message.content
+                    for result in results
+                    if result.choices[0].message.content is not None
+                ]
+                return completions
+            except Exception as e:
+                print(f"Error while generating: {e}")
+            retries += 1
+        return []
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
@@ -109,4 +112,3 @@ class GroqGenerationWrapper(OpenAIGenerationWrapper):
             base_url="https://api.groq.com/openai/v1",
         )
         self.model_name = "mixtral-8x7b-32768"
-
