@@ -164,7 +164,7 @@ class PromptRewritingDPO(SyntheticDataTask):
 class SafetyLabeling(SyntheticDataTask):
 
     seed_data_format = DatasetFormat.CSV
-    seed_data_location = "seed_data_files/160k_batch1.tsv"
+    seed_data_location = "data_files/160k_batch1.tsv"
     output_data_name = "safer-prompt"
     output_data_format = DatasetFormat.CSV
     dataset_task_format = DatasetTaskFormat.SFT
@@ -232,7 +232,7 @@ class SafetyLabeling(SyntheticDataTask):
 class Toolformer(SyntheticDataTask):
 
     seed_data_format = DatasetFormat.SYNTHETIC
-    seed_data_location = "seed_data_files/domain_specific_tasks.csv"
+    seed_data_location = "data_files/domain_specific_tasks.csv"
 
     dataset_task_format = DatasetTaskFormat.DPO
 
@@ -348,7 +348,7 @@ class SyntheticToolCalls(SyntheticDataTask):
 
     dataset_task_format = DatasetTaskFormat.DPO
     seed_data_format = DatasetFormat.CSV
-    seed_data_location = "seed_data_files/domain_specific_tasks.csv"
+    seed_data_location = "data_files/domain_specific_tasks.csv"
 
     # TODO swap this and the output dataset name
     dpo_seed_cache_dataset_name = "synthetic-tool-calls-dpo-pairs"

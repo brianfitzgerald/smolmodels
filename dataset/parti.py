@@ -6,9 +6,10 @@ from typing import Dict
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
     ensure_directory,
-    FineTunerDataset,
     SAFETY_TASK_PREFIX,
 )
+
+from dataset.utils import FineTunerDataset
 
 
 def generate_full_prompt(instruction: str, prompt: str) -> str:

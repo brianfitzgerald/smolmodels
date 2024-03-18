@@ -8,11 +8,12 @@ from pathlib import Path
 import shutil
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
+from dataset.classifier import PromptClassifierDataModule
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
 
-from model.t5 import T5FineTuner
+from model.t5 import T5Model
 from model.roberta import RobertaClassifier
 from model.llama import LlamaFineTuner
 
@@ -28,12 +29,12 @@ from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
     HyperParams,
-    FineTunerDataset,
     compute_metrics,
     ensure_directory,
     PROMPT_EXPANSION_TASK_PREFIX,
     SAFETY_TASK_PREFIX,
 )
+from dataset.utils import FineTunerDataset
 
 
 class LogPredictionSamplesCallback(pl.Callback):
@@ -160,19 +161,19 @@ CONFIGS = {
         HyperParams("TinyLlama/TinyLlama-1.1B-Chat-v1.0"),
     ),
     "prompt_upsample_small": ModelConfig(
-        T5FineTuner,
+        T5Model,
         PromptUpsampleDataModule,
         PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
     "prompt_upsample": ModelConfig(
-        T5FineTuner,
+        T5Model,
         PromptUpsampleDataModule,
         PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
     "prompt_safety": ModelConfig(
-        T5FineTuner,
+        T5Model,
         PromptSafetyDataModule,
         PROMPT_SAFETY_PROJECT,
         HyperParams(
@@ -185,8 +186,8 @@ CONFIGS = {
         ckpt_name="saferprompt-v1",
     ),
     "safety_classifier": ModelConfig(
-        T5FineTuner,
-        PromptSafetyDataModule,
+        RobertaClassifier,
+        PromptClassifierDataModule,
         PROMPT_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
@@ -202,7 +203,7 @@ CONFIGS = {
 def main(
     wandb: bool = False,
     distributed: bool = False,
-    config: str = "prompt_safety",
+    config: str = "safety_classifier",
     **kwargs,
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
@@ -237,7 +238,7 @@ def main(
     )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
-    precision = "32" if model_config.model == T5FineTuner else "16-mixed"
+    precision = "32" if model_config.model == T5Model else "16-mixed"
 
     strategy = "ddp" if distributed else "auto"
 

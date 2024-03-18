@@ -15,9 +15,9 @@ from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 
 
-class T5FineTuner(pl.LightningModule):
+class T5Model(pl.LightningModule):
     def __init__(self, params: HyperParams):
-        super(T5FineTuner, self).__init__()
+        super(T5Model, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
 
