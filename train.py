@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
-from dataset.classifier import PromptClassifierDataModule
+from dataset.prompt_classifier import PromptClassifierDataModule
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string

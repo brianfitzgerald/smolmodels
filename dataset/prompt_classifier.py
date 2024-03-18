@@ -2,9 +2,11 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 import pandas as pd
 from datasets import Dataset
 from typing import List
+import torch
 
 
 from dataset.utils import FineTunerDataset
+from synthetic_data.utils import SAFE_PROMPT_LABEL_IDS
 
 
 class PromptClassifierDataModule(FineTunerDataset):
@@ -40,10 +42,13 @@ class PromptClassifierDataModule(FineTunerDataset):
             num_proc=self.cpu_count,
         )
 
-
     def prepare_sample(self, examples: dict):
 
-        inputs: List[str] = examples[self.label_column]
+        inputs: List[str] = examples[self.prompt_column]
+        labels: List[int] = [
+            SAFE_PROMPT_LABEL_IDS[label] for label in examples[self.label_column]
+        ]
+        labels_tensor = torch.tensor(labels, dtype=torch.long)
 
         inputs_tokenized = self.tokenizer(
             inputs,
@@ -55,6 +60,8 @@ class PromptClassifierDataModule(FineTunerDataset):
             return_tensors="pt",
         )
 
-        return inputs_tokenized
-
-
+        return {
+            "input_ids": inputs_tokenized["input_ids"],
+            "attention_mask": inputs_tokenized["attention_mask"],
+            "labels": labels_tensor,
+        }

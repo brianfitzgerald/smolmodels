@@ -9,6 +9,7 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
+from synthetic_data.utils import SAFE_PROMPT_LABELS
 
 import lightning.pytorch as pl
 
@@ -18,12 +19,16 @@ class RobertaClassifier(pl.LightningModule):
         super(RobertaClassifier, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
+        self.labels = SAFE_PROMPT_LABELS
 
         self.model: RobertaForSequenceClassification = (
             RobertaForSequenceClassification.from_pretrained(
-                params.base_model_checkpoint
+                params.base_model_checkpoint,
+                num_labels=len(self.labels),
+                output_attentions=False,
+                output_hidden_states=False,
             )
-        )  # type: ignore
+        )
         self.tokenizer: RobertaTokenizer = RobertaTokenizer.from_pretrained(
             params.base_model_checkpoint
         )  # type: ignore
@@ -71,7 +76,7 @@ class RobertaClassifier(pl.LightningModule):
         return {"val_loss": loss}
 
     def configure_optimizers(self) -> Dict:
-        "Prepare optimizer and schedule (linear warmup and decay)"
+        # TODO double check right optimizer for roberta
 
         if self.params.optimizer == "AdamW":
             optimizer = AdamW(
