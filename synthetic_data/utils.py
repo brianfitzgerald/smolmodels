@@ -100,7 +100,7 @@ def print_result_dicts(
         print("No results found, skipping print.")
         return
     columns = list(results[0].keys())
-    new_dataset_row_elements = [
+    printed_elements = [
         [clean_message(row[column]) for column in columns] for row in results
     ]
 
@@ -111,7 +111,7 @@ def print_result_dicts(
 
     print(
         tabulate(
-            new_dataset_row_elements,
+            printed_elements,
             headers=columns,
             tablefmt="simple_grid",
             maxcolwidths=col_widths,

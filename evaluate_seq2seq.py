@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 import torch
 from PIL import Image
+from synthetic_data.utils import print_result_dicts, ensure_directory
 
 
-from model.utils import ensure_directory
 import pandas as pd
 from fire import Fire
 
@@ -91,12 +91,16 @@ def main(
         print(f"Reading samples from: {dataset_file}")
         if dataset_file.endswith(".csv"):
             validation_df: pd.DataFrame = pd.read_csv(dataset_file)
+            validation_df.rename(columns={"Prompt": "prompt"}, inplace=True)
         elif dataset_file.endswith(".parquet"):
             validation_df: pd.DataFrame = pd.read_parquet(dataset_file)
             validation_df = validation_df[
                 (validation_df["nsfw_regex"] == True)
                 | (validation_df["nsfw_image"] == True)
+                | len(validation_df["prompt"]) < 64
             ]
+
+        # TODO refactor this so the parquet is loaded as a dataset, and uses the same dataloader
         for i in range(0, len(validation_df), batch_size):
 
             chunk = validation_df[i : i + batch_size]
@@ -109,17 +113,23 @@ def main(
                 prompts_with_prefix, return_tensors="pt", padding=True
             ).to("cuda")
 
-            output_sequences = model.generate(
+            generated_tokens = model.generate(
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 max_length=77,
                 num_return_sequences=1,
             )
 
-            out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
-            for j, (prompt, generated) in enumerate(zip(chunk["prompt"], out)):
-                print(f"Prompt: {prompt}\nGenerated: {generated}\n\n")
+            generated_strings = tokenizer.batch_decode(
+                generated_tokens, skip_special_tokens=True
+            )
 
+            new_prompt_rows = []
+
+            for j, (prompt, generated) in enumerate(
+                zip(chunk["prompt"], generated_strings)
+            ):
+                new_prompt_rows.append({"Prompt": prompt, "Sanitized": generated})
                 if generate_samples:
                     for k, txt in enumerate([prompt, generated]):
                         print(f"Generating sample for: {txt}")
@@ -127,6 +137,8 @@ def main(
                         prompt_fmt = format_filename(txt)
                         label = "prompt" if k == 0 else "upsampled"
                         image.save(f"{out_dir}/{i}_{j}_{k}_{label}_{prompt_fmt}_.png")
+
+            print_result_dicts(new_prompt_rows)
     else:
         print("Loading samples from dataloader")
         data_module = model_config.data_module(
@@ -138,19 +150,23 @@ def main(
             input_ids = inputs["input_ids"].to("cuda")
             attention_mask = inputs["attention_mask"].to("cuda")
             labels = inputs["labels"]
-            output_sequences = model.generate(
+            print(f"Generating {len(input_ids)} completions...")
+            generated_tokens = model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 max_length=77,
                 num_return_sequences=1,
             )
-            out = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)
+            generated_strings = tokenizer.batch_decode(
+                generated_tokens, skip_special_tokens=True
+            )
             prompt_strings = tokenizer.batch_decode(labels, skip_special_tokens=True)
-            print(f"Prompts: {prompt_strings}\nSanitized: {out}\n\n")
-            for prompt, generated in zip(prompt_strings, out):
-                rows.append({"Prompt": prompt, "Upsampled": generated})
+            for prompt, generated in zip(prompt_strings, generated_strings):
+                rows.append({"Prompt": prompt, "Sanitized": generated})
 
-            if i % 100 == 0:
+            print_result_dicts(rows[-batch_size:])
+
+            if i % 100 == 0 and i > 0:
                 print(f"Processed {i} samples, saving...")
                 out_df = pd.DataFrame(rows)
                 out_df.to_csv(f"{out_dir}/saferprompt_out.csv", index=False)
