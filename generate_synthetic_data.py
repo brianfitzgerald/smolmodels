@@ -51,7 +51,7 @@ MODEL_WRAPPER_CLASSES = {
 
 def main(
     # n batches
-    save_every: int = 2,
+    save_every: int = 10,
     batch_size: int = 8,
     restart: bool = False,
     pairs: bool = False,
@@ -76,7 +76,7 @@ def main(
     So that each output row contains a prompt, and two completions, one positive and one negative.
 
     Arguments:
-    - upload_every: Upload the dataset every n batches.
+    - save_every: Upload or save the dataset every n batches.
     - batch_size: The batch size to use for generation.
     - restart: Restart the dataset from scratch.
     - pairs: Generate DPO pairs.

@@ -181,3 +181,6 @@ submit.sh
 submit_datagen.sh
 
 *DS_Store*
+
+160k_batch1.tsv
+clipdrop_prompts_benchmark.tsv
