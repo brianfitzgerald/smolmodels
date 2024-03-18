@@ -24,7 +24,7 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.fabric.plugins.environments.lightning import LightningEnvironment
 
 
-from dataset.parti import PromptSafetyDataModule, PromptUpsampleDataModule
+from dataset.prompt_upsample import PromptSafetyDataModule, PromptUpsampleDataModule
 from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,

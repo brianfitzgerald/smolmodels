@@ -27,7 +27,6 @@ class T5Model(pl.LightningModule):
         self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(
             params.base_model_checkpoint
         )
-        self.train_steps = 0
         self.save_hyperparameters()
         self.perplexity = Perplexity(ignore_index=self.tokenizer.pad_token_id)
 

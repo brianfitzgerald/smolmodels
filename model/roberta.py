@@ -1,16 +1,14 @@
 from transformers.optimization import (
-    Adafactor,
-    get_inverse_sqrt_schedule,
-    AdafactorSchedule,
+    get_linear_schedule_with_warmup,
 )
 from model.utils import HyperParams
 from torch.optim import AdamW
 from torch import Tensor
-from transformers import AutoTokenizer
 from transformers.models.roberta.modeling_roberta import (
     RobertaForSequenceClassification,
 )
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
+from typing import Dict
 
 import lightning.pytorch as pl
 
@@ -26,7 +24,7 @@ class RobertaClassifier(pl.LightningModule):
                 params.base_model_checkpoint
             )
         )  # type: ignore
-        self.tokenizer: RobertaTokenizer = AutoTokenizer.from_pretrained(
+        self.tokenizer: RobertaTokenizer = RobertaTokenizer.from_pretrained(
             params.base_model_checkpoint
         )  # type: ignore
         self.train_steps = 0
@@ -72,7 +70,7 @@ class RobertaClassifier(pl.LightningModule):
         )
         return {"val_loss": loss}
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> Dict:
         "Prepare optimizer and schedule (linear warmup and decay)"
 
         if self.params.optimizer == "AdamW":
@@ -81,9 +79,15 @@ class RobertaClassifier(pl.LightningModule):
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
             )
+            scheduler = get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps=0, num_training_steps=10
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                },
+            }
+
         else:
             raise ValueError(f"Unsupported optimizer: {self.params.optimizer}")
-
-        return {
-            "optimizer": optimizer,
-        }
