@@ -13,6 +13,7 @@ import random
 import string
 
 from model.t5 import T5FineTuner
+from model.roberta import RobertaClassifier
 from model.llama import LlamaFineTuner
 
 from lightning.pytorch.loggers import WandbLogger
@@ -149,6 +150,7 @@ class ModelConfig:
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
+PROMPT_CLASSIFIER_PROJECT = "roberta-prompt-safety-classifier"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -181,6 +183,18 @@ CONFIGS = {
         ),
         task_prefix=SAFETY_TASK_PREFIX,
         ckpt_name="saferprompt-v1",
+    ),
+    "safety_classifier": ModelConfig(
+        T5FineTuner,
+        PromptSafetyDataModule,
+        PROMPT_CLASSIFIER_PROJECT,
+        HyperParams(
+            base_model_checkpoint="distilbert/distilroberta-base",
+            gradient_accumulation_steps=4,
+            train_batch_size=2,
+            optimizer="AdamW",
+        ),
+        ckpt_name="safer-prompt-classifier",
     ),
 }
 

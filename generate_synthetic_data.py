@@ -53,7 +53,7 @@ MODEL_WRAPPER_CLASSES = {
 def main(
     # n batches
     save_every: int = 10,
-    batch_size: int = 16,
+    batch_size: int = 19,
     restart: bool = False,
     pairs: bool = False,
     resume_input_position: bool = True,
