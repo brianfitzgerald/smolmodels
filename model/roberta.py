@@ -11,7 +11,7 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
-from synthetic_data.utils import SAFERPROMPT_LABELS
+from synthetic_data.utils import SAFERPROMPT_LABELS, ANNOTATED_LABELS
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 
 import lightning.pytorch as pl
@@ -23,12 +23,17 @@ class RobertaClassifier(pl.LightningModule):
         super(RobertaClassifier, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
-        self.labels = SAFERPROMPT_LABELS
+        self.labels_to_id = (
+            SAFERPROMPT_LABELS
+            if params.labels_set == "clipdrop_synthetic"
+            else ANNOTATED_LABELS
+        )
+        self.id_to_labels = {v: k for k, v in self.labels_to_id.items()}
 
         self.model: RobertaForSequenceClassification = (
             RobertaForSequenceClassification.from_pretrained(
                 params.base_model_checkpoint,
-                num_labels=len(self.labels),
+                num_labels=len(self.labels_to_id),
                 output_attentions=False,
                 output_hidden_states=False,
             )
@@ -40,7 +45,7 @@ class RobertaClassifier(pl.LightningModule):
         self.save_hyperparameters()
 
         # TODO micro or macro?
-        n_classes: int = len(self.labels)
+        n_classes: int = len(self.labels_to_id)
         self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="macro")
         self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
         self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
@@ -74,7 +79,7 @@ class RobertaClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss, metrics = self(batch)
         self.log(
-            "train_loss", loss, on_step=True, on_epoch=True, logger=True
+            "train_loss", loss, on_step=True, on_epoch=True, logger=True, prog_bar=True
         )
         for k, v in metrics.items():
             self.log(f"metrics/train_{k}", v, on_step=True, on_epoch=True, logger=True)
@@ -87,11 +92,10 @@ class RobertaClassifier(pl.LightningModule):
             loss,
             on_step=True,
             on_epoch=True,
-            prog_bar=True,
             logger=True,
         )
         for k, v in metrics.items():
-            self.log(f"metrics/val_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log(f"metrics/val_{k}", v, on_step=True, on_epoch=True, logger=True)
         return {"val_loss": loss}
 
     def configure_optimizers(self) -> Dict:

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal
+from typing import List, Literal, Optional
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
@@ -15,6 +15,7 @@ PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 Objective = Literal["classification", "generation"]
+LabelsSet = Literal["clipdrop_synthetic", "i2p", "clipdrop_binary"]
 
 @dataclass
 class HyperParams:
@@ -32,6 +33,8 @@ class HyperParams:
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW8bit"
     objective: Objective = "generation"
+    # Only relevant for classification
+    labels_set: Optional[LabelsSet] = None
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):

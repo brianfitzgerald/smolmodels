@@ -13,6 +13,7 @@ import random
 import string
 import torch.multiprocessing
 from weakref import proxy
+from typing import Dict
 
 
 from model.t5 import T5Model
@@ -80,6 +81,8 @@ class LogPredictionSamplesCallback(pl.Callback):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
         attention_mask = batch["attention_mask"]
+        labels_dict: Dict[str, int] = pl_module.id_to_labels
+
         n = len(input_ids)
         if pl_module.params.objective == "classification":
             out = pl_module.model(input_ids=input_ids, attention_mask=attention_mask)
@@ -87,9 +90,9 @@ class LogPredictionSamplesCallback(pl.Callback):
             labels_list = labels.cpu().numpy().tolist()
 
             predicted_class_names = [
-                SAFERPROMPT_IDS_TO_LABELS[i] for i in predicted_classes
+                labels_dict[i] for i in predicted_classes
             ]
-            label_class_names = [SAFERPROMPT_IDS_TO_LABELS[i] for i in labels_list]
+            label_class_names = [labels_dict[i] for i in labels_list]
 
             column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
 
@@ -235,7 +238,27 @@ CONFIGS = {
         task_prefix=SAFETY_TASK_PREFIX,
         ckpt_name="saferprompt-v1",
     ),
-    "safety_classifier": ModelConfig(
+    "safety_classifier_synthetic": ModelConfig(
+        RobertaClassifier,
+        ClipdropSyntheticClassesDataModule,
+        PROMPT_CLASSIFIER_PROJECT,
+        HyperParams(
+            base_model_checkpoint="distilbert/distilroberta-base",
+            train_batch_size=16,
+            eval_batch_size=8,
+            gradient_accumulation_steps=1,
+            optimizer="AdamW",
+            num_train_epochs=25,
+            warmup_steps=1000,
+            learning_rate=1e-4,
+            adam_epsilon=1e-8,
+            max_seq_length=512,
+            labels_set="clipdrop_binary",
+            objective="classification",
+        ),
+        ckpt_name="safer-prompt-classifier",
+    ),
+    "safety_classifier_binary": ModelConfig(
         RobertaClassifier,
         ClipdropBinaryDataModule,
         PROMPT_CLASSIFIER_PROJECT,
@@ -250,9 +273,10 @@ CONFIGS = {
             learning_rate=1e-4,
             adam_epsilon=1e-8,
             max_seq_length=512,
+            labels_set="clipdrop_binary",
             objective="classification",
         ),
-        ckpt_name="safer-prompt-classifier",
+        ckpt_name="safer-prompt-binary-classifier",
     ),
 }
 
@@ -260,7 +284,7 @@ CONFIGS = {
 def main(
     wandb: bool = False,
     distributed: bool = False,
-    config: str = "safety_classifier",
+    config: str = "safety_classifier_binary",
     **kwargs,
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
@@ -320,6 +344,7 @@ def main(
         strategy=strategy,
         callbacks=callbacks,
         logger=loggers,
+        val_check_interval=0.1,
         gradient_clip_algorithm="norm",
         log_every_n_steps=1,
         num_nodes=1,

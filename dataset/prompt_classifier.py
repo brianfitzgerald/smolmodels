@@ -5,7 +5,7 @@ from typing import List
 import torch
 
 from dataset.utils import FineTunerDataset
-from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS
+from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS, ANNOTATED_LABELS
 
 SAFERPROMPT_IDS_TO_LABELS = {
     SAFERPROMPT_LABELS[label]: label for label in SAFERPROMPT_LABELS
@@ -23,7 +23,6 @@ I2P_LABELS = {
 }
 I2P_IDS_TO_LABELS = {I2P_LABELS[label]: label for label in I2P_LABELS}
 
-SAFERPROMPT_ANNOTATED_LABELS = {"safe": 0, "unsafe": 1, "borderline": 2}
 
 
 class ClipdropSyntheticClassesDataModule(FineTunerDataset):
@@ -42,7 +41,10 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
     def setup(self, stage: str):
         print(f"Loading dataset for stage {stage}")
         dataset_csv = pd.read_csv(self.data_file_path)
-        self.dataset = Dataset.from_pandas(dataset_csv).train_test_split(test_size=0.01)
+        self.dataset = Dataset.from_pandas(dataset_csv)
+        self.dataset = self.filter_dataset(self.dataset).train_test_split(
+            test_size=0.01, seed=42
+        )
         self.train_dataset = self.dataset["train"]
         self.val_dataset = self.dataset["test"]
 
@@ -72,6 +74,9 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
 
         self.train_dataset.set_format(type="torch", columns=columns)
         self.val_dataset.set_format(type="torch", columns=columns)
+
+    def filter_dataset(self, dataset: Dataset) -> Dataset:
+        return dataset
 
     def prepare_sample(self, examples: dict):
 
@@ -110,12 +115,16 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         self.cache_dir = "dataset_caches/clipdrop_binary"
         self.data_file_path = "data_files/clipdrop_prompts_benchmark_annotated.csv"
 
+    def filter_dataset(self, dataset: Dataset) -> Dataset:
+        dataset = dataset.filter(lambda x: x["prompt"] is not None and x["taskus_label"] is not None)
+        return dataset
+
     def prepare_sample(self, examples: dict):
 
         inputs: List[str] = examples[self.prompt_column]
 
         labels: List[int] = [
-            SAFERPROMPT_ANNOTATED_LABELS[label] for label in examples[self.label_column]
+            ANNOTATED_LABELS[label] for label in examples[self.label_column]
         ]
 
         labels_tensor = torch.tensor(labels, dtype=torch.long)
