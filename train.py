@@ -19,7 +19,7 @@ from model.t5 import T5Model
 from model.roberta import RobertaClassifier
 from model.llama import LlamaFineTuner
 
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar, LearningRateMonitor
@@ -77,7 +77,7 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-        if pl_module.params.objective == Objective.CLASSIFICATION:
+        if pl_module.params.objective == "classification":
             pass
         else:
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -220,7 +220,7 @@ CONFIGS = {
             learning_rate=1e-4,
             adam_epsilon=1e-8,
             max_seq_length=512,
-            objective=Objective.CLASSIFICATION,
+            objective="classification",
         ),
         ckpt_name="safer-prompt-classifier",
     ),
@@ -253,6 +253,8 @@ def main(
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
+    else:
+        loggers.append(TensorBoardLogger("logs"))
 
     ensure_directory("logs", clear=True)
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)

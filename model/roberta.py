@@ -74,10 +74,10 @@ class RobertaClassifier(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         loss, metrics = self(batch)
         self.log(
-            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+            "train_loss", loss, on_step=True, on_epoch=True, logger=True
         )
         for k, v in metrics.items():
-            self.log(f"train_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log(f"metrics/train_{k}", v, on_step=True, on_epoch=True, logger=True)
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
@@ -91,7 +91,7 @@ class RobertaClassifier(pl.LightningModule):
             logger=True,
         )
         for k, v in metrics.items():
-            self.log(f"val_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log(f"metrics/val_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return {"val_loss": loss}
 
     def configure_optimizers(self) -> Dict:

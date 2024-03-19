@@ -14,12 +14,7 @@ IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
-
-
-class Objective(Enum):
-    CLASSIFICATION = "classification"
-    GENERATION = "generation"
-
+Objective = Literal["classification", "generation"]
 
 @dataclass
 class HyperParams:
@@ -36,7 +31,7 @@ class HyperParams:
     seed: int = 42
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW8bit"
-    objective: Objective = Objective.GENERATION
+    objective: Objective = "generation"
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):
