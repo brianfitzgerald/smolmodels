@@ -6,7 +6,7 @@ import torch
 
 
 from dataset.utils import FineTunerDataset
-from synthetic_data.utils import SAFE_PROMPT_LABEL_IDS, ensure_directory
+from synthetic_data.utils import SAFE_PROMPT_LABEL_NAMES_TO_ID, ensure_directory
 
 
 class PromptClassifierDataModule(FineTunerDataset):
@@ -59,7 +59,7 @@ class PromptClassifierDataModule(FineTunerDataset):
 
         inputs: List[str] = examples[self.prompt_column]
         labels: List[int] = [
-            SAFE_PROMPT_LABEL_IDS[label] for label in examples[self.label_column]
+            SAFE_PROMPT_LABEL_NAMES_TO_ID[label] for label in examples[self.label_column]
         ]
         # convert to binary classification
         # labels = [1 if label != 0 else 0 for label in labels]

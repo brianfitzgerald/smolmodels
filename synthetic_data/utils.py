@@ -188,7 +188,8 @@ def ensure_directory(directory: str, clear: bool = True):
 LABEL_REGEX = re.compile(r"Label:\s*(.*)")
 
 SAFE_PROMPT_LABELS = {"famous_figures", "nudity", "sexual_content", "violence", "discriminatory_content", "safe"}
-SAFE_PROMPT_LABEL_IDS = {label: i for i, label in enumerate(SAFE_PROMPT_LABELS)}
+SAFE_PROMPT_LABEL_NAMES_TO_ID = {label: i for i, label in enumerate(SAFE_PROMPT_LABELS)}
+SAFE_PROMPT_IDS_TO_LABEL_NAMES = {i: label for i, label in enumerate(SAFE_PROMPT_LABELS)}
 
 def extract_label(text: str) -> Optional[str]:
     match = LABEL_REGEX.search(text)

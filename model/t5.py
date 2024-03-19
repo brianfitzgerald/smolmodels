@@ -53,6 +53,7 @@ class T5Model(pl.LightningModule):
             labels=batch["labels"],
         )
         perplexity = self.perplexity(outputs.logits, batch["labels"])
+        # TODO call compute_metrics here
 
         return outputs.loss, perplexity
 

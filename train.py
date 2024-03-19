@@ -5,7 +5,6 @@ import pandas as pd
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from enum import Enum
 from pathlib import Path
-import shutil
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
 from dataset.prompt_classifier import PromptClassifierDataModule
@@ -19,7 +18,7 @@ from model.t5 import T5Model
 from model.roberta import RobertaClassifier
 from model.llama import LlamaFineTuner
 
-from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar, LearningRateMonitor
@@ -38,6 +37,7 @@ from model.utils import (
     SAFETY_TASK_PREFIX,
 )
 from dataset.utils import FineTunerDataset
+from synthetic_data.utils import SAFE_PROMPT_IDS_TO_LABEL_NAMES
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -77,8 +77,31 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         input_ids = batch["input_ids"]
         labels = batch["labels"]
+        attention_mask = batch["attention_mask"]
+        n = len(input_ids)
         if pl_module.params.objective == "classification":
-            pass
+            out = pl_module.model(input_ids=input_ids, attention_mask=attention_mask)
+            predicted_classes = out.logits.argmax(dim=-1).cpu().numpy().tolist()
+            labels_list = labels.cpu().numpy().tolist()
+
+            predicted_class_names = [
+                SAFE_PROMPT_IDS_TO_LABEL_NAMES[i] for i in predicted_classes
+            ]
+            label_class_names = [SAFE_PROMPT_IDS_TO_LABEL_NAMES[i] for i in labels_list]
+
+            column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
+
+            feature_columns = []
+            feature_columns.append([trainer.current_epoch] * n)
+            feature_columns.append(list(range(n)))
+            feature_columns.append(predicted_class_names)
+            feature_columns.append(label_class_names)
+
+            decoded = self.tokenizer.batch_decode(
+                input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+            )
+            feature_columns.append(decoded)
+
         else:
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
             out = pl_module.model.generate(
@@ -86,46 +109,42 @@ class LogPredictionSamplesCallback(pl.Callback):
                 max_length=self.max_new_tokens,
             )
 
-            n = len(input_ids)
-            columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
+            column_names = ["Epoch", "Sample Index", "Input", "Output", "Target"]
 
-            table_columns = []
-            table_columns.append([trainer.current_epoch] * n)
-            table_columns.append(list(range(n)))
+            feature_columns = []
+            feature_columns.append([trainer.current_epoch] * n)
+            feature_columns.append(list(range(n)))
 
             for feature in [input_ids, out, labels]:
                 decoded = self.tokenizer.batch_decode(
                     feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
                 )
-                table_columns.append(decoded)
+                feature_columns.append(decoded)
 
-            metrics = compute_metrics(table_columns[3], table_columns[4])
+        run_name = "latest"
+        if self.wandb_logger:
+            run_name = self.wandb_logger.experiment.name
+            table_rows = list(zip(*feature_columns))
+            self.wandb_logger.log_table("Validation Samples", column_names, table_rows)
 
-            run_name = "latest"
-            if self.wandb_logger:
-                run_name = self.wandb_logger.experiment.name
-                table_rows = list(zip(*table_columns))
-                self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-                self.wandb_logger.log_metrics(metrics)
+        rows = [list(row) for row in zip(*feature_columns)]
+        rows_df = pd.DataFrame(rows, columns=column_names)
+        rows_df.to_csv(
+            self.log_dir / f"{run_name}_samples.csv",
+            mode="a",
+            header=False,
+            index=False,
+        )
 
-            rows = [list(row) for row in zip(*table_columns)]
-            rows_df = pd.DataFrame(rows, columns=columns)
-            rows_df.to_csv(
-                self.log_dir / f"{run_name}_samples.csv",
-                mode="a",
-                header=False,
-                index=False,
-            )
-
-            new_rows = tabulate(
-                rows,
-                headers=columns,
-                maxcolwidths=[10, 10, 50, 50, 50],
-            )
-            print(new_rows)
-            with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
-                f.write(new_rows)
-                f.write("\n")
+        new_rows = tabulate(
+            rows,
+            headers=column_names,
+            maxcolwidths=[10, 10, 50, 50, 50],
+        )
+        print(new_rows)
+        with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
+            f.write(new_rows)
+            f.write("\n")
 
 
 class ModelChoice(Enum):
@@ -141,10 +160,11 @@ class HfModelCheckpoint(ModelCheckpoint):
 
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         # TODO fix
+        current_step = trainer.global_step
+        super()._save_checkpoint(trainer, f"{filepath}_step_{current_step}")
+        print(f"Saving checkpoint at {filepath}")
         return
         filepath_folder = f"{filepath}/"
-        super()._save_checkpoint(trainer, filepath_folder)
-        print(f"Saving checkpoint at {filepath_folder}")
         if trainer.is_global_zero:
             trainer.lightning_module.model.save_pretrained(filepath_folder)
             trainer.lightning_module.tokenizer.save_pretrained(filepath_folder)
@@ -253,8 +273,6 @@ def main(
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
-    else:
-        loggers.append(TensorBoardLogger("logs"))
 
     ensure_directory("logs", clear=True)
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
