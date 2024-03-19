@@ -205,6 +205,7 @@ class ModelConfig:
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
 PROMPT_CLASSIFIER_PROJECT = "roberta-prompt-safety-classifier"
+BINARY_CLASSIFIER_PROJECT = "roberta-binary-classifier"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -261,15 +262,15 @@ CONFIGS = {
     "safety_classifier_binary": ModelConfig(
         RobertaClassifier,
         ClipdropBinaryDataModule,
-        PROMPT_CLASSIFIER_PROJECT,
+        BINARY_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
             train_batch_size=16,
             eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=25,
-            warmup_steps=1000,
+            num_train_epochs=10,
+            warmup_steps=100,
             learning_rate=1e-4,
             adam_epsilon=1e-8,
             max_seq_length=512,
@@ -344,7 +345,6 @@ def main(
         strategy=strategy,
         callbacks=callbacks,
         logger=loggers,
-        val_check_interval=0.1,
         gradient_clip_algorithm="norm",
         log_every_n_steps=1,
         num_nodes=1,
