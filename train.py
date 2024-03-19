@@ -12,6 +12,7 @@ from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
 import torch.multiprocessing
+from weakref import proxy
 
 
 from model.t5 import T5Model
@@ -30,8 +31,6 @@ from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
     HyperParams,
-    Objective,
-    compute_metrics,
     ensure_directory,
     PROMPT_EXPANSION_TASK_PREFIX,
     SAFETY_TASK_PREFIX,
@@ -94,13 +93,13 @@ class LogPredictionSamplesCallback(pl.Callback):
             feature_columns = []
             feature_columns.append([trainer.current_epoch] * n)
             feature_columns.append(list(range(n)))
-            feature_columns.append(predicted_class_names)
-            feature_columns.append(label_class_names)
 
             decoded = self.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
             feature_columns.append(decoded)
+            feature_columns.append(label_class_names)
+            feature_columns.append(predicted_class_names)
 
         else:
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -154,29 +153,37 @@ class ModelChoice(Enum):
 
 # https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
 class HfModelCheckpoint(ModelCheckpoint):
+    """
+    Overrides default checkpoint saving behavior to instead save the HF model and tokenizer.
+    """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.FILE_EXTENSION = ""
 
+    def save_dir(self, filepath: str) -> str:
+        return f"{filepath}.hf"
+
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
-        # TODO fix
-        current_step = trainer.global_step
-        super()._save_checkpoint(trainer, f"{filepath}_step_{current_step}")
-        print(f"Saving checkpoint at {filepath}")
-        return
-        filepath_folder = f"{filepath}/"
+        self._last_global_step_saved = trainer.global_step
+        self._last_checkpoint_saved = filepath
+
+        # notify loggers
         if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pretrained(filepath_folder)
-            trainer.lightning_module.tokenizer.save_pretrained(filepath_folder)
+            for logger in trainer.loggers:
+                logger.after_save_checkpoint(proxy(self))
+        hf_save_dir = self.save_dir(filepath)
+        if trainer.is_global_zero:
+            trainer.lightning_module.model.save_pretrained(hf_save_dir)
+            trainer.lightning_module.tokenizer.save_pretrained(hf_save_dir)
 
     # https://github.com/Lightning-AI/lightning/pull/16067
     def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
-        super()._remove_checkpoint(trainer, filepath)
-        print(f"Removing checkpoint at {filepath}")
+        hf_save_dir = self.save_dir(filepath)
         if trainer.is_global_zero:
-            fs, _ = url_to_fs(filepath)
-            if fs.exists(filepath):
-                fs.rm(filepath, recursive=True)
+            fs, _ = url_to_fs(hf_save_dir)
+            if fs.exists(hf_save_dir):
+                fs.rm(hf_save_dir, recursive=True)
 
 
 @dataclass
@@ -280,7 +287,7 @@ def main(
     checkpoint_callback = HfModelCheckpoint(
         dirpath="checkpoints",
         filename=run_name,
-        monitor="val_loss",
+        monitor="val_loss_epoch",
         mode="min",
     )
 
@@ -302,7 +309,6 @@ def main(
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.25,
         strategy=strategy,
         callbacks=callbacks,
         logger=loggers,
