@@ -61,6 +61,8 @@ class PromptClassifierDataModule(FineTunerDataset):
         labels: List[int] = [
             SAFE_PROMPT_LABEL_IDS[label] for label in examples[self.label_column]
         ]
+        # convert to binary classification
+        # labels = [1 if label != 0 else 0 for label in labels]
         labels_tensor = torch.tensor(labels, dtype=torch.long)
 
         inputs_tokenized = self.tokenizer(

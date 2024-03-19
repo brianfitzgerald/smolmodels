@@ -31,6 +31,7 @@ from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
     HyperParams,
+    Objective,
     compute_metrics,
     ensure_directory,
     PROMPT_EXPANSION_TASK_PREFIX,
@@ -60,61 +61,71 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
 
     def log_prediction_samples(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs,
+        batch,
+        batch_idx,
+        dataloader_idx,
     ):
+        """
+        Log sample outputs. Metrics are logged in the training loop.
+        """
         if batch_idx > 0:
             return
 
-        # TODO fix
-        return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
-        labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
-        out = pl_module.model.generate(
-            input_ids,
-            max_length=self.max_new_tokens,
-        )
-
-        n = len(input_ids)
-        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
-
-        table_columns = []
-        table_columns.append([trainer.current_epoch] * n)
-        table_columns.append(list(range(n)))
-
-        for feature in [input_ids, out, labels]:
-            decoded = self.tokenizer.batch_decode(
-                feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
+        if pl_module.params.objective == Objective.CLASSIFICATION:
+            pass
+        else:
+            labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
+            out = pl_module.model.generate(
+                input_ids,
+                max_length=self.max_new_tokens,
             )
-            table_columns.append(decoded)
 
-        metrics = compute_metrics(table_columns[3], table_columns[4])
+            n = len(input_ids)
+            columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
 
-        run_name = "latest"
-        if self.wandb_logger:
-            run_name = self.wandb_logger.experiment.name
-            table_rows = list(zip(*table_columns))
-            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-            self.wandb_logger.log_metrics(metrics)
+            table_columns = []
+            table_columns.append([trainer.current_epoch] * n)
+            table_columns.append(list(range(n)))
 
-        rows = [list(row) for row in zip(*table_columns)]
-        rows_df = pd.DataFrame(rows, columns=columns)
-        rows_df.to_csv(
-            self.log_dir / f"{run_name}_samples.csv",
-            mode="a",
-            header=False,
-            index=False,
-        )
+            for feature in [input_ids, out, labels]:
+                decoded = self.tokenizer.batch_decode(
+                    feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
+                )
+                table_columns.append(decoded)
 
-        new_rows = tabulate(
-            rows,
-            headers=columns,
-            maxcolwidths=[10, 10, 50, 50, 50],
-        )
-        print(new_rows)
-        with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
-            f.write(new_rows)
-            f.write("\n")
+            metrics = compute_metrics(table_columns[3], table_columns[4])
+
+            run_name = "latest"
+            if self.wandb_logger:
+                run_name = self.wandb_logger.experiment.name
+                table_rows = list(zip(*table_columns))
+                self.wandb_logger.log_table("Validation Samples", columns, table_rows)
+                self.wandb_logger.log_metrics(metrics)
+
+            rows = [list(row) for row in zip(*table_columns)]
+            rows_df = pd.DataFrame(rows, columns=columns)
+            rows_df.to_csv(
+                self.log_dir / f"{run_name}_samples.csv",
+                mode="a",
+                header=False,
+                index=False,
+            )
+
+            new_rows = tabulate(
+                rows,
+                headers=columns,
+                maxcolwidths=[10, 10, 50, 50, 50],
+            )
+            print(new_rows)
+            with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
+                f.write(new_rows)
+                f.write("\n")
 
 
 class ModelChoice(Enum):
@@ -201,13 +212,15 @@ CONFIGS = {
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
             train_batch_size=16,
+            eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=10,
-            warmup_steps=10_000,
+            num_train_epochs=25,
+            warmup_steps=1000,
             learning_rate=1e-4,
             adam_epsilon=1e-8,
             max_seq_length=512,
+            objective=Objective.CLASSIFICATION,
         ),
         ckpt_name="safer-prompt-classifier",
     ),
@@ -256,6 +269,13 @@ def main(
     precision = "32" if model_config.model == T5Model else "16-mixed"
 
     strategy = "ddp" if distributed else "auto"
+    callbacks = [
+        sample_callback,
+        checkpoint_callback,
+        progress_bar_callback,
+    ]
+    if wandb:
+        callbacks.append(lr_monitor)
 
     trainer = pl.Trainer(
         accumulate_grad_batches=hparams.gradient_accumulation_steps,
@@ -264,7 +284,7 @@ def main(
         gradient_clip_val=hparams.max_grad_norm,
         val_check_interval=0.25,
         strategy=strategy,
-        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback, lr_monitor],
+        callbacks=callbacks,
         logger=loggers,
         gradient_clip_algorithm="norm",
         log_every_n_steps=1,

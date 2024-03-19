@@ -1,4 +1,5 @@
 from torch.optim.optimizer import Optimizer
+from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.optimization import (
     get_linear_schedule_with_warmup,
 )
@@ -11,6 +12,7 @@ from transformers.models.roberta.modeling_roberta import (
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
 from synthetic_data.utils import SAFE_PROMPT_LABELS
+from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 
 import lightning.pytorch as pl
 from lightning.pytorch.utilities import grad_norm
@@ -37,36 +39,49 @@ class RobertaClassifier(pl.LightningModule):
         self.train_steps = 0
         self.save_hyperparameters()
 
+        # TODO micro or macro?
+        n_classes: int = len(self.labels)
+        self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="macro")
+        self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
+        self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
+        self.recall = Recall("multiclass", num_classes=n_classes, average="macro")
+
     def forward(
         self,
-        input_ids: Tensor,
-        attention_mask: Tensor,
-        labels: Tensor,
+        batch: Dict[str, Tensor],
     ):
-        return self.model(
+
+        input_ids: Tensor = batch["input_ids"]
+        attention_mask: Tensor = batch["attention_mask"]
+        labels: Tensor = batch["labels"]
+
+        out: SequenceClassifierOutput = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels,
         )
 
-    def _step(self, batch):
-        outputs = self(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            labels=batch["labels"],
-        )
+        logits = out.logits
+        metrics = {
+            "accuracy": self.accuracy(logits, labels),
+            "f1": self.f1(logits, labels),
+            "precision": self.precision(logits, labels),
+            "recall": self.recall(logits, labels),
+        }
 
-        return outputs.loss
+        return out.loss, metrics
 
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        loss, metrics = self(batch)
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
+        for k, v in metrics.items():
+            self.log(f"train_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        loss, metrics = self(batch)
         self.log(
             "val_loss",
             loss,
@@ -75,6 +90,8 @@ class RobertaClassifier(pl.LightningModule):
             prog_bar=True,
             logger=True,
         )
+        for k, v in metrics.items():
+            self.log(f"val_{k}", v, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return {"val_loss": loss}
 
     def configure_optimizers(self) -> Dict:
@@ -87,7 +104,9 @@ class RobertaClassifier(pl.LightningModule):
                 eps=self.params.adam_epsilon,
             )
             scheduler = get_linear_schedule_with_warmup(
-                optimizer, num_warmup_steps=self.params.warmup_steps, num_training_steps=self.trainer.max_steps
+                optimizer,
+                num_warmup_steps=self.params.warmup_steps,
+                num_training_steps=self.trainer.max_steps,
             )
             return {
                 "optimizer": optimizer,

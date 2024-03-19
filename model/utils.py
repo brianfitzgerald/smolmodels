@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import List, Literal
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
@@ -15,6 +16,11 @@ PAD_TOKEN_ID = 0
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 
 
+class Objective(Enum):
+    CLASSIFICATION = "classification"
+    GENERATION = "generation"
+
+
 @dataclass
 class HyperParams:
     base_model_checkpoint: str = "google/flan-t5-small"
@@ -30,7 +36,7 @@ class HyperParams:
     seed: int = 42
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW8bit"
-
+    objective: Objective = Objective.GENERATION
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):
