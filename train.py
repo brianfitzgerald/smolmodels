@@ -22,7 +22,7 @@ from model.llama import LlamaFineTuner
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import TQDMProgressBar
+from lightning.pytorch.callbacks import TQDMProgressBar, LearningRateMonitor
 from lightning.fabric.plugins.environments.lightning import LightningEnvironment
 
 
@@ -38,7 +38,8 @@ from model.utils import (
 )
 from dataset.utils import FineTunerDataset
 
-torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy("file_system")
+
 
 class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
@@ -63,7 +64,7 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         if batch_idx > 0:
             return
-        
+
         # TODO fix
         return
         input_ids = batch["input_ids"]
@@ -129,6 +130,7 @@ class HfModelCheckpoint(ModelCheckpoint):
 
     def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
         # TODO fix
+        return
         filepath_folder = f"{filepath}/"
         super()._save_checkpoint(trainer, filepath_folder)
         print(f"Saving checkpoint at {filepath_folder}")
@@ -198,10 +200,14 @@ CONFIGS = {
         PROMPT_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
-            gradient_accumulation_steps=4,
-            train_batch_size=2,
+            train_batch_size=8,
+            gradient_accumulation_steps=1,
             optimizer="AdamW",
-            max_seq_length=512
+            num_train_epochs=10,
+            warmup_steps=10_000,
+            learning_rate=5e-6,
+            adam_epsilon=1e-8,
+            max_seq_length=512,
         ),
         ckpt_name="safer-prompt-classifier",
     ),
@@ -246,6 +252,7 @@ def main(
     )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
+    lr_monitor = LearningRateMonitor(logging_interval="step")
     precision = "32" if model_config.model == T5Model else "16-mixed"
 
     strategy = "ddp" if distributed else "auto"
@@ -257,8 +264,9 @@ def main(
         gradient_clip_val=hparams.max_grad_norm,
         val_check_interval=0.25,
         strategy=strategy,
-        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
+        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback, lr_monitor],
         logger=loggers,
+        gradient_clip_algorithm="norm",
         log_every_n_steps=1,
         num_nodes=1,
         devices="auto",

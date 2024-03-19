@@ -1,3 +1,4 @@
+from torch.optim.optimizer import Optimizer
 from transformers.optimization import (
     get_linear_schedule_with_warmup,
 )
@@ -12,6 +13,7 @@ from typing import Dict
 from synthetic_data.utils import SAFE_PROMPT_LABELS
 
 import lightning.pytorch as pl
+from lightning.pytorch.utilities import grad_norm
 
 
 class RobertaClassifier(pl.LightningModule):
@@ -85,7 +87,7 @@ class RobertaClassifier(pl.LightningModule):
                 eps=self.params.adam_epsilon,
             )
             scheduler = get_linear_schedule_with_warmup(
-                optimizer, num_warmup_steps=0, num_training_steps=10
+                optimizer, num_warmup_steps=self.params.warmup_steps, num_training_steps=self.trainer.max_steps
             )
             return {
                 "optimizer": optimizer,
@@ -96,3 +98,7 @@ class RobertaClassifier(pl.LightningModule):
 
         else:
             raise ValueError(f"Unsupported optimizer: {self.params.optimizer}")
+
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
+        norms = grad_norm(self.model, norm_type=2)
+        self.log_dict(norms)
