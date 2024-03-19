@@ -11,7 +11,7 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
-from synthetic_data.utils import SAFE_PROMPT_LABELS
+from synthetic_data.utils import SAFERPROMPT_LABELS
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 
 import lightning.pytorch as pl
@@ -23,7 +23,7 @@ class RobertaClassifier(pl.LightningModule):
         super(RobertaClassifier, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
-        self.labels = SAFE_PROMPT_LABELS
+        self.labels = SAFERPROMPT_LABELS
 
         self.model: RobertaForSequenceClassification = (
             RobertaForSequenceClassification.from_pretrained(

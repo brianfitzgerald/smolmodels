@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
-from dataset.prompt_classifier import PromptClassifierDataModule
+from dataset.prompt_classifier import SAFERPROMPT_IDS_TO_LABELS, ClipdropSyntheticClassesDataModule, ClipdropBinaryDataModule
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
@@ -22,7 +22,11 @@ from model.llama import LlamaFineTuner
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import TQDMProgressBar, LearningRateMonitor
+from lightning.pytorch.callbacks import (
+    TQDMProgressBar,
+    LearningRateMonitor,
+    EarlyStopping,
+)
 from lightning.fabric.plugins.environments.lightning import LightningEnvironment
 
 
@@ -36,7 +40,6 @@ from model.utils import (
     SAFETY_TASK_PREFIX,
 )
 from dataset.utils import FineTunerDataset
-from synthetic_data.utils import SAFE_PROMPT_IDS_TO_LABEL_NAMES
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -84,9 +87,9 @@ class LogPredictionSamplesCallback(pl.Callback):
             labels_list = labels.cpu().numpy().tolist()
 
             predicted_class_names = [
-                SAFE_PROMPT_IDS_TO_LABEL_NAMES[i] for i in predicted_classes
+                SAFERPROMPT_IDS_TO_LABELS[i] for i in predicted_classes
             ]
-            label_class_names = [SAFE_PROMPT_IDS_TO_LABEL_NAMES[i] for i in labels_list]
+            label_class_names = [SAFERPROMPT_IDS_TO_LABELS[i] for i in labels_list]
 
             column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
 
@@ -234,7 +237,7 @@ CONFIGS = {
     ),
     "safety_classifier": ModelConfig(
         RobertaClassifier,
-        PromptClassifierDataModule,
+        ClipdropBinaryDataModule,
         PROMPT_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
@@ -292,7 +295,11 @@ def main(
     )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
-    lr_monitor = LearningRateMonitor(logging_interval="step")
+    lr_monitor_callback = LearningRateMonitor(logging_interval="step")
+    early_stopping_callback = EarlyStopping(
+        monitor="val_loss_epoch", patience=3, mode="min", check_finite=True
+    )
+
     precision = "32" if model_config.model == T5Model else "16-mixed"
 
     strategy = "ddp" if distributed else "auto"
@@ -300,9 +307,10 @@ def main(
         sample_callback,
         checkpoint_callback,
         progress_bar_callback,
+        early_stopping_callback,
     ]
     if wandb:
-        callbacks.append(lr_monitor)
+        callbacks.append(lr_monitor_callback)
 
     trainer = pl.Trainer(
         accumulate_grad_batches=hparams.gradient_accumulation_steps,
