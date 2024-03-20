@@ -6,7 +6,8 @@ import torch
 from torch import Tensor
 
 from dataset.utils import FineTunerDataset
-from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS, ANNOTATED_LABELS
+from synthetic_data.labels import SAFERPROMPT_LABELS, ANNOTATED_LABELS
+from synthetic_data.utils import ensure_directory
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 
@@ -101,7 +102,8 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
         dataset = dataset.filter(
-            lambda x: x["prompt"] is not None and x["taskus_label"] is not None, cache_file_name=f"{self.cache_dir}/dataset_filtered.parquet"
+            lambda x: x["prompt"] is not None and x["taskus_label"] is not None,
+            cache_file_name=f"{self.cache_dir}/dataset_filtered.parquet",
         )
         return dataset
 
@@ -139,7 +141,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         class_counts = torch.bincount(labels)
         class_weights = 1.0 / class_counts.float()
         sample_weights = class_weights[labels]
-        
+
         print(f"Class counts: {class_counts.tolist()}")
 
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
@@ -150,4 +152,65 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count) # type: ignore
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
+
+
+class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
+    def __init__(
+        self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
+    ):
+        super().__init__(batch_size, tokenizer, max_token_length)
+        self.cache_dir = "dataset_caches/clipdrop_multilabel"
+        self.data_file_path = "data_files/clipdrop_prompts_famous_figures.csv"
+        ensure_directory(self.cache_dir, clear=False)
+
+    def prepare_sample(self, examples: dict):
+
+        inputs: List[str] = examples[self.prompt_column]
+
+        breakpoint()
+        annotated_labels = [
+            1 if label == "safe" else 0 for label in examples["annotated_label"]
+        ]
+        class_labels = [
+            1 if label == "positive" else 0 for label in examples["class_label"]
+        ]
+        labels_batch = [
+            annotated_labels[i] + class_labels[i] for i in range(len(annotated_labels))
+        ]
+
+        labels_batch_tensor = torch.tensor(labels_batch, dtype=torch.long)
+
+        inputs_tokenized = self.tokenizer(
+            inputs,
+            add_special_tokens=True,
+            max_length=self.max_token_length,
+            truncation=True,
+            padding="max_length",
+            return_attention_mask=True,
+            return_tensors="pt",
+        )
+
+        return {
+            "input_ids": inputs_tokenized["input_ids"],
+            "attention_mask": inputs_tokenized["attention_mask"],
+            "labels": labels_batch_tensor,
+        }
+
+    def get_sampler(self, labels: Tensor):
+
+        class_counts = torch.bincount(labels)
+        class_weights = 1.0 / class_counts.float()
+        sample_weights = class_weights[labels]
+
+        print(f"Class counts: {class_counts.tolist()}")
+
+        sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
+        return sampler
+
+    def train_dataloader(self):
+        sampler = self.get_sampler(self.train_dataset["labels"])  # type: ignore
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore

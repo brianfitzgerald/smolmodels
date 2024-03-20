@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from dataset.prompt_classifier import (
     ClipdropSyntheticClassesDataModule,
     ClipdropBinaryDataModule,
+    ClipdropMultiLabelDataModule,
 )
 from dataset.function_calling import FunctionCallingDataModule
 import random
@@ -218,10 +219,9 @@ def gradient_norm(model: pl.LightningModule):
 class ModelConfig:
     model: type[pl.LightningModule]
     data_module: type[FineTunerDataset]
-    wandb_project_name: str
+    project_name: str
     hyperparams: HyperParams = HyperParams()
     task_prefix: str = PROMPT_EXPANSION_TASK_PREFIX
-    ckpt_name: str = "superprompt-v1"
 
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
@@ -248,7 +248,7 @@ CONFIGS = {
         PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
-    "prompt_safety": ModelConfig(
+    "saferprompt": ModelConfig(
         T5Model,
         PromptSafetyDataModule,
         PROMPT_SAFETY_PROJECT,
@@ -259,7 +259,6 @@ CONFIGS = {
             optimizer="AdamW8bit",
         ),
         task_prefix=SAFETY_TASK_PREFIX,
-        ckpt_name="saferprompt-v1",
     ),
     "safety_classifier_synthetic": ModelConfig(
         RobertaClassifier,
@@ -279,7 +278,6 @@ CONFIGS = {
             labels_set="clipdrop_binary",
             objective="classification",
         ),
-        ckpt_name="safer-prompt-classifier",
     ),
     "safety_classifier_binary": ModelConfig(
         RobertaClassifier,
@@ -299,12 +297,11 @@ CONFIGS = {
             labels_set="clipdrop_binary",
             objective="classification",
         ),
-        ckpt_name="safer-prompt-binary-classifier",
     ),
     "safety_classifier_multilabel": ModelConfig(
         RobertaClassifier,
-        ClipdropBinaryDataModule,
-        BINARY_CLASSIFIER_PROJECT,
+        ClipdropMultiLabelDataModule,
+        "roberta-safety-classifier-multilabel",
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
             train_batch_size=16,
@@ -319,7 +316,6 @@ CONFIGS = {
             labels_set="clipdrop_binary",
             objective="classification",
         ),
-        ckpt_name="safer-prompt-binary-classifier",
     ),
 }
 
@@ -327,7 +323,7 @@ CONFIGS = {
 def main(
     wandb: bool = False,
     distributed: bool = False,
-    config: str = "safety_classifier_binary",
+    config: str = "safety_classifier_multilabel",
     **kwargs,
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
@@ -346,7 +342,7 @@ def main(
     loggers: List[Logger] = []
 
     if wandb:
-        project_name = model_config.wandb_project_name
+        project_name = model_config.project_name
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
 

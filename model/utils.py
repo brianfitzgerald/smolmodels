@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 from dataclasses import dataclass
 
-from synthetic_data.utils import LabelsSet
+from synthetic_data.labels import LabelsSet
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (

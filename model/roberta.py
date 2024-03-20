@@ -10,7 +10,7 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
-from synthetic_data.utils import SAFERPROMPT_LABELS, ANNOTATED_LABELS
+from synthetic_data.labels import LABEL_SETS_DICT
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 
 import lightning.pytorch as pl
@@ -21,11 +21,9 @@ class RobertaClassifier(pl.LightningModule):
         super(RobertaClassifier, self).__init__()
         self.params = params
         self.hparams.update(vars(params))
-        self.labels_to_id = (
-            SAFERPROMPT_LABELS
-            if params.labels_set == "clipdrop_synthetic"
-            else ANNOTATED_LABELS
-        )
+        if not params.labels_set:
+            raise ValueError(f"Labels set {params.labels_set} not found")
+        self.labels_to_id = LABEL_SETS_DICT[params.labels_set]
         self.id_to_labels = {v: k for k, v in self.labels_to_id.items()}
 
         self.model: RobertaForSequenceClassification = (

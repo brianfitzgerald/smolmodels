@@ -84,7 +84,7 @@ def main(
         model.push_to_hub("superprompt-v1")
         return
 
-    out_dir = f"samples/{model_config.ckpt_name}"
+    out_dir = f"samples/{model_config.project_name}"
     ensure_directory(out_dir, clear=True)
 
     if dataset_file:

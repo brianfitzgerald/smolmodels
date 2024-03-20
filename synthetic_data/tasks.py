@@ -26,9 +26,6 @@ import pandas as pd
 
 
 from synthetic_data.utils import (
-    ANNOTATED_LABELS,
-    FAMOUS_FIGURES_LABELS,
-    SAFERPROMPT_LABELS,
     Conversation,
     DatasetTaskFormat,
     DatasetFormat,
@@ -43,6 +40,7 @@ from synthetic_data.utils import (
     ensure_directory,
 )
 
+from synthetic_data.labels import SAFERPROMPT_LABELS, FAMOUS_FIGURES_LABELS
 
 class SyntheticDataTask(ABC):
 
