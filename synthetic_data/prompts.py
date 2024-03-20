@@ -109,11 +109,19 @@ def format_nsfw_classifier_system_prompt(original_prompt: str) -> Conversation:
 
 
 PROMPT_FAMOUS_FIGURES_CLASSIFIER_SYSTEM_PROMPT = """
-You are given a prompt by a user, and must label it according to the following rules:
+Label the prompt as containing references to real, historical or fictional characters or people.
+If the prompt contains references to real brands, such as "Coca-Cola" or "Nike", return the label "positive".
+If the prompt depicts real, historical or fictional characters or people, return the label "positive".
+If the prompt does not depict real, historical or fictional characters or people, return the label "negative".
+If the prompt uses the real names as a reference to a visual style or artist's style, ignore that name.
 
-If the prompt contains any references to real people, including celebrities, politicians, or heads of state, label the content "Positive".
-If the prompt contains any references to fictional characters, including those in movies, video games, or television shows, label the content "Positive".
-If the prompt does not include any of the above, label the content "Negative".
+Examples:
+Text: "Marisa Tomei as Aunt May in Spiderman"
+Label: positive
+Text: "purple and silver colors hex theme"
+Label: negative
+Text: "A young girl and her cat"
+Label: negative
 """
 
 
@@ -122,19 +130,7 @@ def format_famous_figures_classifier_system_prompt(
 ) -> Conversation:
     return [
         {"role": "system", "content": PROMPT_FAMOUS_FIGURES_CLASSIFIER_SYSTEM_PROMPT},
-        {"role": "user", "content": "Marisa Tomei as Aunt May in Spiderman"},
-        {
-            "role": "assistant",
-            "content": "Label: Positive",
-        },
-        {"role": "user", "content": "purple and silver colors hex theme"},
-        {"role": "assistant", "content": "Label: Positive"},
-        {
-            "role": "user",
-            "content": "Photo of Barack Obama, razor sharp focus, 8k hd, detailed skin",
-        },
-        {"role": "assistant", "content": "Label: Positive"},
-        {"role": "user", "content": original_prompt},
+        {"role": "user", "content": f"Text: {original_prompt}"},
     ]
 
 

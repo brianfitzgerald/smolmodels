@@ -228,7 +228,6 @@ def extract_label(text: str, valid_labels: Dict) -> Optional[str]:
     match = LABEL_REGEX.search(text)
     if match:
         label = match.group(1).strip().lower()
-        print(f"Extracted label: {label}")
         # remove labels with multiple words
         if " " in label:
             return None
