@@ -7,7 +7,8 @@ from synthetic_data.conversion import chatml_to_conversation
 from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
-    format_classifier_system_prompt,
+    format_famous_figures_classifier_system_prompt,
+    format_nsfw_classifier_system_prompt,
     format_dalle_prompt_template,
     format_safety_prompt_template,
     get_tool_usage_prompt,
@@ -25,6 +26,9 @@ import pandas as pd
 
 
 from synthetic_data.utils import (
+    ANNOTATED_LABELS,
+    FAMOUS_FIGURES_LABELS,
+    SAFERPROMPT_LABELS,
     Conversation,
     DatasetTaskFormat,
     DatasetFormat,
@@ -168,6 +172,7 @@ class SafetyLabeling(SyntheticDataTask):
     output_data_name = "safer-prompt"
     output_data_format = DatasetFormat.CSV
     dataset_task_format = DatasetTaskFormat.SFT
+    dataset_labels = SAFERPROMPT_LABELS
 
     empty_dataset_format = {
         "prompt": [],
@@ -181,7 +186,9 @@ class SafetyLabeling(SyntheticDataTask):
         """
         dataset = dataset.filter(preprocess_prompts)
         pd_dataset: pd.DataFrame = dataset.to_pandas()  # type: ignore
-        pd_dataset["tasks_label"] = pd_dataset["tasks_label"].replace('borderline', 'unsafe')
+        pd_dataset["tasks_label"] = pd_dataset["tasks_label"].replace(
+            "borderline", "unsafe"
+        )
         max_samples_per_group: int = pd_dataset.groupby("tasks_label").size().min()  # type: ignore
 
         def sample_group(group):
@@ -202,7 +209,9 @@ class SafetyLabeling(SyntheticDataTask):
 
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         self.original_rows_batch = batch
-        return [format_classifier_system_prompt(prompt) for prompt in batch["prompt"]]
+        return [
+            format_nsfw_classifier_system_prompt(prompt) for prompt in batch["prompt"]
+        ]
 
     def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
         rows = []
@@ -216,7 +225,7 @@ class SafetyLabeling(SyntheticDataTask):
             if "I'm sorry" in completion:
                 continue
             completion = clean_message(completion)
-            class_label = extract_label(completion)
+            class_label = extract_label(completion, self.dataset_labels)
             if not class_label:
                 continue
             rows.append(
@@ -227,6 +236,18 @@ class SafetyLabeling(SyntheticDataTask):
                 }
             )
         return rows
+
+
+class FamousFiguresLabeling(SafetyLabeling):
+
+    dataset_labels = FAMOUS_FIGURES_LABELS
+    output_data_name = "famous-figures-labeling"
+
+    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+        self.original_rows_batch = batch
+        return [
+            format_famous_figures_classifier_system_prompt(prompt) for prompt in batch["prompt"]
+        ]
 
 
 class Toolformer(SyntheticDataTask):

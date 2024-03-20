@@ -7,7 +7,10 @@ from enum import Enum
 from pathlib import Path
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
-from dataset.prompt_classifier import SAFERPROMPT_IDS_TO_LABELS, ClipdropSyntheticClassesDataModule, ClipdropBinaryDataModule
+from dataset.prompt_classifier import (
+    ClipdropSyntheticClassesDataModule,
+    ClipdropBinaryDataModule,
+)
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
@@ -89,9 +92,7 @@ class LogPredictionSamplesCallback(pl.Callback):
             predicted_classes = out.logits.argmax(dim=-1).cpu().numpy().tolist()
             labels_list = labels.cpu().numpy().tolist()
 
-            predicted_class_names = [
-                labels_dict[i] for i in predicted_classes
-            ]
+            predicted_class_names = [labels_dict[i] for i in predicted_classes]
             label_class_names = [labels_dict[i] for i in labels_list]
 
             column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]

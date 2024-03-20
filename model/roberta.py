@@ -51,7 +51,7 @@ class RobertaClassifier(pl.LightningModule):
         self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
         self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
         self.recall = Recall("multiclass", num_classes=n_classes, average="macro")
-    
+
     def forward(
         self,
         batch: Dict[str, Tensor],
@@ -108,7 +108,7 @@ class RobertaClassifier(pl.LightningModule):
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
             )
-            n_steps: int = self.trainer.estimated_stepping_batches # type: ignore
+            n_steps: int = self.trainer.estimated_stepping_batches  # type: ignore
             scheduler = get_cosine_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=self.params.warmup_steps,
