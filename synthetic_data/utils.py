@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 import re
 import shutil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -185,8 +185,6 @@ def ensure_directory(directory: str, clear: bool = True):
     Path(directory).mkdir(exist_ok=True, parents=True)
 
 
-LABEL_REGEX = re.compile(r"Label:\s*(.*)")
-
 SAFERPROMPT_LABELS = {
     "safe": 0,
     "famous_figures": 1,
@@ -196,17 +194,21 @@ SAFERPROMPT_LABELS = {
     "discriminatory_content": 5,
 }
 
-ANNOTATED_LABELS = {"safe": 0, "borderline": 1, "unsafe": 2}
+ANNOTATED_LABELS = {"safe": 0, "unsafe": 1, "borderline": 2}
+FAMOUS_FIGURES_LABELS = {"negative": 0, "positive": 1}
+
+LABEL_REGEX = re.compile(r"Label:\s*(.*)")
 
 
-def extract_label(text: str) -> Optional[str]:
+def extract_label(text: str, valid_labels: Dict) -> Optional[str]:
     match = LABEL_REGEX.search(text)
     if match:
-        label = match.group(1).strip()
+        label = match.group(1).strip().lower()
+        print(f"Extracted label: {label}")
         # remove labels with multiple words
         if " " in label:
             return None
-        if label not in SAFERPROMPT_LABELS:
+        if label not in valid_labels:
             return None
         return label
     else:

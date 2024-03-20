@@ -3,7 +3,11 @@ import os
 from typing import Dict, List, Optional, cast
 import pandas as pd
 import asyncio
-from synthetic_data.tasks import SafetyLabeling, SyntheticDataTask
+from synthetic_data.tasks import (
+    FamousFiguresLabeling,
+    SafetyLabeling,
+    SyntheticDataTask,
+)
 
 
 import fire
@@ -40,6 +44,7 @@ DATA_TASKS: Dict[str, type[SyntheticDataTask]] = {
     "synthetic_tool_calls": SyntheticToolCalls,
     "prompt_rewriting_dpo": PromptRewritingDPO,
     "safety_labeling": SafetyLabeling,
+    "famous_figures_labeling": FamousFiguresLabeling,
 }
 
 MODEL_WRAPPER_CLASSES = {
@@ -58,7 +63,7 @@ def main(
     pairs: bool = False,
     resume_input_position: bool = True,
     generation_source: GenerationSource = GenerationSource.OPENROUTER,
-    task_name: str = "safety_labeling",
+    task_name: str = "famous_figures_labeling",
     n_epochs: int = 10,
     **kwargs,
 ):
@@ -197,7 +202,7 @@ def main(
                 full_conversations_batch = task.format_seed_input_conversation(batch)
 
                 print(
-                    f"Epoch {epoch}, batch {batch_idx}/{total_batches}: generating {len(full_conversations_batch)} completions ({len(new_dataset_rows)}/{len(input_dataset)} generated in run)"
+                    f"Epoch {epoch}, batch {batch_idx}/{total_batches}: generating {len(full_conversations_batch)} completions ({len(new_dataset_rows)}/{len(input_dataset)} total rows)"
                 )
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)

@@ -8,7 +8,6 @@ from pathlib import Path
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
 from dataset.prompt_classifier import (
-    SAFERPROMPT_IDS_TO_LABELS,
     ClipdropSyntheticClassesDataModule,
     ClipdropBinaryDataModule,
 )

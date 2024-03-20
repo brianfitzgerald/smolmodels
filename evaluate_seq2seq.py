@@ -97,7 +97,8 @@ def main(
             validation_df = validation_df[
                 (validation_df["nsfw_regex"] == True)
                 | (validation_df["nsfw_image"] == True)
-                | len(validation_df["prompt"]) < 64
+                | len(validation_df["prompt"])
+                < 64
             ]
 
         # TODO refactor this so the parquet is loaded as a dataset, and uses the same dataloader

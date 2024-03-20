@@ -107,7 +107,6 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
 
 
 class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
-
     def __init__(
         self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
     ):

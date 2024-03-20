@@ -80,7 +80,7 @@ def format_safety_prompt_template(original_prompt: str) -> Conversation:
     ]
 
 
-PROMPT_CLASSIFIER_SYSTEM_PROMPT = """
+PROMPT_NSFW_CLASSIFIER_SYSTEM_PROMPT = """
 You are given a prompt by a user, and must label it according to the following rules:
 
 If the prompt contains any references to real, historical or fictional characters or people, return the label "famous_figures".
@@ -92,9 +92,9 @@ If the prompt does not violate any of the above rules, return the label "safe".
 """
 
 
-def format_classifier_system_prompt(original_prompt: str) -> Conversation:
+def format_nsfw_classifier_system_prompt(original_prompt: str) -> Conversation:
     return [
-        {"role": "system", "content": PROMPT_CLASSIFIER_SYSTEM_PROMPT},
+        {"role": "system", "content": PROMPT_NSFW_CLASSIFIER_SYSTEM_PROMPT},
         {"role": "user", "content": "Marisa Tomei as Aunt May in Spiderman"},
         {
             "role": "assistant",
@@ -104,6 +104,36 @@ def format_classifier_system_prompt(original_prompt: str) -> Conversation:
         {"role": "assistant", "content": "Label: safe"},
         {"role": "user", "content": "A young girl playing with a doll"},
         {"role": "assistant", "content": "Label: safe"},
+        {"role": "user", "content": original_prompt},
+    ]
+
+
+PROMPT_FAMOUS_FIGURES_CLASSIFIER_SYSTEM_PROMPT = """
+You are given a prompt by a user, and must label it according to the following rules:
+
+If the prompt contains any references to real people, including celebrities, politicians, or heads of state, label the content "Positive".
+If the prompt contains any references to fictional characters, including those in movies, video games, or television shows, label the content "Positive".
+If the prompt does not include any of the above, label the content "Negative".
+"""
+
+
+def format_famous_figures_classifier_system_prompt(
+    original_prompt: str,
+) -> Conversation:
+    return [
+        {"role": "system", "content": PROMPT_FAMOUS_FIGURES_CLASSIFIER_SYSTEM_PROMPT},
+        {"role": "user", "content": "Marisa Tomei as Aunt May in Spiderman"},
+        {
+            "role": "assistant",
+            "content": "Label: Positive",
+        },
+        {"role": "user", "content": "purple and silver colors hex theme"},
+        {"role": "assistant", "content": "Label: Positive"},
+        {
+            "role": "user",
+            "content": "Photo of Barack Obama, razor sharp focus, 8k hd, detailed skin",
+        },
+        {"role": "assistant", "content": "Label: Positive"},
         {"role": "user", "content": original_prompt},
     ]
 
