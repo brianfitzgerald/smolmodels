@@ -82,7 +82,6 @@ class LogPredictionSamplesCallback(pl.Callback):
         labels = batch["labels"]
         attention_mask = batch["attention_mask"]
         labels_dict: Dict[str, int] = pl_module.id_to_labels
-        breakpoint()
 
         n = len(input_ids)
         if pl_module.params.objective == "classification":

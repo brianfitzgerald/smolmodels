@@ -3,9 +3,11 @@ import pandas as pd
 from datasets import Dataset
 from typing import List
 import torch
+from collections import Counter
 
 from dataset.utils import FineTunerDataset
 from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS, ANNOTATED_LABELS
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 SAFERPROMPT_IDS_TO_LABELS = {
     SAFERPROMPT_LABELS[label]: label for label in SAFERPROMPT_LABELS
@@ -144,3 +146,18 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
             "attention_mask": inputs_tokenized["attention_mask"],
             "labels": labels_tensor,
         }
+    
+    def get_sampler(self):
+        label_counts = Counter(self.train_dataset[self.label_column])
+        label_weights = [1 / c for c in label_counts.values()]
+        num_samples = len(self.train_dataset)
+        sampler = WeightedRandomSampler(label_weights, num_samples, replacement=True)
+        return sampler
+
+    def train_dataloader(self):
+        sampler = self.get_sampler()
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
+
+    def val_dataloader(self):
+        sampler = self.get_sampler()
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
