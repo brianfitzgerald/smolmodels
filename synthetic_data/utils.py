@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 import re
 import shutil
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Literal
 
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -185,6 +185,10 @@ def ensure_directory(directory: str, clear: bool = True):
     Path(directory).mkdir(exist_ok=True, parents=True)
 
 
+LabelsSet = Literal[
+    "clipdrop_synthetic", "i2p", "clipdrop_binary", "multilabel_safe_famous_figures"
+]
+
 SAFERPROMPT_LABELS = {
     "safe": 0,
     "famous_figures": 1,
@@ -195,7 +199,27 @@ SAFERPROMPT_LABELS = {
 }
 
 ANNOTATED_LABELS = {"safe": 0, "unsafe": 1, "borderline": 2}
+
 FAMOUS_FIGURES_LABELS = {"negative": 0, "positive": 1}
+
+I2P_LABELS = {
+    "hate": 0,
+    "harassment": 1,
+    "violence": 2,
+    "self-harm": 3,
+    "sexual-content": 4,
+    "shocking-images": 5,
+    "illegal-activity": 6,
+}
+
+MULTILABEL_SAFE_FAMOUS_FIGURES = {"negative": 0, "positive": 1, "safe": 2, "unsafe": 3}
+
+LABEL_SETS: Dict[LabelsSet, Dict] = {
+    "clipdrop_synthetic": SAFERPROMPT_LABELS,
+    "clipdrop_binary": ANNOTATED_LABELS,
+    "i2p": I2P_LABELS,
+    "multilabel_safe_famous_figures": MULTILABEL_SAFE_FAMOUS_FIGURES,
+}
 
 LABEL_REGEX = re.compile(r"Label:\s*(.*)")
 

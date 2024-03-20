@@ -301,6 +301,26 @@ CONFIGS = {
         ),
         ckpt_name="safer-prompt-binary-classifier",
     ),
+    "safety_classifier_multilabel": ModelConfig(
+        RobertaClassifier,
+        ClipdropBinaryDataModule,
+        BINARY_CLASSIFIER_PROJECT,
+        HyperParams(
+            base_model_checkpoint="distilbert/distilroberta-base",
+            train_batch_size=16,
+            eval_batch_size=8,
+            gradient_accumulation_steps=1,
+            optimizer="AdamW",
+            num_train_epochs=3,
+            warmup_steps=100,
+            learning_rate=1e-5,
+            adam_epsilon=1e-8,
+            max_seq_length=512,
+            labels_set="clipdrop_binary",
+            objective="classification",
+        ),
+        ckpt_name="safer-prompt-binary-classifier",
+    ),
 }
 
 

@@ -6,6 +6,8 @@ from pathlib import Path
 import shutil
 from dataclasses import dataclass
 
+from synthetic_data.utils import LabelsSet
+
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (
     "Rewrite the following prompt to remove any unsafe or copyrighted content: "
@@ -15,7 +17,6 @@ PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 Objective = Literal["classification", "generation"]
-LabelsSet = Literal["clipdrop_synthetic", "i2p", "clipdrop_binary"]
 
 
 @dataclass

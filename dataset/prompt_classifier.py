@@ -9,22 +9,6 @@ from dataset.utils import FineTunerDataset
 from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS, ANNOTATED_LABELS
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-SAFERPROMPT_IDS_TO_LABELS = {
-    SAFERPROMPT_LABELS[label]: label for label in SAFERPROMPT_LABELS
-}
-
-
-I2P_LABELS = {
-    "hate": 0,
-    "harassment": 1,
-    "violence": 2,
-    "self-harm": 3,
-    "sexual-content": 4,
-    "shocking-images": 5,
-    "illegal-activity": 6,
-}
-I2P_IDS_TO_LABELS = {I2P_LABELS[label]: label for label in I2P_LABELS}
-
 
 class ClipdropSyntheticClassesDataModule(FineTunerDataset):
     def __init__(
@@ -156,7 +140,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         class_weights = 1.0 / class_counts.float()
         sample_weights = class_weights[labels]
         
-        print(f"Class counts: {class_counts}")
+        print(f"Class counts: {class_counts.tolist()}")
 
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
         return sampler
@@ -166,5 +150,4 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
 
     def val_dataloader(self):
-        sampler = self.get_sampler(self.val_dataset["labels"])  # type: ignore
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count) # type: ignore

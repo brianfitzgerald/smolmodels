@@ -42,7 +42,6 @@ class RobertaClassifier(pl.LightningModule):
         self.train_steps = 0
         self.save_hyperparameters()
 
-        # TODO micro or macro?
         n_classes: int = len(self.labels_to_id)
         self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="macro")
         self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
