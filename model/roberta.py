@@ -1,7 +1,5 @@
-from torch.optim.optimizer import Optimizer
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.optimization import (
-    get_linear_schedule_with_warmup,
     get_cosine_schedule_with_warmup,
 )
 from model.utils import HyperParams
@@ -16,7 +14,6 @@ from synthetic_data.utils import SAFERPROMPT_LABELS, ANNOTATED_LABELS
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 
 import lightning.pytorch as pl
-from lightning.pytorch.utilities import grad_norm
 
 
 class RobertaClassifier(pl.LightningModule):
@@ -47,11 +44,11 @@ class RobertaClassifier(pl.LightningModule):
 
         # TODO micro or macro?
         n_classes: int = len(self.labels_to_id)
-        self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="macro")
-        self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
-        self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
-        self.recall = Recall("multiclass", num_classes=n_classes, average="macro")
-    
+        self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="micro")
+        self.f1 = F1Score("multiclass", num_classes=n_classes, average="micro")
+        self.precision = Precision("multiclass", num_classes=n_classes, average="micro")
+        self.recall = Recall("multiclass", num_classes=n_classes, average="micro")
+
     def forward(
         self,
         batch: Dict[str, Tensor],
@@ -89,11 +86,7 @@ class RobertaClassifier(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss, metrics = self(batch)
         self.log(
-            "val_loss",
-            loss,
-            on_step=True,
-            on_epoch=True,
-            logger=True,
+            "val_loss", loss, on_step=True, on_epoch=True, logger=True, prog_bar=True
         )
         for k, v in metrics.items():
             self.log(f"metrics/val_{k}", v, on_step=True, on_epoch=True, logger=True)
@@ -108,7 +101,7 @@ class RobertaClassifier(pl.LightningModule):
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
             )
-            n_steps: int = self.trainer.estimated_stepping_batches # type: ignore
+            n_steps: int = self.trainer.estimated_stepping_batches  # type: ignore
             scheduler = get_cosine_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=self.params.warmup_steps,
@@ -124,7 +117,3 @@ class RobertaClassifier(pl.LightningModule):
 
         else:
             raise ValueError(f"Unsupported optimizer: {self.params.optimizer}")
-
-    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        norms = grad_norm(self.model, norm_type=2)
-        self.log_dict(norms)

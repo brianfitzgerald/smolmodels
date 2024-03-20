@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from fire import Fire
 from tabulate import tabulate
 import pandas as pd
@@ -7,7 +7,11 @@ from enum import Enum
 from pathlib import Path
 from fsspec.core import url_to_fs
 from dataclasses import dataclass
-from dataset.prompt_classifier import SAFERPROMPT_IDS_TO_LABELS, ClipdropSyntheticClassesDataModule, ClipdropBinaryDataModule
+from dataset.prompt_classifier import (
+    SAFERPROMPT_IDS_TO_LABELS,
+    ClipdropSyntheticClassesDataModule,
+    ClipdropBinaryDataModule,
+)
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
@@ -19,8 +23,8 @@ from typing import Dict
 from model.t5 import T5Model
 from model.roberta import RobertaClassifier
 from model.llama import LlamaFineTuner
-
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers.logger import Logger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import (
@@ -89,9 +93,7 @@ class LogPredictionSamplesCallback(pl.Callback):
             predicted_classes = out.logits.argmax(dim=-1).cpu().numpy().tolist()
             labels_list = labels.cpu().numpy().tolist()
 
-            predicted_class_names = [
-                labels_dict[i] for i in predicted_classes
-            ]
+            predicted_class_names = [labels_dict[i] for i in predicted_classes]
             label_class_names = [labels_dict[i] for i in labels_list]
 
             column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
@@ -143,6 +145,7 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         new_rows = tabulate(
             rows,
+            tablefmt="simple_grid",
             headers=column_names,
             maxcolwidths=[10, 10, 50, 50, 50],
         )
@@ -190,6 +193,25 @@ class HfModelCheckpoint(ModelCheckpoint):
             fs, _ = url_to_fs(hf_save_dir)
             if fs.exists(hf_save_dir):
                 fs.rm(hf_save_dir, recursive=True)
+
+
+class GradNormCallback(pl.Callback):
+    """
+    Logs the gradient norm.
+    """
+
+    def on_after_backward(self, trainer, model):
+        model.log("grad_norm_total", gradient_norm(model))
+
+
+def gradient_norm(model: pl.LightningModule):
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1.0 / 2)
+    return total_norm
 
 
 @dataclass
@@ -269,7 +291,7 @@ CONFIGS = {
             eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=10,
+            num_train_epochs=1000,
             warmup_steps=100,
             learning_rate=1e-4,
             adam_epsilon=1e-8,
@@ -290,8 +312,6 @@ def main(
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
 
-    loggers = []
-
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
     model = model_config.model(hparams)
@@ -303,11 +323,12 @@ def main(
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
     run_name = f"{config}-{run_name}"
 
+    loggers: List[Logger] = [CSVLogger("logs", name=run_name)]
+
     if wandb:
         project_name = model_config.wandb_project_name
         wandb_logger = WandbLogger(name=run_name, project=project_name)
         loggers.append(wandb_logger)
-        wandb_logger.watch(model)
 
     ensure_directory("logs", clear=True)
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
@@ -319,10 +340,12 @@ def main(
         mode="min",
     )
 
+    grad_norm_callback = GradNormCallback()
+
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     lr_monitor_callback = LearningRateMonitor(logging_interval="step")
     early_stopping_callback = EarlyStopping(
-        monitor="val_loss_epoch", patience=3, mode="min", check_finite=True
+        monitor="val_loss_epoch", patience=5, mode="min", check_finite=True
     )
 
     precision = "32" if model_config.model == T5Model else "16-mixed"
@@ -333,6 +356,7 @@ def main(
         checkpoint_callback,
         progress_bar_callback,
         early_stopping_callback,
+        grad_norm_callback       
     ]
     if wandb:
         callbacks.append(lr_monitor_callback)
@@ -345,7 +369,8 @@ def main(
         strategy=strategy,
         callbacks=callbacks,
         logger=loggers,
-        gradient_clip_algorithm="norm",
+        overfit_batches=1,
+        gradient_clip_algorithm="value",
         log_every_n_steps=1,
         num_nodes=1,
         devices="auto",

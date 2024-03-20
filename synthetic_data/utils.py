@@ -196,7 +196,7 @@ SAFERPROMPT_LABELS = {
     "discriminatory_content": 5,
 }
 
-ANNOTATED_LABELS = {"safe": 0, "unsafe": 1, "borderline": 2}
+ANNOTATED_LABELS = {"safe": 0, "borderline": 1, "unsafe": 2}
 
 
 def extract_label(text: str) -> Optional[str]:

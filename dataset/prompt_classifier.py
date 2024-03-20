@@ -118,7 +118,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
         dataset = dataset.filter(
-            lambda x: x["prompt"] is not None and x["taskus_label"] is not None
+            lambda x: x["prompt"] is not None and x["taskus_label"] is not None, cache_file_name=f"{self.cache_dir}/dataset_filtered.parquet"
         )
         return dataset
 
@@ -129,6 +129,9 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         labels: List[int] = [
             ANNOTATED_LABELS[label] for label in examples[self.label_column]
         ]
+
+        # convert borderline to unsafe
+        labels = [0 if label != 2 else 1 for label in labels]
 
         labels_tensor = torch.tensor(labels, dtype=torch.long)
 
@@ -153,6 +156,8 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         class_counts = torch.bincount(labels)
         class_weights = 1.0 / class_counts.float()
         sample_weights = class_weights[labels]
+        
+        print(f"Class counts: {class_counts}")
 
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
         return sampler
