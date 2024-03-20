@@ -28,10 +28,8 @@ I2P_LABELS = {
 }
 
 CLIPDROP_MULTILABEL_LABELS = {
-    "famous_figures": 0,
-    "no_famous_figures": 1,
-    "safe": 0,
-    "unsafe": 1,
+    "unsafe": 0,
+    "famous_figures": 1,
 }
 
 LABEL_SETS_DICT: Dict[LabelsSet, Dict[str, int]] = {

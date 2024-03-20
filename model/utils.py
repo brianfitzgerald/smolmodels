@@ -16,7 +16,7 @@ IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
-Objective = Literal["classification", "generation"]
+Objective = Literal["binary_classification", "multilabel_classification", "generation"]
 
 
 @dataclass

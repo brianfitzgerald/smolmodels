@@ -18,10 +18,11 @@ import string
 import torch.multiprocessing
 from weakref import proxy
 from typing import Dict
+import json
 
 
 from model.t5 import T5Model
-from model.roberta import RobertaClassifier
+from model.roberta import RobertaClassifier, RobertaClassifierMultilabel
 from model.llama import LlamaFineTuner
 from lightning.pytorch.loggers.logger import Logger
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
@@ -87,10 +88,12 @@ class LogPredictionSamplesCallback(pl.Callback):
         input_ids = batch["input_ids"]
         labels = batch["labels"]
         attention_mask = batch["attention_mask"]
-        labels_dict: Dict[str, int] = pl_module.id_to_labels
+        labels_dict: Dict[int, str] = pl_module.id_to_labels
+        h_params: HyperParams = pl_module.params
+        column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
 
         n = len(input_ids)
-        if pl_module.params.objective == "classification":
+        if h_params.objective == "binary_classification":
             out = pl_module.model(input_ids=input_ids, attention_mask=attention_mask)
             predicted_classes = out.logits.argmax(dim=-1).cpu().numpy().tolist()
             labels_list = labels.cpu().numpy().tolist()
@@ -98,18 +101,34 @@ class LogPredictionSamplesCallback(pl.Callback):
             predicted_class_names = [labels_dict[i] for i in predicted_classes]
             label_class_names = [labels_dict[i] for i in labels_list]
 
-            column_names = ["Epoch", "Sample Index", "Prompt", "Expected", "Predicted"]
-
-            feature_columns = []
-            feature_columns.append([trainer.current_epoch] * n)
-            feature_columns.append(list(range(n)))
-
-            decoded = self.tokenizer.batch_decode(
+            decoded_prompts = self.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
-            feature_columns.append(decoded)
-            feature_columns.append(label_class_names)
-            feature_columns.append(predicted_class_names)
+
+            feature_columns = [
+                [trainer.current_epoch] * n,
+                list(range(n)),
+                decoded_prompts,
+                label_class_names,
+                predicted_class_names,
+            ]
+
+        elif h_params.objective == "multilabel_classification":
+            out = pl_module.model(input_ids=input_ids, attention_mask=attention_mask)
+            labels = labels.cpu().numpy().tolist()
+            predicted_classes = out.logits.cpu().numpy().tolist()
+
+            decoded_prompts = self.tokenizer.batch_decode(
+                input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
+            )
+
+            feature_columns = [
+                [trainer.current_epoch] * n,
+                list(range(n)),
+                decoded_prompts,
+                labels,
+                predicted_classes,
+            ]
 
         else:
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -118,13 +137,11 @@ class LogPredictionSamplesCallback(pl.Callback):
                 max_length=self.max_new_tokens,
             )
 
-            column_names = ["Epoch", "Sample Index", "Input", "Output", "Target"]
-
             feature_columns = []
             feature_columns.append([trainer.current_epoch] * n)
             feature_columns.append(list(range(n)))
 
-            for feature in [input_ids, out, labels]:
+            for feature in [input_ids, labels, out]:
                 decoded = self.tokenizer.batch_decode(
                     feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
                 )
@@ -276,7 +293,7 @@ CONFIGS = {
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_binary",
-            objective="classification",
+            objective="binary_classification",
         ),
     ),
     "safety_classifier_binary": ModelConfig(
@@ -295,11 +312,11 @@ CONFIGS = {
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_binary",
-            objective="classification",
+            objective="binary_classification",
         ),
     ),
     "safety_classifier_multilabel": ModelConfig(
-        RobertaClassifier,
+        RobertaClassifierMultilabel,
         ClipdropMultiLabelDataModule,
         "roberta-safety-classifier-multilabel",
         HyperParams(
@@ -308,13 +325,13 @@ CONFIGS = {
             eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=3,
+            num_train_epochs=10,
             warmup_steps=100,
             learning_rate=1e-5,
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
-            objective="classification",
+            objective="multilabel_classification",
         ),
     ),
 }
@@ -371,9 +388,9 @@ def main(
     strategy = "ddp" if distributed else "auto"
     callbacks = [
         sample_callback,
-        checkpoint_callback,
+        # checkpoint_callback,
         progress_bar_callback,
-        early_stopping_callback,
+        # early_stopping_callback,
         grad_norm_callback       
     ]
     if wandb:

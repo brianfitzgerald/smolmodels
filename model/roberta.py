@@ -12,25 +12,28 @@ from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
 from synthetic_data.labels import LABEL_SETS_DICT
 from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
+import torch
 
 import lightning.pytorch as pl
 
 
 class RobertaClassifier(pl.LightningModule):
-    def __init__(self, params: HyperParams):
+    def __init__(
+        self, params: HyperParams, problem_type: str = "single_label_classification"
+    ):
         super(RobertaClassifier, self).__init__()
         self.params = params
-        self.hparams.update(vars(params))
         if not params.labels_set:
             raise ValueError(f"Labels set {params.labels_set} not found")
         self.labels_to_id = LABEL_SETS_DICT[params.labels_set]
         self.id_to_labels = {v: k for k, v in self.labels_to_id.items()}
-        n_labels: int = len(self.labels_to_id)
 
         self.model: RobertaForSequenceClassification = (
             RobertaForSequenceClassification.from_pretrained(
                 params.base_model_checkpoint,
                 output_attentions=False,
+                problem_type=problem_type,
+                num_labels=len(self.labels_to_id),
                 output_hidden_states=False,
             )
         )
@@ -39,6 +42,7 @@ class RobertaClassifier(pl.LightningModule):
         )  # type: ignore
         self.train_steps = 0
         self.save_hyperparameters()
+        n_labels: int = len(self.labels_to_id)
 
         self.accuracy = Accuracy("multiclass", num_classes=n_labels, average="macro")
         self.f1 = F1Score("multiclass", num_classes=n_labels, average="macro")
@@ -52,8 +56,7 @@ class RobertaClassifier(pl.LightningModule):
 
         input_ids: Tensor = batch["input_ids"]
         attention_mask: Tensor = batch["attention_mask"]
-        labels: Tensor = batch["labels"]
-        breakpoint()
+        labels: Tensor = batch["labels"].float()
 
         out: SequenceClassifierOutput = self.model(
             input_ids=input_ids,
@@ -63,10 +66,10 @@ class RobertaClassifier(pl.LightningModule):
 
         logits = out.logits
         metrics = {
-            "accuracy": self.accuracy(logits, labels),
-            "f1": self.f1(logits, labels),
-            "precision": self.precision(logits, labels),
-            "recall": self.recall(logits, labels),
+            # "accuracy": self.accuracy(logits, labels),
+            # "f1": self.f1(logits, labels),
+            # "precision": self.precision(logits, labels),
+            # "recall": self.recall(logits, labels),
         }
 
         return out.loss, metrics
@@ -115,3 +118,10 @@ class RobertaClassifier(pl.LightningModule):
 
         else:
             raise ValueError(f"Unsupported optimizer: {self.params.optimizer}")
+
+
+class RobertaClassifierMultilabel(RobertaClassifier):
+    def __init__(self, params: HyperParams):
+        super(RobertaClassifierMultilabel, self).__init__(
+            params, problem_type="multi_label_classification"
+        )

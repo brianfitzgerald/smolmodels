@@ -197,17 +197,6 @@ class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
             "labels": labels_batch_tensor,
         }
 
-    def get_sampler(self, labels: Tensor):
-
-        class_counts = torch.bincount(labels)
-        class_weights = 1.0 / class_counts.float()
-        sample_weights = class_weights[labels]
-
-        print(f"Class counts: {class_counts.tolist()}")
-
-        sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
-        return sampler
-
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
 
