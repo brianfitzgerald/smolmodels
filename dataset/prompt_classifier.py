@@ -168,15 +168,15 @@ class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
 
         inputs: List[str] = examples[self.prompt_column]
 
-        breakpoint()
         annotated_labels = [
             1 if label == "safe" else 0 for label in examples["annotated_label"]
         ]
         class_labels = [
             1 if label == "positive" else 0 for label in examples["class_label"]
         ]
+
         labels_batch = [
-            annotated_labels[i] + class_labels[i] for i in range(len(annotated_labels))
+            [annotated_labels[i], class_labels[i]] for i in range(len(annotated_labels))
         ]
 
         labels_batch_tensor = torch.tensor(labels_batch, dtype=torch.long)
@@ -209,8 +209,7 @@ class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
         return sampler
 
     def train_dataloader(self):
-        sampler = self.get_sampler(self.train_dataset["labels"])  # type: ignore
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore

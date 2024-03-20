@@ -25,11 +25,11 @@ class RobertaClassifier(pl.LightningModule):
             raise ValueError(f"Labels set {params.labels_set} not found")
         self.labels_to_id = LABEL_SETS_DICT[params.labels_set]
         self.id_to_labels = {v: k for k, v in self.labels_to_id.items()}
+        n_labels: int = len(self.labels_to_id)
 
         self.model: RobertaForSequenceClassification = (
             RobertaForSequenceClassification.from_pretrained(
                 params.base_model_checkpoint,
-                num_labels=len(self.labels_to_id),
                 output_attentions=False,
                 output_hidden_states=False,
             )
@@ -40,11 +40,10 @@ class RobertaClassifier(pl.LightningModule):
         self.train_steps = 0
         self.save_hyperparameters()
 
-        n_classes: int = len(self.labels_to_id)
-        self.accuracy = Accuracy("multiclass", num_classes=n_classes, average="macro")
-        self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
-        self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
-        self.recall = Recall("multiclass", num_classes=n_classes, average="macro")
+        self.accuracy = Accuracy("multiclass", num_classes=n_labels, average="macro")
+        self.f1 = F1Score("multiclass", num_classes=n_labels, average="macro")
+        self.precision = Precision("multiclass", num_classes=n_labels, average="macro")
+        self.recall = Recall("multiclass", num_classes=n_labels, average="macro")
 
     def forward(
         self,
@@ -54,6 +53,7 @@ class RobertaClassifier(pl.LightningModule):
         input_ids: Tensor = batch["input_ids"]
         attention_mask: Tensor = batch["attention_mask"]
         labels: Tensor = batch["labels"]
+        breakpoint()
 
         out: SequenceClassifierOutput = self.model(
             input_ids=input_ids,

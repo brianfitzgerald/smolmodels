@@ -313,7 +313,7 @@ CONFIGS = {
             learning_rate=1e-5,
             adam_epsilon=1e-8,
             max_seq_length=512,
-            labels_set="clipdrop_binary",
+            labels_set="clipdrop_multilabel",
             objective="classification",
         ),
     ),
