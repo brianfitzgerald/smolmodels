@@ -3,7 +3,7 @@ import pandas as pd
 from datasets import Dataset
 from typing import List
 import torch
-from collections import Counter
+from torch import Tensor
 
 from dataset.utils import FineTunerDataset
 from synthetic_data.utils import ensure_directory, SAFERPROMPT_LABELS, ANNOTATED_LABELS
@@ -24,7 +24,6 @@ I2P_LABELS = {
     "illegal-activity": 6,
 }
 I2P_IDS_TO_LABELS = {I2P_LABELS[label]: label for label in I2P_LABELS}
-
 
 
 class ClipdropSyntheticClassesDataModule(FineTunerDataset):
@@ -118,7 +117,9 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         self.data_file_path = "data_files/clipdrop_prompts_benchmark_annotated.csv"
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.filter(lambda x: x["prompt"] is not None and x["taskus_label"] is not None)
+        dataset = dataset.filter(
+            lambda x: x["prompt"] is not None and x["taskus_label"] is not None
+        )
         return dataset
 
     def prepare_sample(self, examples: dict):
@@ -146,18 +147,20 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
             "attention_mask": inputs_tokenized["attention_mask"],
             "labels": labels_tensor,
         }
-    
-    def get_sampler(self):
-        label_counts = Counter(self.train_dataset[self.label_column])
-        label_weights = [1 / c for c in label_counts.values()]
-        num_samples = len(self.train_dataset)
-        sampler = WeightedRandomSampler(label_weights, num_samples, replacement=True)
+
+    def get_sampler(self, labels: Tensor):
+
+        class_counts = torch.bincount(labels)
+        class_weights = 1.0 / class_counts.float()
+        sample_weights = class_weights[labels]
+
+        sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
         return sampler
 
     def train_dataloader(self):
-        sampler = self.get_sampler()
+        sampler = self.get_sampler(self.train_dataset["labels"])  # type: ignore
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
 
     def val_dataloader(self):
-        sampler = self.get_sampler()
+        sampler = self.get_sampler(self.val_dataset["labels"])  # type: ignore
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
