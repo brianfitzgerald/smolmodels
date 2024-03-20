@@ -11,7 +11,7 @@ from transformers.models.roberta.modeling_roberta import (
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
 from synthetic_data.labels import LABEL_SETS_DICT
-from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
+from torchmetrics.classification import Accuracy, Precision, Recall, F1Score, MultilabelAccuracy, MultilabelPrecision, MultilabelRecall, MultilabelF1Score
 import torch
 
 import lightning.pytorch as pl
@@ -42,8 +42,9 @@ class RobertaClassifier(pl.LightningModule):
         )  # type: ignore
         self.train_steps = 0
         self.save_hyperparameters()
-        n_labels: int = len(self.labels_to_id)
 
+    def setup(self, stage: str):
+        n_labels: int = len(self.labels_to_id)
         self.accuracy = Accuracy("multiclass", num_classes=n_labels, average="macro")
         self.f1 = F1Score("multiclass", num_classes=n_labels, average="macro")
         self.precision = Precision("multiclass", num_classes=n_labels, average="macro")
@@ -64,12 +65,17 @@ class RobertaClassifier(pl.LightningModule):
             labels=labels,
         )
 
-        logits = out.logits
+        metric_value = out.logits
+
+        if self.params.objective == "multilabel_classification":
+            # convert to logits
+            metric_value = (torch.sigmoid(out.logits).squeeze(dim=0) > 0.5).float()
+
         metrics = {
-            # "accuracy": self.accuracy(logits, labels),
-            # "f1": self.f1(logits, labels),
-            # "precision": self.precision(logits, labels),
-            # "recall": self.recall(logits, labels),
+            "accuracy": self.accuracy(metric_value, labels),
+            "f1": self.f1(metric_value, labels),
+            "precision": self.precision(metric_value, labels),
+            "recall": self.recall(metric_value, labels),
         }
 
         return out.loss, metrics
@@ -125,3 +131,10 @@ class RobertaClassifierMultilabel(RobertaClassifier):
         super(RobertaClassifierMultilabel, self).__init__(
             params, problem_type="multi_label_classification"
         )
+
+    def setup(self, stage: str):
+        n_labels: int = len(self.labels_to_id)
+        self.accuracy = Accuracy("multilabel", num_labels=n_labels, average="macro")
+        self.f1 = F1Score("multilabel", num_labels=n_labels, average="macro")
+        self.precision = Precision("multilabel", num_labels=n_labels, average="macro")
+        self.recall = Recall("multilabel", num_labels=n_labels, average="macro")
