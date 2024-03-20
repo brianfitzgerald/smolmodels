@@ -53,12 +53,14 @@ class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
         self,
         tokenizer: T5Tokenizer,
+        run_name: str,
         wandb_logger: Optional[WandbLogger] = None,
         max_new_tokens: int = 256,
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
         self.max_new_tokens = max_new_tokens
+        self.run_name = run_name
 
         self.log_dir = Path("logs")
 
@@ -130,9 +132,8 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         run_name = "latest"
         if self.wandb_logger:
-            run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*feature_columns))
-            self.wandb_logger.log_table("Validation Samples", column_names, table_rows)
+            self.wandb_logger.log_table("samples/validation", column_names, table_rows)
 
         rows = [list(row) for row in zip(*feature_columns)]
         rows_df = pd.DataFrame(rows, columns=column_names)
@@ -195,7 +196,7 @@ class HfModelCheckpoint(ModelCheckpoint):
                 fs.rm(hf_save_dir, recursive=True)
 
 
-class GradNormCallback(pl.Callback):
+class GradientNormLogger(pl.Callback):
     """
     Logs the gradient norm.
     """
@@ -227,7 +228,7 @@ class ModelConfig:
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
 PROMPT_CLASSIFIER_PROJECT = "roberta-prompt-safety-classifier"
-BINARY_CLASSIFIER_PROJECT = "roberta-binary-classifier"
+BINARY_CLASSIFIER_PROJECT = "roberta-safety-classifier-binary"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -291,9 +292,9 @@ CONFIGS = {
             eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=1000,
+            num_train_epochs=10,
             warmup_steps=100,
-            learning_rate=1e-4,
+            learning_rate=1e-5,
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_binary",
@@ -323,7 +324,7 @@ def main(
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
     run_name = f"{config}-{run_name}"
 
-    loggers: List[Logger] = [CSVLogger("logs", name=run_name)]
+    loggers: List[Logger] = []
 
     if wandb:
         project_name = model_config.wandb_project_name
@@ -331,7 +332,7 @@ def main(
         loggers.append(wandb_logger)
 
     ensure_directory("logs", clear=True)
-    sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
+    sample_callback = LogPredictionSamplesCallback(model.tokenizer, run_name, wandb_logger)
 
     checkpoint_callback = HfModelCheckpoint(
         dirpath="/weka/home-brianf/smolmodels_checkpoints",
@@ -340,12 +341,12 @@ def main(
         mode="min",
     )
 
-    grad_norm_callback = GradNormCallback()
+    grad_norm_callback = GradientNormLogger()
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     lr_monitor_callback = LearningRateMonitor(logging_interval="step")
     early_stopping_callback = EarlyStopping(
-        monitor="val_loss_epoch", patience=5, mode="min", check_finite=True
+        monitor="val_loss_epoch", patience=3, mode="min", check_finite=True
     )
 
     precision = "32" if model_config.model == T5Model else "16-mixed"
@@ -369,7 +370,6 @@ def main(
         strategy=strategy,
         callbacks=callbacks,
         logger=loggers,
-        overfit_batches=1,
         gradient_clip_algorithm="value",
         log_every_n_steps=1,
         num_nodes=1,
