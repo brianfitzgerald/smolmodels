@@ -82,6 +82,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         labels = batch["labels"]
         attention_mask = batch["attention_mask"]
         labels_dict: Dict[str, int] = pl_module.id_to_labels
+        breakpoint()
 
         n = len(input_ids)
         if pl_module.params.objective == "classification":
@@ -313,7 +314,7 @@ def main(
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
 
     checkpoint_callback = HfModelCheckpoint(
-        dirpath="checkpoints",
+        dirpath="/weka/home-brianf/smolmodels_checkpoints",
         filename=run_name,
         monitor="val_loss_epoch",
         mode="min",

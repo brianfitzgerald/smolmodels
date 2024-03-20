@@ -2,7 +2,7 @@ from torch.optim.optimizer import Optimizer
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.optimization import (
     get_linear_schedule_with_warmup,
-    get_cosine_schedule_with_warmup
+    get_cosine_schedule_with_warmup,
 )
 from model.utils import HyperParams
 from torch.optim import AdamW
@@ -51,7 +51,7 @@ class RobertaClassifier(pl.LightningModule):
         self.f1 = F1Score("multiclass", num_classes=n_classes, average="macro")
         self.precision = Precision("multiclass", num_classes=n_classes, average="macro")
         self.recall = Recall("multiclass", num_classes=n_classes, average="macro")
-
+    
     def forward(
         self,
         batch: Dict[str, Tensor],
@@ -108,10 +108,12 @@ class RobertaClassifier(pl.LightningModule):
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
             )
+            n_steps: int = self.trainer.estimated_stepping_batches # type: ignore
             scheduler = get_cosine_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=self.params.warmup_steps,
-                num_training_steps=self.trainer.max_steps,
+                num_training_steps=n_steps,
+                num_cycles=1,
             )
             return {
                 "optimizer": optimizer,
