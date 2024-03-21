@@ -11,7 +11,7 @@ from transformers.models.roberta.modeling_roberta import (
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 from typing import Dict
 from synthetic_data.labels import LABEL_SETS_DICT
-from torchmetrics.classification import Accuracy, Precision, Recall, F1Score, MultilabelAccuracy, MultilabelPrecision, MultilabelRecall, MultilabelF1Score
+from torchmetrics.classification import Accuracy, Precision, Recall, F1Score
 import torch
 
 import lightning.pytorch as pl

@@ -110,7 +110,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         self.data_file_paths = ["data_files/clipdrop_prompts_40k.tsv", "data_files/clipdrop_prompts_160k_batch1.tsv"]
         self.rename_columns = {"taskus_label": "tasks_label"}
         ensure_directory(self.cache_dir, clear=False)
-        self.oversample = False
+        self.oversample = True
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
         """
@@ -142,9 +142,6 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         labels: List[int] = [
             ANNOTATED_LABELS[label] for label in examples["tasks_label"]
         ]
-
-        # convert borderline to unsafe
-        labels = [0 if label != 2 else 1 for label in labels]
 
         labels_tensor = torch.tensor(labels, dtype=torch.long)
 

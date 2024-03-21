@@ -153,7 +153,6 @@ class LogPredictionSamplesCallback(pl.Callback):
                 )
                 feature_columns.append(decoded)
 
-        run_name = "latest"
         if self.wandb_logger:
             table_rows = list(zip(*feature_columns))
             self.wandb_logger.log_table("samples/validation", column_names, table_rows)
@@ -161,7 +160,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         rows = [list(row) for row in zip(*feature_columns)]
         rows_df = pd.DataFrame(rows, columns=column_names)
         rows_df.to_csv(
-            self.log_dir / f"{run_name}_samples.csv",
+            self.log_dir / f"{self.run_name}_samples.csv",
             mode="a",
             header=False,
             index=False,
@@ -174,7 +173,7 @@ class LogPredictionSamplesCallback(pl.Callback):
             maxcolwidths=[10, 10, 50, 50, 50],
         )
         print(new_rows)
-        with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
+        with open(self.log_dir / f"{self.run_name}_samples.txt", "a") as f:
             f.write(new_rows)
             f.write("\n")
 
