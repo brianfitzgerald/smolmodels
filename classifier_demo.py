@@ -16,7 +16,7 @@ class SafetyInference:
     def __init__(self) -> None:
 
         classifier_model_name = (
-            "/weka/home-brianf/smolmodels_checkpoints/safety_classifier_binary-DNRC.hf"
+            "/weka/home-brianf/smolmodels_checkpoints/safety_classifier_binary-CBLU.hf"
         )
         print(f"Loading classifier model from {classifier_model_name}")
         self.safety_classifier = pipeline(
@@ -59,7 +59,7 @@ class SafetyInference:
                 break
         for out in safety_outputs[0]:  # type: ignore
             if out["label"] == "unsafe":
-                if out["score"] > 0.5 or (has_persons and score > 0.3):
+                if out["score"] > 0.5 or (has_persons and score > 0.25):
                     would_be_nsfw = True
                     break
         return safety_labels_output, ner_labels_output, lang_detected, would_be_nsfw
