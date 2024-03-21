@@ -23,6 +23,8 @@ class RobertaClassifier(pl.LightningModule):
     ):
         super(RobertaClassifier, self).__init__()
         self.params = params
+        self.hparams.update(vars(params))
+
         if not params.labels_set:
             raise ValueError(f"Labels set {params.labels_set} not found")
         self.labels_to_id = LABEL_SETS_DICT[params.labels_set]
@@ -33,6 +35,8 @@ class RobertaClassifier(pl.LightningModule):
                 params.base_model_checkpoint,
                 output_attentions=False,
                 problem_type=problem_type,
+                label2id=self.labels_to_id,
+                id2label=self.id_to_labels,
                 num_labels=len(self.labels_to_id),
                 output_hidden_states=False,
             )

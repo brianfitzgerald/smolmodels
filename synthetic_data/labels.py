@@ -13,7 +13,7 @@ SAFERPROMPT_LABELS = {
     "discriminatory_content": 5,
 }
 
-ANNOTATED_LABELS = {"safe": 0, "unsafe": 1, "borderline": 2}
+ANNOTATED_LABELS = {"safe": 0, "unsafe": 1}
 
 FAMOUS_FIGURES_LABELS = {"negative": 0, "positive": 1}
 

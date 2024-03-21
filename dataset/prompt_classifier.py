@@ -130,10 +130,10 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         """
         dataset_pd: pd.DataFrame = dataset.to_pandas()  # type: ignore
         dataset_pd = dataset_pd[["prompt", "tasks_label"]]
+        dataset_pd = dataset_pd.dropna(subset=["prompt", "tasks_label"])
         dataset_pd.loc[dataset_pd["tasks_label"] == "borderline", "tasks_label"] = (
             "unsafe"
         )
-        dataset_pd = dataset_pd.dropna(subset=["prompt", "tasks_label"])
         label_counts = dataset_pd["tasks_label"].value_counts()
         if self.sampling_strategy == "oversample":
             max_count = label_counts.max()
@@ -159,7 +159,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
                 )
             balanced_ds = Dataset.from_pandas(under_sampled_df)
         elif self.sampling_strategy == "none":
-            balanced_ds = dataset
+            balanced_ds = Dataset.from_pandas(dataset_pd)
         return balanced_ds
 
     def prepare_sample(self, examples: dict):

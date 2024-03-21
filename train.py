@@ -306,6 +306,7 @@ CONFIGS = {
             max_seq_length=512,
             labels_set="clipdrop_binary",
             objective="binary_classification",
+            sampling_strategy="undersample"
         ),
     ),
     "safety_classifier_multilabel": ModelConfig(
@@ -319,7 +320,6 @@ CONFIGS = {
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
             objective="multilabel_classification",
-            sampling_strategy="undersample"
         ),
     ),
 }
