@@ -104,7 +104,6 @@ class LogPredictionSamplesCallback(pl.Callback):
             decoded_prompts = self.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
-            breakpoint()
 
             feature_columns = [
                 [trainer.current_epoch] * n,

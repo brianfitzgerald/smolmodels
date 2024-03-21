@@ -57,7 +57,10 @@ class RobertaClassifier(pl.LightningModule):
 
         input_ids: Tensor = batch["input_ids"]
         attention_mask: Tensor = batch["attention_mask"]
-        labels: Tensor = batch["labels"].float()
+        labels: Tensor = batch["labels"]
+
+        if self.params.objective == "multilabel_classification":
+            labels = labels.float()
 
         out: SequenceClassifierOutput = self.model(
             input_ids=input_ids,
