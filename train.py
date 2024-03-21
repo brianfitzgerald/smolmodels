@@ -116,18 +116,22 @@ class LogPredictionSamplesCallback(pl.Callback):
         elif h_params.objective == "multilabel_classification":
             out = pl_module.model(input_ids=input_ids, attention_mask=attention_mask)
             labels = labels.cpu().numpy().tolist()
-            predicted_classes = out.logits.cpu().numpy().tolist()
+            predicted_classes = torch.sigmoid(out.logits).squeeze(dim=0)
+            predicted_classes = predicted_classes.cpu().numpy().tolist()
 
             decoded_prompts = self.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
 
+            labels_str = [json.dumps(label) for label in labels]
+            predicted_classes_str = [json.dumps([round(l, 2) for l in label]) for label in predicted_classes]
+
             feature_columns = [
                 [trainer.current_epoch] * n,
                 list(range(n)),
                 decoded_prompts,
-                labels,
-                predicted_classes,
+                labels_str,
+                predicted_classes_str,
             ]
 
         else:
@@ -325,9 +329,9 @@ CONFIGS = {
             eval_batch_size=8,
             gradient_accumulation_steps=1,
             optimizer="AdamW",
-            num_train_epochs=10,
+            num_train_epochs=50,
             warmup_steps=100,
-            learning_rate=1e-5,
+            learning_rate=1e-6,
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
@@ -388,9 +392,9 @@ def main(
     strategy = "ddp" if distributed else "auto"
     callbacks = [
         sample_callback,
-        # checkpoint_callback,
+        checkpoint_callback,
         progress_bar_callback,
-        # early_stopping_callback,
+        early_stopping_callback,
         grad_norm_callback       
     ]
     if wandb:
