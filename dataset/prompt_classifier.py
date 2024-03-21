@@ -1,9 +1,10 @@
 from transformers.tokenization_utils import PreTrainedTokenizer
 import pandas as pd
-from datasets import Dataset
+from datasets import Dataset, concatenate_datasets
 from typing import List
 import torch
 from torch import Tensor
+import csv
 
 from dataset.utils import FineTunerDataset
 from synthetic_data.labels import SAFERPROMPT_LABELS, ANNOTATED_LABELS
@@ -20,14 +21,23 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
     ):
         super().__init__(batch_size, tokenizer, max_token_length)
         self.prompt_column = "prompt"
-        self.label_column = "class_label"
         self.cache_dir = "dataset_caches/clipdrop"
-        self.data_file_path = "data_files/classified_prompts_40k_synthetic.csv"
+        self.data_file_paths = ["data_files/classified_prompts_40k_synthetic.csv"]
+        self.rename_columns = {}
 
     def setup(self, stage: str):
         print(f"Loading dataset for stage {stage}")
-        dataset_csv = pd.read_csv(self.data_file_path)
-        self.dataset = Dataset.from_pandas(dataset_csv)
+        all_datasets = []
+        for data_file in self.data_file_paths:
+            if data_file.endswith(".csv"):
+                dataset_csv = pd.read_csv(data_file, on_bad_lines='skip', quoting=csv.QUOTE_NONE, encoding='utf-8')
+            elif data_file.endswith(".tsv"):
+                dataset_csv = pd.read_csv(data_file, on_bad_lines='skip', encoding='utf-8', sep='\t')
+            dataset_csv = dataset_csv.rename(columns=self.rename_columns)
+            dataset = Dataset.from_pandas(dataset_csv)
+            all_datasets.append(dataset)
+
+        self.dataset = concatenate_datasets(all_datasets)
         self.dataset = self.filter_dataset(self.dataset).train_test_split(
             test_size=0.01, seed=42
         )
@@ -69,7 +79,7 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
         inputs: List[str] = examples[self.prompt_column]
 
         labels: List[int] = [
-            SAFERPROMPT_LABELS[label] for label in examples[self.label_column]
+            SAFERPROMPT_LABELS[label] for label in examples["tasks_label"]
         ]
 
         labels_tensor = torch.tensor(labels, dtype=torch.long)
@@ -96,13 +106,14 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
     ):
         super().__init__(batch_size, tokenizer, max_token_length)
-        self.label_column = "taskus_label"
         self.cache_dir = "dataset_caches/clipdrop_binary"
-        self.data_file_path = "data_files/clipdrop_prompts_benchmark_annotated.csv"
+        self.data_file_paths = ["data_files/clipdrop_prompts_40k.tsv", "data_files/clipdrop_prompts_160k_batch1.tsv"]
+        self.rename_columns = {"taskus_label": "tasks_label"}
+        ensure_directory(self.cache_dir, clear=False)
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
         dataset = dataset.filter(
-            lambda x: x["prompt"] is not None and x["taskus_label"] is not None,
+            lambda x: x["prompt"] is not None and x["tasks_label"] is not None and x["tasks_label"] in ANNOTATED_LABELS.keys(),
             cache_file_name=f"{self.cache_dir}/dataset_filtered.parquet",
         )
         return dataset
@@ -112,7 +123,7 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         inputs: List[str] = examples[self.prompt_column]
 
         labels: List[int] = [
-            ANNOTATED_LABELS[label] for label in examples[self.label_column]
+            ANNOTATED_LABELS[label] for label in examples["tasks_label"]
         ]
 
         # convert borderline to unsafe
@@ -155,18 +166,19 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
 
 
-class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
+class ClipdropSafetyFamousFiguresDataModule(ClipdropSyntheticClassesDataModule):
+    """
+    Datamodule with 2 classes - safe and famous_figures
+    """
     def __init__(
         self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
     ):
         super().__init__(batch_size, tokenizer, max_token_length)
         self.cache_dir = "dataset_caches/clipdrop_multilabel"
-        self.data_file_path = "data_files/clipdrop_prompts_famous_figures.csv"
+        self.data_file_paths = ["data_files/clipdrop_prompts_famous_figures.csv"]
         ensure_directory(self.cache_dir, clear=False)
 
     def prepare_sample(self, examples: dict):
-
-        inputs: List[str] = examples[self.prompt_column]
 
         annotated_labels = [
             1 if label == "safe" else 0 for label in examples["annotated_label"]
@@ -182,7 +194,7 @@ class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
         labels_batch_tensor = torch.tensor(labels_batch, dtype=torch.long)
 
         inputs_tokenized = self.tokenizer(
-            inputs,
+            examples[self.prompt_column],
             add_special_tokens=True,
             max_length=self.max_token_length,
             truncation=True,
@@ -196,9 +208,3 @@ class ClipdropMultiLabelDataModule(ClipdropSyntheticClassesDataModule):
             "attention_mask": inputs_tokenized["attention_mask"],
             "labels": labels_batch_tensor,
         }
-
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore

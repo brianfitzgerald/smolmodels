@@ -26,14 +26,14 @@ class HyperParams:
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
     warmup_steps: int = 100
-    train_batch_size: int = 4
-    eval_batch_size: int = 2
+    train_batch_size: int = 16
+    eval_batch_size: int = 8
     num_train_epochs: int = 25
-    gradient_accumulation_steps: int = 2
+    gradient_accumulation_steps: int = 1
     max_grad_norm: float = 1.0
     seed: int = 42
     weight_decay: float = 0.0
-    optimizer: OptimizerChoice = "AdamW8bit"
+    optimizer: OptimizerChoice = "AdamW"
     objective: Objective = "generation"
     # Only relevant for classification
     labels_set: Optional[LabelsSet] = None

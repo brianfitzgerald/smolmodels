@@ -184,6 +184,9 @@ submit_datagen.sh
 
 160k_batch1.tsv
 clipdrop_prompts_benchmark.tsv
-data_files/clipdrop_prompts_benchmark_annotated.csv
+data_files/clipdrop_prompts_40k.csv
+data_files/clipdrop_prompts_40k.tsv
 data_files/classified_prompts_40k_synthetic.csv
 data_files/clipdrop_prompts_famous_figures.csv
+data_files/clipdrop_prompts_160k_batch1.csv
+data_files/clipdrop_prompts_160k_batch1.tsv

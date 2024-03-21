@@ -27,14 +27,8 @@ I2P_LABELS = {
     "illegal-activity": 6,
 }
 
-CLIPDROP_MULTILABEL_LABELS = {
-    "unsafe": 0,
-    "famous_figures": 1,
-}
-
 LABEL_SETS_DICT: Dict[LabelsSet, Dict[str, int]] = {
     "clipdrop_synthetic": SAFERPROMPT_LABELS,
     "clipdrop_binary": ANNOTATED_LABELS,
     "i2p": I2P_LABELS,
-    "clipdrop_multilabel": CLIPDROP_MULTILABEL_LABELS,
 }

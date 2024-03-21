@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from dataset.prompt_classifier import (
     ClipdropSyntheticClassesDataModule,
     ClipdropBinaryDataModule,
-    ClipdropMultiLabelDataModule,
+    ClipdropSafetyFamousFiguresDataModule,
 )
 from dataset.function_calling import FunctionCallingDataModule
 import random
@@ -104,6 +104,7 @@ class LogPredictionSamplesCallback(pl.Callback):
             decoded_prompts = self.tokenizer.batch_decode(
                 input_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
+            breakpoint()
 
             feature_columns = [
                 [trainer.current_epoch] * n,
@@ -124,7 +125,9 @@ class LogPredictionSamplesCallback(pl.Callback):
             )
 
             labels_str = [json.dumps(label) for label in labels]
-            predicted_classes_str = [json.dumps([round(l, 2) for l in label]) for label in predicted_classes]
+            predicted_classes_str = [
+                json.dumps([round(l, 2) for l in label]) for label in predicted_classes
+            ]
 
             feature_columns = [
                 [trainer.current_epoch] * n,
@@ -287,14 +290,8 @@ CONFIGS = {
         PROMPT_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
-            train_batch_size=16,
-            eval_batch_size=8,
-            gradient_accumulation_steps=1,
-            optimizer="AdamW",
             num_train_epochs=25,
-            warmup_steps=1000,
             learning_rate=1e-4,
-            adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_binary",
             objective="binary_classification",
@@ -306,14 +303,8 @@ CONFIGS = {
         BINARY_CLASSIFIER_PROJECT,
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
-            train_batch_size=16,
-            eval_batch_size=8,
-            gradient_accumulation_steps=1,
-            optimizer="AdamW",
-            num_train_epochs=3,
-            warmup_steps=100,
-            learning_rate=1e-5,
-            adam_epsilon=1e-8,
+            num_train_epochs=50,
+            learning_rate=1e-6,
             max_seq_length=512,
             labels_set="clipdrop_binary",
             objective="binary_classification",
@@ -321,18 +312,25 @@ CONFIGS = {
     ),
     "safety_classifier_multilabel": ModelConfig(
         RobertaClassifierMultilabel,
-        ClipdropMultiLabelDataModule,
+        ClipdropSafetyFamousFiguresDataModule,
         "roberta-safety-classifier-multilabel",
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
-            train_batch_size=16,
-            eval_batch_size=8,
-            gradient_accumulation_steps=1,
-            optimizer="AdamW",
             num_train_epochs=50,
-            warmup_steps=100,
-            learning_rate=1e-7,
-            adam_epsilon=1e-8,
+            learning_rate=1e-6,
+            max_seq_length=512,
+            labels_set="clipdrop_multilabel",
+            objective="multilabel_classification",
+        ),
+    ),
+    "safety_classifier_multilabel_nsfw_only": ModelConfig(
+        RobertaClassifierMultilabel,
+        ClipdropSafetyFamousFiguresDataModule,
+        "roberta-safety-classifier-multilabel-nsfw-only",
+        HyperParams(
+            base_model_checkpoint="distilbert/distilroberta-base",
+            num_train_epochs=50,
+            learning_rate=1e-6,
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
             objective="multilabel_classification",
@@ -344,7 +342,7 @@ CONFIGS = {
 def main(
     wandb: bool = False,
     distributed: bool = False,
-    config: str = "safety_classifier_multilabel",
+    config: str = "safety_classifier_binary",
     **kwargs,
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
@@ -368,7 +366,9 @@ def main(
         loggers.append(wandb_logger)
 
     ensure_directory("logs", clear=True)
-    sample_callback = LogPredictionSamplesCallback(model.tokenizer, run_name, wandb_logger)
+    sample_callback = LogPredictionSamplesCallback(
+        model.tokenizer, run_name, wandb_logger
+    )
 
     quality_metric = "val_loss_epoch"
 
@@ -395,7 +395,7 @@ def main(
         checkpoint_callback,
         progress_bar_callback,
         early_stopping_callback,
-        grad_norm_callback       
+        grad_norm_callback,
     ]
     if wandb:
         callbacks.append(lr_monitor_callback)
