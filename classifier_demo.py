@@ -2,6 +2,7 @@ import torch
 from transformers.models.roberta.modeling_roberta import (
     RobertaForSequenceClassification,
 )
+from transformers.pipelines import pipeline
 from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 import gradio as gr
 from span_marker import SpanMarkerModel
@@ -13,19 +14,15 @@ class SafetyInference:
         
         classifier_model_name = "SamLowe/roberta-base-go_emotions"
         print(f"Loading classifier model {classifier_model_name}")
-        self.safety_classifier = RobertaForSequenceClassification.from_pretrained(classifier_model_name)
-        self.safety_classifier = self.safety_classifier.cuda()
-        self.tokenizer = RobertaTokenizer.from_pretrained(classifier_model_name)
+        self.safety_classifier = pipeline(task="text-classification", model="SamLowe/roberta-base-go_emotions", top_k=None, device="cuda")
 
         print(f"Loading NER model")
         self.ner_model = SpanMarkerModel.from_pretrained("tomaarsen/span-marker-mbert-base-multinerd")
         self.ner_model = self.ner_model.cuda()
     
     def predict(self, text):
-        tokenized_inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512).to("cuda")
         with torch.no_grad():
-            logits = self.safety_classifier(**tokenized_inputs).logits
-            logprobs = torch.sigmoid(logits).cpu().numpy()
+            safety_outputs = self.safety_classifier(text)
             ner_predictions = self.ner_model.predict(text)
         breakpoint()
         has_persons = False
@@ -33,15 +30,15 @@ class SafetyInference:
             if "person" in span["label"]: # type: ignore
                 has_persons = True
                 break
-        return logprobs, has_persons
+        return safety_outputs, has_persons
 
 def main(gradio: bool = False):
     inference_wrapper = SafetyInference()
 
     def predict_labels(text):
         print(f"Processing {text}")
-        logprobs, has_persons = inference_wrapper.predict(text)
-        return f"Safety: {logprobs}, has people: {has_persons}"
+        safety_outputs, has_persons = inference_wrapper.predict(text)
+        return f"Safety: {safety_outputs}, has people: {has_persons}"
 
     if gradio:
         interface = gr.Interface(fn=predict_labels,

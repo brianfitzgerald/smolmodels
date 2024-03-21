@@ -17,6 +17,7 @@ PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 Objective = Literal["binary_classification", "multilabel_classification", "generation"]
+SamplingStrategy = Literal["oversample", "undersample", "none"]
 
 
 @dataclass
@@ -35,6 +36,7 @@ class HyperParams:
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW"
     objective: Objective = "generation"
+    sampling_strategy: SamplingStrategy = "none"
     # Only relevant for classification
     labels_set: Optional[LabelsSet] = None
 

@@ -7,6 +7,7 @@ from torch import Tensor
 import csv
 
 from dataset.utils import FineTunerDataset
+from model.utils import HyperParams, SamplingStrategy
 from synthetic_data.labels import SAFERPROMPT_LABELS, ANNOTATED_LABELS
 from synthetic_data.utils import ensure_directory
 from torch.utils.data import DataLoader, WeightedRandomSampler
@@ -15,11 +16,10 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 class ClipdropSyntheticClassesDataModule(FineTunerDataset):
     def __init__(
         self,
-        batch_size: int,
+        hyperparams: HyperParams,
         tokenizer: PreTrainedTokenizer,
-        max_token_length: int,
     ):
-        super().__init__(batch_size, tokenizer, max_token_length)
+        super().__init__(hyperparams, tokenizer)
         self.prompt_column = "prompt"
         self.cache_dir = "dataset_caches/clipdrop"
         self.data_file_paths = ["data_files/classified_prompts_40k_synthetic.csv"]
@@ -30,9 +30,16 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
         all_datasets = []
         for data_file in self.data_file_paths:
             if data_file.endswith(".csv"):
-                dataset_csv = pd.read_csv(data_file, on_bad_lines='skip', quoting=csv.QUOTE_NONE, encoding='utf-8')
+                dataset_csv = pd.read_csv(
+                    data_file,
+                    on_bad_lines="skip",
+                    quoting=csv.QUOTE_NONE,
+                    encoding="utf-8",
+                )
             elif data_file.endswith(".tsv"):
-                dataset_csv = pd.read_csv(data_file, on_bad_lines='skip', encoding='utf-8', sep='\t')
+                dataset_csv = pd.read_csv(
+                    data_file, on_bad_lines="skip", encoding="utf-8", sep="\t"
+                )
             dataset_csv = dataset_csv.rename(columns=self.rename_columns)
             dataset = Dataset.from_pandas(dataset_csv)
             all_datasets.append(dataset)
@@ -103,36 +110,56 @@ class ClipdropSyntheticClassesDataModule(FineTunerDataset):
 
 class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
     def __init__(
-        self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
+        self,
+        hyperparams: HyperParams,
+        tokenizer: PreTrainedTokenizer,
     ):
-        super().__init__(batch_size, tokenizer, max_token_length)
-        self.cache_dir = "dataset_caches/clipdrop_binary"
-        self.data_file_paths = ["data_files/clipdrop_prompts_40k.tsv", "data_files/clipdrop_prompts_160k_batch1.tsv"]
+        super().__init__(hyperparams, tokenizer)
+        self.sampling_strategy: SamplingStrategy = hyperparams.sampling_strategy
+        self.cache_dir = f"dataset_caches/clipdrop_binary_{self.sampling_strategy}"
+        self.data_file_paths = [
+            "data_files/clipdrop_prompts_40k.tsv",
+            "data_files/clipdrop_prompts_160k_batch1.tsv",
+        ]
         self.rename_columns = {"taskus_label": "tasks_label"}
         ensure_directory(self.cache_dir, clear=False)
-        self.oversample = True
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
         """
         Minority oversample, drop na, and convert borderline to unsafe
         """
-        dataset_pd: pd.DataFrame = dataset.to_pandas() # type: ignore
+        dataset_pd: pd.DataFrame = dataset.to_pandas()  # type: ignore
         dataset_pd = dataset_pd[["prompt", "tasks_label"]]
-        dataset_pd.loc[dataset_pd["tasks_label"] == "borderline", "tasks_label"] = "unsafe"
+        dataset_pd.loc[dataset_pd["tasks_label"] == "borderline", "tasks_label"] = (
+            "unsafe"
+        )
         dataset_pd = dataset_pd.dropna(subset=["prompt", "tasks_label"])
         label_counts = dataset_pd["tasks_label"].value_counts()
-        if self.oversample:
+        if self.sampling_strategy == "oversample":
             max_count = label_counts.max()
-            balanced_df = pd.concat([dataset_pd[dataset_pd['tasks_label'] == label].sample(max_count, replace=True) for label in label_counts.index])
+            balanced_df = pd.concat(
+                [
+                    dataset_pd[dataset_pd["tasks_label"] == label].sample(
+                        max_count, replace=True
+                    )
+                    for label in label_counts.index
+                ]
+            )
             balanced_ds = Dataset.from_pandas(balanced_df)
-        else:
+        elif self.sampling_strategy == "undersample":
             min_label_count = label_counts.min()
             under_sampled_df = pd.DataFrame()
             for label in label_counts.index:
-                label_subset = dataset_pd[dataset_pd['tasks_label'] == label]
-                under_sampled_label_subset = label_subset.sample(n=min_label_count, random_state=1)  # random_state for reproducibility
-                under_sampled_df = pd.concat([under_sampled_df, under_sampled_label_subset], axis=0)
+                label_subset = dataset_pd[dataset_pd["tasks_label"] == label]
+                under_sampled_label_subset = label_subset.sample(
+                    n=min_label_count, random_state=1
+                )  # random_state for reproducibility
+                under_sampled_df = pd.concat(
+                    [under_sampled_df, under_sampled_label_subset], axis=0
+                )
             balanced_ds = Dataset.from_pandas(under_sampled_df)
+        elif self.sampling_strategy == "none":
+            balanced_ds = dataset
         return balanced_ds
 
     def prepare_sample(self, examples: dict):
@@ -172,14 +199,18 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
         return sampler
 
+
 class ClipdropSafetyFamousFiguresDataModule(ClipdropSyntheticClassesDataModule):
     """
     Datamodule with 2 classes - safe and famous_figures
     """
+
     def __init__(
-        self, batch_size: int, tokenizer: PreTrainedTokenizer, max_token_length: int
+        self,
+        hyperparams: HyperParams,
+        tokenizer: PreTrainedTokenizer,
     ):
-        super().__init__(batch_size, tokenizer, max_token_length)
+        super().__init__(hyperparams, tokenizer)
         self.cache_dir = "dataset_caches/clipdrop_multilabel"
         self.data_file_paths = ["data_files/clipdrop_prompts_famous_figures.csv"]
         ensure_directory(self.cache_dir, clear=False)

@@ -1,22 +1,22 @@
 import lightning.pytorch as pl
 from transformers.tokenization_utils import PreTrainedTokenizer
 from torch.utils.data import DataLoader
+from model.utils import HyperParams
 
 
 class FineTunerDataset(pl.LightningDataModule):
     def __init__(
         self,
-        batch_size: int,
+        hyperparams: HyperParams,
         tokenizer: PreTrainedTokenizer,
-        max_token_length: int,
     ):
         super().__init__()
 
         self.train_dataset = None
         self.val_dataset = None
-        self.batch_size = batch_size
+        self.batch_size = hyperparams.train_batch_size
         self.tokenizer = tokenizer
-        self.max_token_length = max_token_length
+        self.max_token_length = hyperparams.max_seq_length
         self.cpu_count = 1
 
     def train_dataloader(self):

@@ -319,6 +319,7 @@ CONFIGS = {
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
             objective="multilabel_classification",
+            sampling_strategy="undersample"
         ),
     ),
 }
@@ -338,7 +339,7 @@ def main(
     hparams = model_config.hyperparams
     model = model_config.model(hparams)
     data_module = model_config.data_module(
-        hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
+        hparams, model.tokenizer
     )
 
     wandb_logger = None
