@@ -331,7 +331,7 @@ CONFIGS = {
             optimizer="AdamW",
             num_train_epochs=50,
             warmup_steps=100,
-            learning_rate=1e-6,
+            learning_rate=1e-7,
             adam_epsilon=1e-8,
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
@@ -370,7 +370,7 @@ def main(
     ensure_directory("logs", clear=True)
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, run_name, wandb_logger)
 
-    quality_metric = "val_metrics/f1_epoch"
+    quality_metric = "val_loss_epoch"
 
     checkpoint_callback = HfModelCheckpoint(
         dirpath="/weka/home-brianf/smolmodels_checkpoints",
@@ -384,7 +384,7 @@ def main(
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     lr_monitor_callback = LearningRateMonitor(logging_interval="step")
     early_stopping_callback = EarlyStopping(
-        monitor=quality_metric, patience=3, mode="max", check_finite=True
+        monitor=quality_metric, patience=5, mode="min", check_finite=True
     )
 
     precision = "32" if model_config.model == T5Model else "16-mixed"
