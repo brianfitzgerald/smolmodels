@@ -303,7 +303,7 @@ CONFIGS = {
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
             num_train_epochs=50,
-            learning_rate=1e-6,
+            learning_rate=1e-7,
             max_seq_length=512,
             labels_set="clipdrop_binary",
             objective="binary_classification",
@@ -315,21 +315,8 @@ CONFIGS = {
         "roberta-safety-classifier-multilabel",
         HyperParams(
             base_model_checkpoint="distilbert/distilroberta-base",
-            num_train_epochs=50,
-            learning_rate=1e-6,
-            max_seq_length=512,
-            labels_set="clipdrop_multilabel",
-            objective="multilabel_classification",
-        ),
-    ),
-    "safety_classifier_multilabel_nsfw_only": ModelConfig(
-        RobertaClassifierMultilabel,
-        ClipdropSafetyFamousFiguresDataModule,
-        "roberta-safety-classifier-multilabel-nsfw-only",
-        HyperParams(
-            base_model_checkpoint="distilbert/distilroberta-base",
-            num_train_epochs=50,
-            learning_rate=1e-6,
+            num_train_epochs=100,
+            learning_rate=1e-5,
             max_seq_length=512,
             labels_set="clipdrop_multilabel",
             objective="multilabel_classification",
@@ -345,6 +332,8 @@ def main(
     **kwargs,
 ):
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
+
+    torch.manual_seed(42)
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams

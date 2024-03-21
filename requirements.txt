@@ -21,3 +21,5 @@ accelerate
 matplotlib
 openai
 bitsandbytes==0.43.0
+gradio==4.22.0
+span_marker

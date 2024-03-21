@@ -110,13 +110,30 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
         self.data_file_paths = ["data_files/clipdrop_prompts_40k.tsv", "data_files/clipdrop_prompts_160k_batch1.tsv"]
         self.rename_columns = {"taskus_label": "tasks_label"}
         ensure_directory(self.cache_dir, clear=False)
+        self.oversample = False
 
     def filter_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.filter(
-            lambda x: x["prompt"] is not None and x["tasks_label"] is not None and x["tasks_label"] in ANNOTATED_LABELS.keys(),
-            cache_file_name=f"{self.cache_dir}/dataset_filtered.parquet",
-        )
-        return dataset
+        """
+        Minority oversample, drop na, and convert borderline to unsafe
+        """
+        dataset_pd: pd.DataFrame = dataset.to_pandas() # type: ignore
+        dataset_pd = dataset_pd[["prompt", "tasks_label"]]
+        dataset_pd.loc[dataset_pd["tasks_label"] == "borderline", "tasks_label"] = "unsafe"
+        dataset_pd = dataset_pd.dropna(subset=["prompt", "tasks_label"])
+        label_counts = dataset_pd["tasks_label"].value_counts()
+        if self.oversample:
+            max_count = label_counts.max()
+            balanced_df = pd.concat([dataset_pd[dataset_pd['tasks_label'] == label].sample(max_count, replace=True) for label in label_counts.index])
+            balanced_ds = Dataset.from_pandas(balanced_df)
+        else:
+            min_label_count = label_counts.min()
+            under_sampled_df = pd.DataFrame()
+            for label in label_counts.index:
+                label_subset = dataset_pd[dataset_pd['tasks_label'] == label]
+                under_sampled_label_subset = label_subset.sample(n=min_label_count, random_state=1)  # random_state for reproducibility
+                under_sampled_df = pd.concat([under_sampled_df, under_sampled_label_subset], axis=0)
+            balanced_ds = Dataset.from_pandas(under_sampled_df)
+        return balanced_ds
 
     def prepare_sample(self, examples: dict):
 
@@ -157,14 +174,6 @@ class ClipdropBinaryDataModule(ClipdropSyntheticClassesDataModule):
 
         sampler = WeightedRandomSampler(sample_weights, len(sample_weights), replacement=True)  # type: ignore
         return sampler
-
-    def train_dataloader(self):
-        sampler = self.get_sampler(self.train_dataset["labels"])  # type: ignore
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.cpu_count, sampler=sampler)  # type: ignore
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
-
 
 class ClipdropSafetyFamousFiguresDataModule(ClipdropSyntheticClassesDataModule):
     """
