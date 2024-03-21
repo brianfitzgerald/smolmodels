@@ -190,3 +190,4 @@ data_files/classified_prompts_40k_synthetic.csv
 data_files/clipdrop_prompts_famous_figures.csv
 data_files/clipdrop_prompts_160k_batch1.csv
 data_files/clipdrop_prompts_160k_batch1.tsv
+flagged
