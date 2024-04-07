@@ -172,11 +172,18 @@ logs/*
 dataset_cache_parti/*
 dataset_cache_llava/*
 *.parquet
+output_datasets/*
 
 samples/*
 dataset_caches/*
 dataset_samples/*
-submit.sh
-submit_datagen.sh
 
 *DS_Store*
+
+clipdrop_prompts_benchmark.tsv
+data/private
+flagged
+classifier_test.png
+gradio_tmp
+classifier_eval
+baseline_eval
