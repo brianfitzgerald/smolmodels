@@ -14,7 +14,9 @@ class LlamaFineTuner(pl.LightningModule):
         self.params = params
         self.hparams.update(vars(params))
 
-        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(params.base_model_checkpoint)
+        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(
+            params.base_model_checkpoint
+        )
         self.tokenizer = LlamaTokenizer.from_pretrained(params.base_model_checkpoint)
         self.ckpt_name = params.base_model_checkpoint
         self.train_steps = 0

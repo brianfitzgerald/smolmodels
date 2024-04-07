@@ -51,6 +51,7 @@ class SyntheticToolCallDPORow:
     call_result_rejected: str
     agent_output_rejected: str
 
+
 class DatasetTaskFormat(str, Enum):
     SFT = "SFT"
     DPO = "DPO"

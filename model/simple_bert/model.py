@@ -6,6 +6,9 @@ import torch.nn.functional as F
 from typing import Tuple
 import lightning.pytorch as pl
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
+from torch.optim import AdamW
+import bitsandbytes as bnb
+from transformers.optimization import get_cosine_schedule_with_warmup
 
 from model.utils import HyperParams
 
@@ -20,7 +23,6 @@ class SimpleBERTConfig:
 
 
 class SelfAttention(nn.Module):
-
     def __init__(self, config: SimpleBERTConfig) -> None:
         """
         Multi head self attention
@@ -30,7 +32,7 @@ class SelfAttention(nn.Module):
         super().__init__()
 
         self.config = config
-        emb_size = config.hidden_size
+        emb_size = config.embed_size
         n_head = config.num_attention_heads
         assert emb_size % n_head == 0
 
@@ -40,7 +42,7 @@ class SelfAttention(nn.Module):
         pos_emb_units = config.embed_size // n_head
 
         # set as parameter so we can learn it
-        self.pos_emb_k = nn.Parameter(torch.zeros(pos_emb_radius * 2, pos_emb_units))
+        self.pos_emb_k = nn.Parameter(torch.zeros(2 * pos_emb_radius, pos_emb_units))
         torch.nn.init.normal_(self.pos_emb_k, mean=0, std=0.02)
 
         # Disable bias - from cramming paper, removes unused parameters
@@ -52,21 +54,20 @@ class SelfAttention(nn.Module):
         self.proj = nn.Linear(emb_size, emb_size, bias=False)
 
     def forward(self, x: Tensor):
-
         # x is context we are attending to
         # usually the hidden state of the transformer
         # the context is not divided by heads - each head attends to the whole context
         # the context is the output of the previous layer, not the qkv scores
 
         batch_size, context_size, emb_size = x.size()
-        assert emb_size == self.config.hidden_size
+        assert emb_size == self.config.embed_size
 
         n_head = self.config.num_attention_heads
         head_size = emb_size // n_head
 
         pos_emb_size, head_size = self.pos_emb_k.size()
         pos_emb_radius = self.config.pos_emb_radius
-        assert pos_emb_size == pos_emb_radius * 2
+        assert pos_emb_size == 2 * pos_emb_radius
 
         # calculate in batch, and move the head to the batch dim
         # so out is (batch_size, n_head, context_size, head_size)
@@ -114,12 +115,12 @@ class SelfAttention(nn.Module):
         )
         assert att_pos.shape == (batch_size, n_head, context_size, context_size)
 
-        attn_val = q @ k.transpose(-2, -1) + att_pos
+        attn_val = q @ k.transpose(-2, -1)
 
         # Scaling attention by the size of the key,
         # as per the original transformer paper
         # this helps keep the gradients from exploding
-        attn_scale = 1 / math.sqrt(k.shape[-1])
+        attn_scale = 1.0 / math.sqrt(k.shape[-1])
 
         # Softmax over the last dim, and scale by the attention scale
         # attn_vals = (batch_size, n_head, context_size, context_size)
@@ -137,7 +138,6 @@ class SelfAttention(nn.Module):
 
 
 class Block(nn.Module):
-
     def __init__(self, config: SimpleBERTConfig) -> None:
         super().__init__()
 
@@ -147,15 +147,14 @@ class Block(nn.Module):
         self.attn = SelfAttention(config)
         self.norm2 = nn.LayerNorm(embed_size, eps=1e-6)
         self.mlp = nn.Sequential(
-            nn.Linear(embed_size, embed_size * 4),
+            nn.Linear(embed_size, embed_size * 4, bias=False),
             nn.GELU(),
-            nn.Linear(embed_size * 4, embed_size),
+            nn.Linear(embed_size * 4, embed_size, bias=False),
         )
         self.pre_layernorm = True
         # No dropout layer, removed in Cramming
 
     def forward(self, x: Tensor) -> Tensor:
-
         if self.pre_layernorm:
             x = x + self.attn(self.norm1(x))
             x = x + self.mlp(self.norm2(x))
@@ -167,7 +166,6 @@ class Block(nn.Module):
 
 
 class BERT(nn.Module):
-
     def __init__(self, config: SimpleBERTConfig, vocab_size: int) -> None:
         super().__init__()
 
@@ -183,6 +181,11 @@ class BERT(nn.Module):
         self.norm_final = nn.LayerNorm(embed_size, eps=1e-6)
 
         self.apply(self._init_weights)
+        # apply the weight initialization to the projection layer, scaled by the number of layers
+        # this is the same as the original transformer
+        for pn, p in self.named_parameters():
+            if pn.endswith("proj.weight"):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * n_layers))
 
     def _init_weights(self, module):
         """
@@ -202,7 +205,6 @@ class BERT(nn.Module):
             torch.nn.init.ones_(module.weight)
 
     def forward(self, x: Tensor) -> Tensor:
-
         x = self.token_emb(x)
         x = self.norm_emb(x)
 
@@ -244,6 +246,7 @@ class SimpleBertForMaskedLM(pl.LightningModule):
 
     def __init__(self, hparams: HyperParams) -> None:
         super().__init__()
+        self.params = hparams
 
         config = SimpleBERTConfig(
             hidden_size=128,
@@ -264,3 +267,73 @@ class SimpleBertForMaskedLM(pl.LightningModule):
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.bert(x)
         return self.head(x, y)
+
+    def training_step(self, batch, batch_idx):
+        loss = self(batch)
+        self.log(
+            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
+        return {"loss": loss}
+
+    def validation_step(self, batch, batch_idx):
+        loss = self(batch)
+        self.log(
+            "val_loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        return {"val_loss": loss}
+
+    def configure_optimizers(self):
+        "Prepare optimizer and schedule (linear warmup and decay)"
+
+        # emulates the original optimizer in https://github.com/google-research/bert/blob/master/optimization.py#L65
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": self.params.weight_decay,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self.model.named_parameters()
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+            },
+        ]
+
+        optim_choice = self.params.optimizer
+
+        if optim_choice == "AdamW":
+            optimizer = AdamW(
+                optimizer_grouped_parameters,
+                lr=self.params.learning_rate,
+                eps=self.params.adam_epsilon,
+            )
+        elif optim_choice == "AdamW8bit":
+            optimizer = bnb.optim.adamw.AdamW8bit(
+                optimizer_grouped_parameters,
+                lr=self.params.learning_rate,
+                eps=self.params.adam_epsilon,
+            )
+        # TODO pass in no. of train steps
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=self.params.warmup_steps,
+            num_training_steps=1000,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+            },
+        }

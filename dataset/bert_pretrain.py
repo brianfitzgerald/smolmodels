@@ -1,7 +1,7 @@
 from datasets import load_dataset, concatenate_datasets, Dataset
 from typing import Optional
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
-from model.utils import ensure_directory, FineTunerDataset
+from model.utils import ensure_directory, SmDataset
 import os
 import re
 from unidecode import unidecode
@@ -20,14 +20,13 @@ def clean_bookcorpus_text(text: str) -> str:
     return s.strip()
 
 
-class BertPretrainDataset(FineTunerDataset):
+class BertPretrainDataset(SmDataset):
     def __init__(
         self,
         batch_size: int,
         tokenizer: PreTrainedTokenizer,
         max_token_length: int,
     ):
-
         self.batch_size = batch_size
         self.tokenizer = tokenizer
         self.train_dataset: Optional[Dataset] = None

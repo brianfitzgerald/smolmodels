@@ -6,7 +6,7 @@ from typing import Dict
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
     ensure_directory,
-    FineTunerDataset,
+    SmDataset,
     SAFETY_TASK_PREFIX,
 )
 
@@ -23,7 +23,7 @@ def generate_full_prompt(instruction: str, prompt: str) -> str:
     )
 
 
-class PromptUpsampleDataModule(FineTunerDataset):
+class PromptUpsampleDataModule(SmDataset):
     def __init__(
         self,
         batch_size: int,
@@ -88,7 +88,6 @@ class PromptUpsampleDataModule(FineTunerDataset):
         self.val_dataset.set_format(type="torch", columns=columns)
 
     def prepare_sample(self, examples: dict):
-
         inputs = [self.task_prefix + doc for doc in examples[self.input_column]]
 
         inputs_tokenized = self.tokenizer(

@@ -10,11 +10,14 @@ import os
 from dataclasses import dataclass
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
-SAFETY_TASK_PREFIX = "Rewrite the following prompt to remove any unsafe or copyrighted content: "
+SAFETY_TASK_PREFIX = (
+    "Rewrite the following prompt to remove any unsafe or copyrighted content: "
+)
 IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
+
 
 @dataclass
 class HyperParams:
@@ -34,7 +37,7 @@ class HyperParams:
     optimizer: OptimizerChoice = "AdamW8bit"
 
 
-class FineTunerDataset(pl.LightningDataModule):
+class SmDataset(pl.LightningDataModule):
     def __init__(
         self,
         batch_size: int,
