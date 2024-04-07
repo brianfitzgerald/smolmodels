@@ -1,19 +1,18 @@
-
-print("Loading dependencies - torch...")
 from typing import Optional
 from tabulate import tabulate
 import pandas as pd
 from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from pathlib import Path
 import shutil
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+import lightning.pytorch as pl
+from fsspec.core import url_to_fs
 
-
-print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 
 
-print("Loading dependencies - project...")
 from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
@@ -97,9 +96,9 @@ class LogPredictionSamplesCallback(pl.Callback):
             f.write(new_rows)
             f.write("\n")
 
+
 # https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
 class HfModelCheckpoint(ModelCheckpoint):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.FILE_EXTENSION = ""
@@ -119,4 +118,3 @@ class HfModelCheckpoint(ModelCheckpoint):
             fs, _ = url_to_fs(filepath)
             if fs.exists(filepath):
                 fs.rm(filepath, recursive=True)
-

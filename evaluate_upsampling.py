@@ -30,7 +30,6 @@ def main(
     generate_samples: bool = False,
     sdxl: bool = True,
 ):
-
     print("Loading model...")
     tokenizer = T5Tokenizer.from_pretrained(checkpoint_dir)
     model: T5ForConditionalGeneration = T5ForConditionalGeneration.from_pretrained(
@@ -78,7 +77,6 @@ def main(
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     for i in range(0, len(drawbench_df), batch_size):
-
         chunk = drawbench_df[i : i + batch_size]
 
         prompts_with_prefix = [

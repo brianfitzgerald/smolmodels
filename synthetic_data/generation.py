@@ -41,9 +41,7 @@ class GenerationWrapper(ABC):
 
 
 class VLLMWrapper(GenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
-
         from vllm import LLM, SamplingParams  # type: ignore
 
         self.sampling_params = SamplingParams(
@@ -63,7 +61,6 @@ class VLLMWrapper(GenerationWrapper):
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("OPENAI_API_KEY")
         if api_key is None:
@@ -98,7 +95,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("OPENROUTER_API_KEY")
         if api_key is None:
@@ -114,7 +110,6 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 
 class GroqGenerationWrapper(OpenAIGenerationWrapper):
-
     def __init__(self, dotenv: Dict[str, str]):
         api_key = dotenv.get("GROQ_API_KEY")
         if api_key is None:

@@ -22,7 +22,7 @@ from training import LogPredictionSamplesCallback, HfModelCheckpoint
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
 from dataset.bert_pretrain import BertPretrainDataset
-from model.utils import HyperParams
+from model.utils import SmDataset, HyperParams
 
 
 class ModelChoice(Enum):
@@ -34,7 +34,7 @@ class ModelChoice(Enum):
 @dataclass
 class ModelConfig:
     model: type[pl.LightningModule]
-    data_module: type[pl.LightningDataModule]
+    data_module: type[SmDataset]
     wandb_project_name: str
     hyperparams: HyperParams = HyperParams()
 
@@ -77,7 +77,9 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
     model = model_config.model(hparams)
-    data_module = model_config.data_module()
+    data_module = model_config.data_module(
+        hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
+    )
 
     wandb_logger = None
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
