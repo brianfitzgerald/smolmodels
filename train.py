@@ -114,6 +114,7 @@ class LogPredictionSamplesCallback(pl.Callback):
 class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
+    SIMPLE_BERT = "simple_bert"
 
 
 # https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
@@ -169,12 +170,6 @@ CONFIGS = {
         PromptUpsampleDataModule,
         PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
-    ),
-    "prompt_safety": ModelConfig(
-        T5FineTuner,
-        PromptSafetyDataModule,
-        PROMPT_SAFETY_PROJECT,
-        HyperParams(base_model_checkpoint="google/flan-t5-small"),
     ),
 }
 
