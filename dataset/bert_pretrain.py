@@ -1,10 +1,11 @@
 from datasets import load_dataset, concatenate_datasets, Dataset
 from typing import Optional
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
-from model.utils import ensure_directory
+from model.utils import ensure_directory, FineTunerDataset
 import os
 import re
 from unidecode import unidecode
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 import lightning.pytorch as pl
 
@@ -19,19 +20,20 @@ def clean_bookcorpus_text(text: str) -> str:
     return s.strip()
 
 
-class BertPretrainDataset(pl.LightningDataModule):
+class BertPretrainDataset(FineTunerDataset):
     def __init__(
         self,
+        batch_size: int,
+        tokenizer: PreTrainedTokenizer,
         max_token_length: int,
     ):
 
+        self.batch_size = batch_size
+        self.tokenizer = tokenizer
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
         self.max_token_length = max_token_length
         self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
-        self.tokenizer = BertTokenizerFast.from_pretrained(
-            "google-bert/bert-base-uncased"
-        )
 
     def setup(self, stage: Optional[str] = None):
         print(f"Loading dataset for stage {stage}")
