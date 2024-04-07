@@ -1,15 +1,11 @@
 from datasets import load_dataset, concatenate_datasets, Dataset
-from typing import Optional, List, Dict
+from typing import Optional
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
-from model.utils import IGNORE_TOKEN_INDEX, ensure_directory, FineTunerDataset
+from model.utils import ensure_directory
 import os
 import re
-import torch
-from torch import Tensor
-import torch.nn.functional as F
 from unidecode import unidecode
 
-from synthetic_data.conversion import chatml_to_conversation
 import lightning.pytorch as pl
 
 

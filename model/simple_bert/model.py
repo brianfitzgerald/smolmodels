@@ -3,6 +3,7 @@ from torch import nn, Tensor
 from dataclasses import dataclass
 import math
 import torch.nn.functional as F
+from typing import Tuple
 
 
 @dataclass
@@ -207,3 +208,42 @@ class BERT(nn.Module):
         x = self.norm_final(x)
 
         return x
+
+
+class MLMHead(nn.Module):
+    """
+    Head for masked language modeling
+    Cramming uses sparse prediction, but not implemented here
+    Project the embeddings back to the vocab size, and calculate the loss
+
+    # TODO - implement sparse prediction
+    """
+
+    def __init__(self, config: SimpleBERTConfig, vocab_size: int) -> None:
+        super().__init__()
+
+        self.proj = nn.Linear(config.embed_size, vocab_size, bias=False)
+
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
+        logits: Tensor = self.proj(x)
+        # ignore_index is the padding token
+        loss = F.cross_entropy(
+            logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=0
+        )
+        return logits, loss
+
+
+class BERTForMaskedLM(nn.Module):
+    """
+    BERT model with a language modeling head
+    """
+
+    def __init__(self, config: SimpleBERTConfig, vocab_size: int) -> None:
+        super().__init__()
+
+        self.bert = BERT(config, vocab_size)
+        self.head = MLMHead(config, vocab_size)
+
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
+        x = self.bert(x)
+        return self.head(x, y)
