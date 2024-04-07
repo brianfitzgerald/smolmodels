@@ -4,6 +4,10 @@ from dataclasses import dataclass
 import math
 import torch.nn.functional as F
 from typing import Tuple
+import lightning.pytorch as pl
+from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
+
+from model.utils import HyperParams
 
 
 @dataclass
@@ -233,13 +237,26 @@ class MLMHead(nn.Module):
         return logits, loss
 
 
-class BERTForMaskedLM(nn.Module):
+class SimpleBertForMaskedLM(pl.LightningModule):
     """
     BERT model with a language modeling head
     """
 
-    def __init__(self, config: SimpleBERTConfig, vocab_size: int) -> None:
+    def __init__(self, hparams: HyperParams) -> None:
         super().__init__()
+
+        config = SimpleBERTConfig(
+            hidden_size=128,
+            pos_emb_radius=16,
+            embed_size=768,
+            num_attention_heads=12,
+            num_layers=12,
+        )
+
+        self.tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(
+            hparams.base_model_checkpoint
+        )
+        vocab_size = self.tokenizer.vocab_size
 
         self.bert = BERT(config, vocab_size)
         self.head = MLMHead(config, vocab_size)
