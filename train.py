@@ -66,7 +66,7 @@ CONFIGS = {
         SimpleBertForMaskedLM,
         BertPretrainDataset,
         BERT_PRETRAIN_PROJECT,
-        HyperParams(base_model_checkpoint="bert-base-uncased"),
+        HyperParams(base_model_checkpoint="bert-base-uncased", max_seq_length=128),
     ),
 }
 

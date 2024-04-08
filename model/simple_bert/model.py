@@ -262,21 +262,21 @@ class SimpleBertForMaskedLM(pl.LightningModule):
         vocab_size = self.tokenizer.vocab_size
 
         self.bert = BERT(config, vocab_size)
-        self.head = MLMHead(config, vocab_size)
+        self.mlm_head = MLMHead(config, vocab_size)
 
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.bert(x)
-        return self.head(x, y)
+        return self.mlm_head(x, y)
 
     def training_step(self, batch, batch_idx):
-        loss = self(batch)
+        loss = self(batch["input_ids"], batch["labels"])
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        loss = self(batch)
+        loss = self(batch["input_ids"], batch["labels"])
         self.log(
             "val_loss",
             loss,
@@ -290,24 +290,17 @@ class SimpleBertForMaskedLM(pl.LightningModule):
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"
 
+        all_params = list(self.bert.parameters()) + list(self.mlm_head.parameters())
+
         # emulates the original optimizer in https://github.com/google-research/bert/blob/master/optimization.py#L65
-        no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if not any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": self.params.weight_decay,
+                "params": [p for p in all_params if p.dim() >= 2],
+                "weight_decay": 0.01,
             },
             {
-                "params": [
-                    p
-                    for n, p in self.model.named_parameters()
-                    if any(nd in n for nd in no_decay)
-                ],
-                "weight_decay": 0.0,
+                "params": [p for p in all_params if p.dim() < 2],
+                "weight_decay": 0,
             },
         ]
 
