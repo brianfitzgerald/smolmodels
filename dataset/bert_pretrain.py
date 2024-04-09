@@ -1,11 +1,12 @@
 from datasets import load_dataset, concatenate_datasets, Dataset
 from typing import Optional, Tuple
-from model.utils import ensure_directory, SmDataset
+from model.utils import ensure_directory, SmDataset, IGNORE_TOKEN_INDEX
 import re
 from unidecode import unidecode
 from transformers.tokenization_utils import PreTrainedTokenizer
 import torch
 from torch import Tensor
+import os
 
 
 def clean_bookcorpus_text(text: str) -> str:
@@ -31,8 +32,8 @@ class BertPretrainDataset(SmDataset):
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
         self.max_token_length = max_token_length
-        # self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
-        self.cpu_count = 1
+        self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
+        # self.cpu_count = 1
         self.mlm_probability = 0.15
 
     def prepare_data(self) -> None:
@@ -75,20 +76,11 @@ class BertPretrainDataset(SmDataset):
     def mask_tokens(self, inputs: Tensor, special_tokens_mask) -> Tuple[Tensor, Tensor]:
         labels = inputs.clone()
         probability_matrix = torch.full(labels.shape, self.mlm_probability)
-        if special_tokens_mask is None:
-            special_tokens_mask = [
-                self.tokenizer.get_special_tokens_mask(
-                    val, already_has_special_tokens=True
-                )
-                for val in labels.tolist()
-            ]
-            special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-        else:
-            special_tokens_mask = special_tokens_mask.bool()
+        special_tokens_mask = special_tokens_mask.bool()
 
         probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
         masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+        labels[~masked_indices] = IGNORE_TOKEN_INDEX # only compute loss on masked tokens
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
         indices_replaced = (

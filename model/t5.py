@@ -3,7 +3,7 @@ from transformers.optimization import (
     get_inverse_sqrt_schedule,
     AdafactorSchedule,
 )
-from model.utils import HyperParams
+from model.utils import HyperParams, IGNORE_TOKEN_INDEX
 from torch.optim import AdamW
 from torch import Tensor
 from torchmetrics.text.perplexity import Perplexity
@@ -38,7 +38,7 @@ class T5FineTuner(pl.LightningModule):
         decoder_attention_mask: Tensor,
         labels: Tensor,
     ):
-        labels[labels[:, :] == self.tokenizer.pad_token_id] = -100
+        labels[labels[:, :] == self.tokenizer.pad_token_id] = IGNORE_TOKEN_INDEX
         return self.model(
             input_ids,
             attention_mask=attention_mask,

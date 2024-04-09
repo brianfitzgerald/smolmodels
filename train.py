@@ -10,13 +10,13 @@ import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
-from model.simple_bert.model import SimpleBertForMaskedLM
+from model.simple_bert import SimpleBertForMaskedLM
 
 print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar
-from training import LogPredictionSamplesCallback, HfModelCheckpoint
+from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
 
 
 print("Loading dependencies - project...")
