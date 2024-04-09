@@ -275,7 +275,7 @@ class SimpleBertForMaskedLM(pl.LightningModule):
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
-        return {"loss": loss}
+        return {"loss": loss, "logits": logits}
 
     def validation_step(self, batch, batch_idx):
         logits, loss = self(batch["input_ids"], batch["labels"])
@@ -287,7 +287,7 @@ class SimpleBertForMaskedLM(pl.LightningModule):
             prog_bar=True,
             logger=True,
         )
-        return {"val_loss": loss}
+        return {"val_loss": loss, "logits": logits}
 
     def configure_optimizers(self):
         "Prepare optimizer and schedule (linear warmup and decay)"

@@ -22,14 +22,14 @@ from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
 from dataset.bert_pretrain import BertPretrainDataset
-from model.utils import SmDataset, HyperParams
+from model.utils import ModelChoice, SmDataset, HyperParams
 
 
-class ModelChoice(Enum):
-    T5 = "t5"
-    LLAMA = "llama"
-    SIMPLE_BERT = "simple_bert"
-
+MODEL_CHOICES = {
+    SimpleBertForMaskedLM: ModelChoice.SIMPLE_BERT,
+    T5FineTuner: ModelChoice.T5,
+    LlamaFineTuner: ModelChoice.LLAMA,
+}
 
 @dataclass
 class ModelConfig:
@@ -91,7 +91,8 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
-    sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
+    model_choice: ModelChoice = MODEL_CHOICES[model.__class__] # type: ignore
+    sample_callback = LogPredictionSamplesCallback(model.tokenizer, model_choice, wandb_logger)
     seed_everything(hparams.seed)
 
     checkpoint_callback = HfModelCheckpoint(

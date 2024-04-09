@@ -8,6 +8,7 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 from torch.utils.data import DataLoader
 import os
 from dataclasses import dataclass
+from enum import Enum
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (
@@ -17,6 +18,11 @@ IGNORE_TOKEN_INDEX = -100
 PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
+
+class ModelChoice(Enum):
+    T5 = "t5"
+    LLAMA = "llama"
+    SIMPLE_BERT = "simple_bert"
 
 
 @dataclass

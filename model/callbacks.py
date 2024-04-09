@@ -16,6 +16,7 @@ import lightning.pytorch as pl
 from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
+    ModelChoice,
     compute_metrics,
 )
 
@@ -24,12 +25,14 @@ class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
         self,
         tokenizer: T5Tokenizer,
+        model_choice: ModelChoice,
         wandb_logger: Optional[WandbLogger] = None,
         max_new_tokens: int = 256,
     ):
         self.tokenizer = tokenizer
         self.wandb_logger = wandb_logger
         self.max_new_tokens = max_new_tokens
+        self.model_choice = model_choice
 
         # TODO clear existing log files
         self.log_dir = Path("logs")
@@ -43,17 +46,27 @@ class LogPredictionSamplesCallback(pl.Callback):
         self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
 
     def log_prediction_samples(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs,
+        batch,
+        batch_idx,
+        dataloader_idx,
     ):
         if batch_idx > 0:
             return
         input_ids = batch["input_ids"]
         labels = batch["labels"]
         labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
-        out = pl_module.model.generate(
-            input_ids,
-            max_length=self.max_new_tokens,
-        )
+        if self.model_choice == ModelChoice.SIMPLE_BERT:
+            logits, loss = pl_module(input_ids, labels)
+            out = logits.argmax(dim=-1)
+        else:
+            out = pl_module.model.generate(
+                input_ids,
+                max_length=self.max_new_tokens,
+            )
 
         n = len(input_ids)
         columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
@@ -62,6 +75,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         table_columns.append([trainer.current_epoch] * n)
         table_columns.append(list(range(n)))
 
+        breakpoint()
         for feature in [input_ids, out, labels]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
