@@ -10,7 +10,7 @@ from torch.optim import AdamW
 import bitsandbytes as bnb
 from transformers.optimization import get_cosine_schedule_with_warmup
 
-from model.utils import HyperParams
+from model.utils import HyperParams, IGNORE_TOKEN_INDEX
 
 
 @dataclass
@@ -234,7 +234,9 @@ class MLMHead(nn.Module):
         logits: Tensor = self.proj(x)
         # ignore_index is the padding token
         loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=0
+            logits.view(-1, logits.size(-1)),
+            y.view(-1),
+            ignore_index=IGNORE_TOKEN_INDEX,
         )
         return logits, loss
 
@@ -269,14 +271,14 @@ class SimpleBertForMaskedLM(pl.LightningModule):
         return self.mlm_head(x, y)
 
     def training_step(self, batch, batch_idx):
-        loss = self(batch["input_ids"], batch["labels"])
+        logits, loss = self(batch["input_ids"], batch["labels"])
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        loss = self(batch["input_ids"], batch["labels"])
+        logits, loss = self(batch["input_ids"], batch["labels"])
         self.log(
             "val_loss",
             loss,
