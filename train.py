@@ -17,6 +17,7 @@ from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar
 from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 
 print("Loading dependencies - project...")
@@ -95,12 +96,20 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
     sample_callback = LogPredictionSamplesCallback(model.tokenizer, model_choice, wandb_logger)
     seed_everything(hparams.seed)
 
-    checkpoint_callback = HfModelCheckpoint(
-        dirpath="checkpoints",
-        filename=run_name,
-        monitor="val_loss",
-        mode="min",
-    )
+    if model_choice == ModelChoice.SIMPLE_BERT:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath="checkpoints",
+            filename=run_name,
+            monitor="val_loss",
+            mode="min",
+        )
+    else:
+        checkpoint_callback = HfModelCheckpoint(
+            dirpath="checkpoints",
+            filename=run_name,
+            monitor="val_loss",
+            mode="min",
+        )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     precision = "32" if model_config.model == T5FineTuner else "16-mixed"
