@@ -75,7 +75,6 @@ class LogPredictionSamplesCallback(pl.Callback):
         table_columns.append([trainer.current_epoch] * n)
         table_columns.append(list(range(n)))
 
-        breakpoint()
         for feature in [input_ids, out, labels]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True

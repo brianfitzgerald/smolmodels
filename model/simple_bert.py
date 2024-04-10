@@ -90,9 +90,10 @@ class SelfAttention(nn.Module):
         # Get the relative position embeddings for the context
         # i.e. matmul q and the position embeddings split out for each head
         # Only add position embeddings to keys, but not values
-        att_rel_pos = q @ self.pos_emb_k.view(1, 1, pos_emb_size, head_size).transpose(
+        k_pos_view = self.pos_emb_k.view(1, 1, pos_emb_size, head_size).transpose(
             -2, -1
         )
+        att_rel_pos = q @ k_pos_view
         # create the relative position embeddings for the context
         # att_idxs = (context_size, context_size)
         att_idxs = (

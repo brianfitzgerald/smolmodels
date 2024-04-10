@@ -21,3 +21,4 @@ accelerate
 matplotlib
 openai
 bitsandbytes==0.43.0
+unidecode
