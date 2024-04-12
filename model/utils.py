@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
@@ -45,10 +45,9 @@ class HyperParams:
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW8bit"
 
-    @property
-    def warmup_steps(self) -> int:
+    def warmup_steps(self, train_steps: Union[int, float]) -> int:
         if self.warmup_ratio:
-            return int(self.warmup_ratio * self.num_train_epochs)
+            return int(self.warmup_ratio * train_steps)
         elif self.warmup_steps_count:
             return self.warmup_steps_count
         else:
@@ -83,9 +82,7 @@ class SmDataset(pl.LightningDataModule):
 
 
 class SmModel(pl.LightningModule):
-    def __init__(
-        self, hparams: HyperParams, tokenizer: PreTrainedTokenizer
-    ) -> None:
+    def __init__(self, hparams: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__()
         self.params = hparams
         self.tokenizer = tokenizer

@@ -63,9 +63,12 @@ class LlamaFineTuner(SmModel):
             weight_decay=self.params.weight_decay,
         )
         print(f"Configuring optimizers: {self.train_steps}")
-        total_training_steps = self.params.num_train_epochs * self.train_steps
         scheduler = get_cosine_schedule_with_warmup(
-            optimizer, self.params.warmup_steps, total_training_steps
+            optimizer,
+            num_warmup_steps=self.params.warmup_steps(
+                self.trainer.estimated_stepping_batches
+            ),
+            num_training_steps=int(self.trainer.estimated_stepping_batches),
         )
 
         return {

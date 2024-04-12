@@ -335,12 +335,10 @@ class SimpleBertForMaskedLM(SmModel):
         else:
             raise ValueError(f"Unknown optimizer choice: {optim_choice}")
 
-        num_train_steps = self.trainer.estimated_stepping_batches
-
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=self.params.warmup_steps,
-            num_training_steps=num_train_steps,
+            num_warmup_steps=self.params.warmup_steps(self.trainer.estimated_stepping_batches),
+            num_training_steps=self.trainer.estimated_stepping_batches,
         )
         return {
             "optimizer": optimizer,
