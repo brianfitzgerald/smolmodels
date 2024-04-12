@@ -1,7 +1,8 @@
 from datasets import load_dataset
 from typing import Optional
-from transformers.tokenization_utils import PreTrainedTokenizer
 from typing import Dict
+
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,

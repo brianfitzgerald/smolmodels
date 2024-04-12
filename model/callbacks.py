@@ -1,7 +1,6 @@
 from typing import Optional
 from tabulate import tabulate
 import pandas as pd
-from transformers.models.t5.tokenization_t5 import T5Tokenizer
 from pathlib import Path
 import shutil
 from lightning.pytorch.loggers import WandbLogger
@@ -12,6 +11,7 @@ from torch import Tensor
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 
 from model.utils import (
@@ -25,7 +25,7 @@ from model.utils import (
 class LogPredictionSamplesCallback(pl.Callback):
     def __init__(
         self,
-        tokenizer: T5Tokenizer,
+        tokenizer: PreTrainedTokenizer,
         model_choice: ModelChoice,
         wandb_logger: Optional[WandbLogger] = None,
         max_new_tokens: int = 256,

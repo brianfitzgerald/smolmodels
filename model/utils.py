@@ -4,11 +4,12 @@ from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
 import shutil
 import lightning.pytorch as pl
-from transformers.tokenization_utils import PreTrainedTokenizer
 from torch.utils.data import DataLoader
 import os
 from dataclasses import dataclass
 from enum import Enum
+
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (
@@ -53,6 +54,10 @@ class HyperParams:
         else:
             raise ValueError("Either warmup_steps_count or warmup_ratio must be set")
 
+    @property
+    def tokenizer_checkpoint(self) -> str:
+        return self.base_model_checkpoint
+
 
 class SmDataset(pl.LightningDataModule):
     def __init__(
@@ -78,11 +83,12 @@ class SmDataset(pl.LightningDataModule):
 
 
 class SmModel(pl.LightningModule):
-
-    def __init__(self, hparams: HyperParams, num_train_steps: int) -> None:
+    def __init__(
+        self, hparams: HyperParams, tokenizer: PreTrainedTokenizer
+    ) -> None:
         super().__init__()
         self.params = hparams
-        self.num_train_steps = num_train_steps
+        self.tokenizer = tokenizer
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):

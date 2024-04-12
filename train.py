@@ -1,9 +1,10 @@
 print("Loading dependencies - torch...")
 from fire import Fire
-from enum import Enum
 from dataclasses import dataclass
 
 from lightning import seed_everything
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.tokenization_utils import PreTrainedTokenizer
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
@@ -90,10 +91,13 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
-    model = model_config.model(hparams, data_module.total_steps)
-    data_module = model_config.data_module(
-        hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
+    tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(  # type: ignore
+        hparams.tokenizer_checkpoint
     )
+    data_module = model_config.data_module(
+        hparams.train_batch_size, tokenizer, hparams.max_seq_length
+    )
+    model = model_config.model(hparams, tokenizer)
 
     wandb_logger = None
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
@@ -107,7 +111,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
 
     model_choice: ModelChoice = MODEL_CHOICES[model.__class__]  # type: ignore
     sample_callback = LogPredictionSamplesCallback(
-        model.tokenizer, model_choice, wandb_logger
+        tokenizer, model_choice, wandb_logger
     )
     seed_everything(hparams.seed)
 

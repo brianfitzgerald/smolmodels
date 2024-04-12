@@ -3,7 +3,7 @@ import openai
 from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict
 from datasets import Dataset, concatenate_datasets
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.tokenization_utils_base import AutoTokenizerBase
 import asyncio
 
 from synthetic_data.utils import Conversation, gather_with_concurrency_limit
@@ -33,7 +33,7 @@ class GenerationWrapper(ABC):
     Abstract method for various ways of generating data.
     """
 
-    tokenizer: PreTrainedTokenizerBase
+    tokenizer: AutoTokenizerBase
 
     @abstractmethod
     async def generate(self, conversations: List[Conversation]) -> List[str]:
