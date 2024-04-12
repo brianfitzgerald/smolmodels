@@ -3,29 +3,25 @@ from transformers.optimization import (
     get_inverse_sqrt_schedule,
     AdafactorSchedule,
 )
+from transformers.tokenization_utils import PreTrainedTokenizer
 from model.utils import HyperParams, IGNORE_TOKEN_INDEX, SmModel
 from torch.optim import AdamW
 from torch import Tensor
 from torchmetrics.text.perplexity import Perplexity
 import bitsandbytes as bnb
 
-import lightning.pytorch as pl
 
 from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
-from transformers.models.t5.tokenization_t5 import T5Tokenizer
 
 
 class T5FineTuner(SmModel):
-    def __init__(self, params: HyperParams, num_train_steps: int):
-        super(T5FineTuner, self).__init__(params, num_train_steps)
-        self.params = params
-        self.hparams.update(vars(params))
+    def __init__(
+        self, params: HyperParams, tokenizer: PreTrainedTokenizer
+    ) -> None:
+        super().__init__(params, tokenizer)
 
         self.model: T5ForConditionalGeneration = (
             T5ForConditionalGeneration.from_pretrained(params.base_model_checkpoint)
-        )
-        self.tokenizer: T5Tokenizer = T5Tokenizer.from_pretrained(
-            params.base_model_checkpoint
         )
         self.train_steps = 0
         self.save_hyperparameters()

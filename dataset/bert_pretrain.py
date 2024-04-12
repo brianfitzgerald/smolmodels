@@ -1,9 +1,10 @@
 from datasets import load_dataset, concatenate_datasets, Dataset
 from typing import Optional, Tuple
-from model.utils import ensure_directory, SmDataset, IGNORE_TOKEN_INDEX
+
+from transformers.tokenization_utils import PreTrainedTokenizer
+from model.utils import ensure_directory, SmDataset
 import re
 from unidecode import unidecode
-from transformers.tokenization_utils import PreTrainedTokenizer
 import torch
 from torch import Tensor
 import os
@@ -107,7 +108,6 @@ class BertPretrainDataset(SmDataset):
         return inputs, labels
 
     def prepare_sample(self, examples: dict):
-
         input_ids = [clean_bookcorpus_text(doc) for doc in examples["text"]]
 
         inputs_tokenized = self.tokenizer(
@@ -124,7 +124,6 @@ class BertPretrainDataset(SmDataset):
             inputs_tokenized["input_ids"],  # type: ignore
             inputs_tokenized["special_tokens_mask"],
         )
-
 
         return {
             "input_ids": input_ids,

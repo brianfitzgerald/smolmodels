@@ -3,15 +3,13 @@ from torch import nn, Tensor
 from dataclasses import dataclass
 import math
 import torch.nn.functional as F
-from typing import Tuple, cast
-import lightning.pytorch as pl
-from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
+from typing import Tuple
 from torch.optim import AdamW
 import bitsandbytes as bnb
 from transformers.optimization import (
-    get_cosine_schedule_with_warmup,
     get_linear_schedule_with_warmup,
 )
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 from model.utils import HyperParams, SmModel
 
@@ -255,8 +253,10 @@ class SimpleBertForMaskedLM(SmModel):
     BERT model with a language modeling head
     """
 
-    def __init__(self, hparams: HyperParams, num_train_steps: int) -> None:
-        super().__init__(hparams, num_train_steps)
+    def __init__(
+        self, hparams: HyperParams, tokenizer: PreTrainedTokenizer
+    ) -> None:
+        super().__init__(hparams, tokenizer)
 
         config = SimpleBERTConfig(
             hidden_size=128,
@@ -266,9 +266,6 @@ class SimpleBertForMaskedLM(SmModel):
             num_layers=12,
         )
 
-        self.tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(
-            hparams.base_model_checkpoint
-        )
         vocab_size = self.tokenizer.vocab_size
         ignore_token_index: int = self.tokenizer.pad_token_id  # type: ignore
         print(f"Ignore token index: {ignore_token_index}")
@@ -338,10 +335,12 @@ class SimpleBertForMaskedLM(SmModel):
         else:
             raise ValueError(f"Unknown optimizer choice: {optim_choice}")
 
+        num_train_steps = self.trainer.estimated_stepping_batches
+
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=self.params.warmup_steps,
-            num_training_steps=self.num_train_steps,
+            num_training_steps=num_train_steps,
         )
         return {
             "optimizer": optimizer,
