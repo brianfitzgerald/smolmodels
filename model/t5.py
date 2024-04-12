@@ -15,9 +15,7 @@ from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
 
 
 class T5FineTuner(SmModel):
-    def __init__(
-        self, params: HyperParams, tokenizer: PreTrainedTokenizer
-    ) -> None:
+    def __init__(self, params: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__(params, tokenizer)
 
         self.model: T5ForConditionalGeneration = (
@@ -126,7 +124,10 @@ class T5FineTuner(SmModel):
                     eps=self.params.adam_epsilon,
                 )
             scheduler = get_inverse_sqrt_schedule(
-                optimizer, num_warmup_steps=self.params.warmup_steps
+                optimizer,
+                num_warmup_steps=self.params.warmup_steps(
+                    self.trainer.estimated_stepping_batches
+                ),
             )
         elif optim_choice == "Adafactor":
             optimizer = Adafactor(
