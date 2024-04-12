@@ -66,7 +66,6 @@ class LogPredictionSamplesCallback(pl.Callback):
             out = logits[labels != mask_token_id].argmax(dim=-1)
             labels = labels[labels != mask_token_id]
             input_ids_display = input_ids.clone()
-            input_ids_display[input_ids_display == mask_token_id] = 7308
         else:
             # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -84,8 +83,9 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         for feature in [input_ids_display, out, labels]:
             decoded = self.tokenizer.batch_decode(
-                feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
+                feature, clean_up_tokenization_spaces=True
             )
+            decoded = [s.replace("[PAD]", "").strip() for s in decoded]
             table_columns.append(decoded)
 
         metrics = compute_metrics(table_columns[3], table_columns[4])
