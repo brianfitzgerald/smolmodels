@@ -8,9 +8,12 @@ import lightning.pytorch as pl
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
 from torch.optim import AdamW
 import bitsandbytes as bnb
-from transformers.optimization import get_cosine_schedule_with_warmup
+from transformers.optimization import (
+    get_cosine_schedule_with_warmup,
+    get_linear_schedule_with_warmup,
+)
 
-from model.utils import HyperParams
+from model.utils import HyperParams, SmModel
 
 
 @dataclass
@@ -247,14 +250,13 @@ class MLMHead(nn.Module):
         return logits, loss
 
 
-class SimpleBertForMaskedLM(pl.LightningModule):
+class SimpleBertForMaskedLM(SmModel):
     """
     BERT model with a language modeling head
     """
 
-    def __init__(self, hparams: HyperParams) -> None:
-        super().__init__()
-        self.params = hparams
+    def __init__(self, hparams: HyperParams, num_train_steps: int) -> None:
+        super().__init__(hparams, num_train_steps)
 
         config = SimpleBERTConfig(
             hidden_size=128,
@@ -268,7 +270,7 @@ class SimpleBertForMaskedLM(pl.LightningModule):
             hparams.base_model_checkpoint
         )
         vocab_size = self.tokenizer.vocab_size
-        ignore_token_index: int = self.tokenizer.pad_token_id # type: ignore
+        ignore_token_index: int = self.tokenizer.pad_token_id  # type: ignore
         print(f"Ignore token index: {ignore_token_index}")
 
         self.bert = BERT(config, vocab_size)
@@ -306,7 +308,7 @@ class SimpleBertForMaskedLM(pl.LightningModule):
         optimizer_grouped_parameters = [
             {
                 "params": [p for p in all_params if p.dim() >= 2],
-                "weight_decay": 0.01,
+                "weight_decay": self.params.weight_decay,
             },
             {
                 "params": [p for p in all_params if p.dim() < 2],
@@ -316,23 +318,30 @@ class SimpleBertForMaskedLM(pl.LightningModule):
 
         optim_choice = self.params.optimizer
 
+        optimizer = None
+        betas = (0.9, 0.999)
+
         if optim_choice == "AdamW":
             optimizer = AdamW(
                 optimizer_grouped_parameters,
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
+                betas=betas,
             )
         elif optim_choice == "AdamW8bit":
             optimizer = bnb.optim.adamw.AdamW8bit(
                 optimizer_grouped_parameters,
                 lr=self.params.learning_rate,
                 eps=self.params.adam_epsilon,
+                betas=betas,
             )
-        # TODO pass in no. of train steps
-        scheduler = get_cosine_schedule_with_warmup(
+        else:
+            raise ValueError(f"Unknown optimizer choice: {optim_choice}")
+
+        scheduler = get_linear_schedule_with_warmup(
             optimizer,
             num_warmup_steps=self.params.warmup_steps,
-            num_training_steps=1000,
+            num_training_steps=self.num_train_steps,
         )
         return {
             "optimizer": optimizer,

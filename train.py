@@ -11,6 +11,7 @@ import string
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
 from model.simple_bert import SimpleBertForMaskedLM
+from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger
@@ -35,7 +36,7 @@ MODEL_CHOICES = {
 
 @dataclass
 class ModelConfig:
-    model: type[pl.LightningModule]
+    model: type[SmModel]
     data_module: type[SmDataset]
     wandb_project_name: str
     hyperparams: HyperParams = HyperParams()
@@ -68,8 +69,18 @@ CONFIGS = {
         SimpleBertForMaskedLM,
         BertPretrainDataset,
         BERT_PRETRAIN_PROJECT,
-        # base model is only used for tokenizer with bert
-        HyperParams(base_model_checkpoint="bert-base-uncased", max_seq_length=256),
+        HyperParams(
+            # base model is only used for tokenizer
+            base_model_checkpoint="bert-base-uncased",
+            learning_rate=1e-3,
+            warmup_ratio=0.5,
+            weight_decay=0.01,
+            max_grad_norm=0.5,
+            num_train_epochs=1,
+            train_batch_size=24,
+            gradient_accumulation_steps=96,
+            max_seq_length=256,
+        ),
     ),
 }
 
@@ -79,7 +90,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
-    model = model_config.model(hparams)
+    model = model_config.model(hparams, data_module.total_steps)
     data_module = model_config.data_module(
         hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
     )

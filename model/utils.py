@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List, Literal, Optional
 from torchmetrics.text.rouge import ROUGEScore
 from torchmetrics.text.bleu import BLEUScore
 from pathlib import Path
@@ -19,6 +19,7 @@ PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 
+
 class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
@@ -31,7 +32,8 @@ class HyperParams:
     max_seq_length: int = 2048
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
-    warmup_steps: int = 50
+    warmup_steps_count: Optional[int] = None
+    warmup_ratio: Optional[float] = None
     train_batch_size: int = 4
     eval_batch_size: int = 2
     num_train_epochs: int = 25
@@ -41,6 +43,15 @@ class HyperParams:
     seed: int = 42
     weight_decay: float = 0.0
     optimizer: OptimizerChoice = "AdamW8bit"
+
+    @property
+    def warmup_steps(self) -> int:
+        if self.warmup_ratio:
+            return int(self.warmup_ratio * self.num_train_epochs)
+        elif self.warmup_steps_count:
+            return self.warmup_steps_count
+        else:
+            raise ValueError("Either warmup_steps_count or warmup_ratio must be set")
 
 
 class SmDataset(pl.LightningDataModule):
@@ -64,6 +75,14 @@ class SmDataset(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=self.batch_size, num_workers=self.cpu_count)  # type: ignore
+
+
+class SmModel(pl.LightningModule):
+
+    def __init__(self, hparams: HyperParams, num_train_steps: int) -> None:
+        super().__init__()
+        self.params = hparams
+        self.num_train_steps = num_train_steps
 
 
 def compute_metrics(inputs: List[str], generated: List[str]):
