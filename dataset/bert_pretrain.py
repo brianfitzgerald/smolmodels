@@ -35,6 +35,8 @@ class BertPretrainDataset(SmDataset):
         self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
         # self.cpu_count = 1
         self.mlm_probability = 0.15
+        self.pad_token_id: int = self.tokenizer.pad_token_id  # type: ignore
+        self.mask_token_id: int = self.tokenizer.mask_token_id  # type: ignore
 
     def prepare_data(self) -> None:
         bc: Dataset = load_dataset("saibo/bookcorpus_deduplicated_small", split="train")  # type: ignore
@@ -80,7 +82,7 @@ class BertPretrainDataset(SmDataset):
 
         probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
         masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = IGNORE_TOKEN_INDEX # only compute loss on masked tokens
+        labels[~masked_indices] = self.mask_token_id
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
         indices_replaced = (
@@ -119,9 +121,10 @@ class BertPretrainDataset(SmDataset):
         )
 
         input_ids, labels = self.mask_tokens(
-            inputs_tokenized["input_ids"], # type: ignore
+            inputs_tokenized["input_ids"],  # type: ignore
             inputs_tokenized["special_tokens_mask"],
         )
+
 
         return {
             "input_ids": input_ids,

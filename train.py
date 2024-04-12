@@ -32,6 +32,7 @@ MODEL_CHOICES = {
     LlamaFineTuner: ModelChoice.LLAMA,
 }
 
+
 @dataclass
 class ModelConfig:
     model: type[pl.LightningModule]
@@ -67,7 +68,8 @@ CONFIGS = {
         SimpleBertForMaskedLM,
         BertPretrainDataset,
         BERT_PRETRAIN_PROJECT,
-        HyperParams(base_model_checkpoint="bert-base-uncased", max_seq_length=128),
+        # base model is only used for tokenizer with bert
+        HyperParams(base_model_checkpoint="bert-base-uncased", max_seq_length=256),
     ),
 }
 
@@ -92,8 +94,10 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
 
-    model_choice: ModelChoice = MODEL_CHOICES[model.__class__] # type: ignore
-    sample_callback = LogPredictionSamplesCallback(model.tokenizer, model_choice, wandb_logger)
+    model_choice: ModelChoice = MODEL_CHOICES[model.__class__]  # type: ignore
+    sample_callback = LogPredictionSamplesCallback(
+        model.tokenizer, model_choice, wandb_logger
+    )
     seed_everything(hparams.seed)
 
     if model_choice == ModelChoice.SIMPLE_BERT:
@@ -119,7 +123,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.01,
+        val_check_interval=0.25,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,

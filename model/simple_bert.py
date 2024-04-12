@@ -3,14 +3,14 @@ from torch import nn, Tensor
 from dataclasses import dataclass
 import math
 import torch.nn.functional as F
-from typing import Tuple
+from typing import Tuple, cast
 import lightning.pytorch as pl
 from transformers.models.bert.tokenization_bert_fast import BertTokenizerFast
 from torch.optim import AdamW
 import bitsandbytes as bnb
 from transformers.optimization import get_cosine_schedule_with_warmup
 
-from model.utils import HyperParams, IGNORE_TOKEN_INDEX
+from model.utils import HyperParams
 
 
 @dataclass
@@ -58,6 +58,7 @@ class SelfAttention(nn.Module):
         # usually the hidden state of the transformer
         # the context is not divided by heads - each head attends to the whole context
         # the context is the output of the previous layer, not the qkv scores
+        # TODO flash attention
 
         batch_size, context_size, emb_size = x.size()
         assert emb_size == self.config.embed_size
@@ -226,18 +227,22 @@ class MLMHead(nn.Module):
     # TODO - implement sparse prediction
     """
 
-    def __init__(self, config: SimpleBERTConfig, vocab_size: int) -> None:
+    def __init__(
+        self, config: SimpleBERTConfig, vocab_size: int, ignore_token_index: int
+    ) -> None:
         super().__init__()
 
         self.proj = nn.Linear(config.embed_size, vocab_size, bias=False)
+        self.ignore_token_index = ignore_token_index
 
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
         logits: Tensor = self.proj(x)
         # ignore_index is the padding token
+        # the view is to flatten the logits and labels across the batch
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
             y.view(-1),
-            ignore_index=IGNORE_TOKEN_INDEX,
+            ignore_index=self.ignore_token_index,
         )
         return logits, loss
 
@@ -263,9 +268,11 @@ class SimpleBertForMaskedLM(pl.LightningModule):
             hparams.base_model_checkpoint
         )
         vocab_size = self.tokenizer.vocab_size
+        ignore_token_index: int = self.tokenizer.pad_token_id # type: ignore
+        print(f"Ignore token index: {ignore_token_index}")
 
         self.bert = BERT(config, vocab_size)
-        self.mlm_head = MLMHead(config, vocab_size)
+        self.mlm_head = MLMHead(config, vocab_size, ignore_token_index)
 
     def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.bert(x)

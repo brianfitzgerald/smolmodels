@@ -8,6 +8,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from fsspec.core import url_to_fs
+from torch import Tensor
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
@@ -56,13 +57,19 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         if batch_idx > 0:
             return
-        input_ids = batch["input_ids"]
-        labels = batch["labels"]
-        labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
+        input_ids: Tensor = batch["input_ids"]
+        labels: Tensor = batch["labels"]
+        input_ids_display = input_ids
         if self.model_choice == ModelChoice.SIMPLE_BERT:
-            logits, loss = pl_module(input_ids, labels)
-            out = logits.argmax(dim=-1)
+            logits, _ = pl_module(input_ids, labels)
+            mask_token_id = pl_module.tokenizer.mask_token_id
+            out = logits[labels != mask_token_id].argmax(dim=-1)
+            labels = labels[labels != mask_token_id]
+            input_ids_display = input_ids.clone()
+            input_ids_display[input_ids_display == mask_token_id] = 7308
         else:
+            # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
+            labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
             out = pl_module.model.generate(
                 input_ids,
                 max_length=self.max_new_tokens,
@@ -75,7 +82,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         table_columns.append([trainer.current_epoch] * n)
         table_columns.append(list(range(n)))
 
-        for feature in [input_ids, out, labels]:
+        for feature in [input_ids_display, out, labels]:
             decoded = self.tokenizer.batch_decode(
                 feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
             )
