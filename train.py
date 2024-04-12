@@ -123,7 +123,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.25,
+        val_check_interval=0.1,
         callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
         logger=loggers,
         log_every_n_steps=1,
