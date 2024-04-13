@@ -33,14 +33,13 @@ class BertPretrainDataset(SmDataset):
         self.train_dataset: Optional[Dataset] = None
         self.val_dataset: Optional[Dataset] = None
         self.max_token_length = max_token_length
-        self.cpu_count = min(len(os.sched_getaffinity(0)), 16)
-        # self.cpu_count = 1
         self.mlm_probability = 0.15
         self.pad_token_id: int = self.tokenizer.pad_token_id  # type: ignore
         self.mask_token_id: int = self.tokenizer.mask_token_id  # type: ignore
 
     def prepare_data(self) -> None:
-        bc: Dataset = load_dataset("saibo/bookcorpus_deduplicated_small", split="train")  # type: ignore
+        # bc: Dataset = load_dataset("saibo/bookcorpus_deduplicated_small", split="train")  # type: ignore
+        bc: Dataset = load_dataset("bookcorpus", split="train[0:100000]")  # type: ignore
         # wp: Dataset = load_dataset("wikipedia", "20220301.en", split="train[0:100000]")  # type: ignore
 
         self.full_dataset = concatenate_datasets([bc]).train_test_split(test_size=0.01)
