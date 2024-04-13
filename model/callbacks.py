@@ -71,7 +71,7 @@ class LogPredictionSamplesCallback(pl.Callback):
         )
 
         if self.model_choice == ModelChoice.SIMPLE_BERT:
-            logits, _ = pl_module(input_ids, labels)
+            logits, _, _ = pl_module(input_ids, labels)
             out = logits[input_ids == mask_token_id].argmax(dim=-1)
 
             # add input_ids, out, label columns

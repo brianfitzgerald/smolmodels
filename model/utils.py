@@ -109,3 +109,4 @@ def ensure_directory(directory: str, clear: bool = True):
     if clear:
         shutil.rmtree(directory)
     Path(directory).mkdir(exist_ok=True, parents=True)
+
