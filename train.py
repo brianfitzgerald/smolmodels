@@ -11,15 +11,15 @@ import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
-from model.simple_bert import SimpleBertForMaskedLM
+from model.simple_bert import SimpleBertForMaskedLM, get_sane_normalizers
 from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
-from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar
 from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
 
 print("Loading dependencies - project...")
@@ -74,7 +74,7 @@ CONFIGS = {
             # base model is only used for tokenizer
             base_model_checkpoint="bert-base-uncased",
             learning_rate=1e-3,
-            warmup_ratio=0.5,
+            warmup_ratio=0.2,
             weight_decay=0.01,
             max_grad_norm=0.5,
             num_train_epochs=1,
@@ -104,15 +104,28 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
     run_name = f"{config}-{run_name}"
 
     if wandb:
-        project_name = model_config.wandb_project_name
-        wandb_logger = WandbLogger(name=run_name, project=project_name)
+        wandb_logger = WandbLogger(
+            name=run_name, project=model_config.wandb_project_name
+        )
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
+    else:
+        loggers.append(CSVLogger("logs", name=run_name))
 
     model_choice: ModelChoice = MODEL_CHOICES[model.__class__]  # type: ignore
     sample_callback = LogPredictionSamplesCallback(
         tokenizer, model_choice, wandb_logger
     )
+
+    learning_rate_callback = LearningRateMonitor(logging_interval="step")
+
+    if model_choice == ModelChoice.SIMPLE_BERT:
+        tokenizer._tokenizer.normalizer = get_sane_normalizers(  # type: ignore
+            force_english_keyboard=True,
+            strip_accents=True,
+            force_lowercase=True,
+        )
+
     seed_everything(hparams.seed)
 
     if model_choice == ModelChoice.SIMPLE_BERT:
@@ -139,7 +152,12 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
         val_check_interval=1000,
-        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
+        callbacks=[
+            sample_callback,
+            checkpoint_callback,
+            progress_bar_callback,
+            learning_rate_callback,
+        ],
         logger=loggers,
         log_every_n_steps=1,
     )

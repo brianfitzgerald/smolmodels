@@ -10,6 +10,9 @@ from transformers.optimization import (
     get_linear_schedule_with_warmup,
 )
 from transformers.tokenization_utils import PreTrainedTokenizer
+from torchmetrics.text.perplexity import Perplexity
+from tokenizers import normalizers, Regex
+
 
 from model.utils import HyperParams, SmModel
 
@@ -253,9 +256,7 @@ class SimpleBertForMaskedLM(SmModel):
     BERT model with a language modeling head
     """
 
-    def __init__(
-        self, hparams: HyperParams, tokenizer: PreTrainedTokenizer
-    ) -> None:
+    def __init__(self, hparams: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__(hparams, tokenizer)
 
         config = SimpleBERTConfig(
@@ -269,23 +270,27 @@ class SimpleBertForMaskedLM(SmModel):
         vocab_size = self.tokenizer.vocab_size
         ignore_token_index: int = self.tokenizer.pad_token_id  # type: ignore
         print(f"Ignore token index: {ignore_token_index}")
+        self.perplexity = Perplexity(ignore_index=self.tokenizer.pad_token_id)
 
         self.bert = BERT(config, vocab_size)
         self.mlm_head = MLMHead(config, vocab_size, ignore_token_index)
 
-    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, y: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
         x = self.bert(x)
-        return self.mlm_head(x, y)
+        logits, loss = self.mlm_head(x, y)
+        perplexity = self.perplexity(logits, y)
+        return logits, loss, perplexity
 
     def training_step(self, batch, batch_idx):
-        logits, loss = self(batch["input_ids"], batch["labels"])
+        logits, loss, perplexity = self(batch["input_ids"], batch["labels"])
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
+        self.log("train_ppl", perplexity, on_step=True, on_epoch=True, logger=True)
         return {"loss": loss, "logits": logits}
 
     def validation_step(self, batch, batch_idx):
-        logits, loss = self(batch["input_ids"], batch["labels"])
+        logits, loss, perplexity = self(batch["input_ids"], batch["labels"])
         self.log(
             "val_loss",
             loss,
@@ -294,6 +299,7 @@ class SimpleBertForMaskedLM(SmModel):
             prog_bar=True,
             logger=True,
         )
+        self.log("val_ppl", perplexity, on_step=True, on_epoch=True, logger=True)
         return {"val_loss": loss, "logits": logits}
 
     def configure_optimizers(self):
@@ -335,14 +341,37 @@ class SimpleBertForMaskedLM(SmModel):
         else:
             raise ValueError(f"Unknown optimizer choice: {optim_choice}")
 
+        warmup_steps = self.params.warmup_steps(self.trainer.estimated_stepping_batches)
+        train_steps = self.trainer.num_training_batches
+        print(f"Training steps: {train_steps} warmup steps: {warmup_steps}")
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=self.params.warmup_steps(self.trainer.estimated_stepping_batches),
-            num_training_steps=self.trainer.estimated_stepping_batches,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=train_steps,
         )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
+                "interval": "step",
             },
         }
+
+# copied from cramming/data/tokenizer_preparation.py in cramming-bert
+def get_sane_normalizers(force_english_keyboard=False, force_lowercase=False, strip_accents=False, sanity=False):
+    """original rules as in XLNET with optional modifications. force_english_keyboard is actually an ascii normalization."""
+    if sanity:
+        return normalizers.BertNormalizer(lowercase=force_lowercase)
+    normalize_ops = []
+    normalize_ops.append(normalizers.Replace("``", '"'))
+    normalize_ops.append(normalizers.Replace("''", '"'))
+    normalize_ops.append(normalizers.NFD() if strip_accents else normalizers.NFKC())
+    if force_lowercase:
+        normalize_ops.append(normalizers.Lowercase())
+    if strip_accents:
+        normalize_ops.append(normalizers.StripAccents())
+    normalize_ops.append(normalizers.Replace(Regex(" {2,}"), " "))
+    if force_english_keyboard:
+        normalize_ops.append(normalizers.Replace(Regex(r"[^\x00-\x7F]+"), ""))  # start from 00 instead of 1F to include tab
+    return normalizers.Sequence(normalize_ops) # type: ignore
+
