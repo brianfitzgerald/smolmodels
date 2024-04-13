@@ -74,7 +74,7 @@ CONFIGS = {
             # base model is only used for tokenizer
             base_model_checkpoint="bert-base-uncased",
             learning_rate=1e-3,
-            warmup_ratio=0.2,
+            warmup_ratio=0.5,
             weight_decay=0.01,
             max_grad_norm=0.5,
             num_train_epochs=1,
@@ -151,7 +151,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=1000,
+        val_check_interval=0.1,
         callbacks=[
             sample_callback,
             checkpoint_callback,

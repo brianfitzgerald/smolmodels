@@ -1,4 +1,4 @@
-from datasets import load_dataset, concatenate_datasets, Dataset
+from datasets import load_dataset, concatenate_datasets, Dataset, ReadInstruction
 from typing import Optional, Tuple
 
 from transformers.tokenization_utils import PreTrainedTokenizer
@@ -39,7 +39,13 @@ class BertPretrainDataset(SmDataset):
 
     def prepare_data(self) -> None:
         # bc: Dataset = load_dataset("saibo/bookcorpus_deduplicated_small", split="train")  # type: ignore
-        bc: Dataset = load_dataset("bookcorpus", split="train[0:100000]")  # type: ignore
+        TEST_SPLIT = False
+        split = (
+            ReadInstruction("train", to=1000)
+            if TEST_SPLIT
+            else ReadInstruction("train")
+        )
+        bc: Dataset = load_dataset("sradc/chunked-shuffled-wikipedia20220301en-bookcorpusopen", split=split)  # type: ignore
         # wp: Dataset = load_dataset("wikipedia", "20220301.en", split="train[0:100000]")  # type: ignore
 
         self.full_dataset = concatenate_datasets([bc]).train_test_split(test_size=0.01)
