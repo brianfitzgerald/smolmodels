@@ -8,6 +8,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from fsspec.core import url_to_fs
 from torch import Tensor
+import torch
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
@@ -59,13 +60,42 @@ class LogPredictionSamplesCallback(pl.Callback):
             return
         input_ids: Tensor = batch["input_ids"]
         labels: Tensor = batch["labels"]
-        input_ids_display = input_ids
+
+        n = len(input_ids)
+        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
+
+        table_columns: list[list] = [[trainer.current_epoch] * n, list(range(n))]
+        mask_token_id, pad_token_id = (
+            pl_module.tokenizer.mask_token_id,
+            pl_module.tokenizer.pad_token_id,
+        )
+
         if self.model_choice == ModelChoice.SIMPLE_BERT:
             logits, _ = pl_module(input_ids, labels)
-            mask_token_id = pl_module.tokenizer.mask_token_id
-            out = logits[labels != mask_token_id].argmax(dim=-1)
-            labels = labels[labels != mask_token_id]
-            input_ids_display = input_ids.clone()
+            out = logits[input_ids == mask_token_id].argmax(dim=-1)
+
+            # add input_ids, out, label columns
+            table_columns.extend([[], [], []])
+
+            for batch_idx in range(n):
+                input_ids_display = input_ids[batch_idx]
+                input_ids_display = input_ids_display[input_ids_display != pad_token_id]
+                input_ids_decoded = self.tokenizer.decode(input_ids_display)
+                table_columns[2].append(input_ids_decoded)
+
+                out_display = out[batch_idx]
+                out_display = out_display[out_display != pad_token_id]
+                out_display = out_display[out_display != mask_token_id]
+                out_decoded = self.tokenizer.decode(out_display)
+                table_columns[3].append(out_decoded)
+
+                labels_display = labels[batch_idx]
+                labels_display = labels_display[labels_display != pad_token_id]
+                labels_display = labels_display[labels_display != mask_token_id]
+                labels_decoded = self.tokenizer.decode(labels_display)
+                table_columns[4].append(labels_decoded)
+
+
         else:
             # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -74,28 +104,21 @@ class LogPredictionSamplesCallback(pl.Callback):
                 max_length=self.max_new_tokens,
             )
 
-        n = len(input_ids)
-        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
+            for feature in [input_ids, out, labels]:
+                decoded = self.tokenizer.batch_decode(
+                    feature, clean_up_tokenization_spaces=True
+                )
+                decoded = [s.replace("[PAD]", "").strip() for s in decoded]
+                table_columns.append(decoded)
 
-        table_columns = []
-        table_columns.append([trainer.current_epoch] * n)
-        table_columns.append(list(range(n)))
-
-        for feature in [input_ids_display, out, labels]:
-            decoded = self.tokenizer.batch_decode(
-                feature, clean_up_tokenization_spaces=True
-            )
-            decoded = [s.replace("[PAD]", "").strip() for s in decoded]
-            table_columns.append(decoded)
-
-        metrics = compute_metrics(table_columns[3], table_columns[4])
 
         run_name = "latest"
         if self.wandb_logger:
             run_name = self.wandb_logger.experiment.name
             table_rows = list(zip(*table_columns))
             self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-            self.wandb_logger.log_metrics(metrics)
+            # metrics = compute_metrics(table_columns[3], table_columns[4])
+            # self.wandb_logger.log_metrics(metrics)
 
         rows = [list(row) for row in zip(*table_columns)]
         rows_df = pd.DataFrame(rows, columns=columns)

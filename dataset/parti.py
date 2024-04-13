@@ -6,8 +6,8 @@ from transformers.tokenization_utils import PreTrainedTokenizer
 
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
-    ensure_directory,
     SmDataset,
+    ensure_directory,
     SAFETY_TASK_PREFIX,
 )
 
