@@ -8,7 +8,6 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from fsspec.core import url_to_fs
 from torch import Tensor
-import torch
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
@@ -19,7 +18,6 @@ from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
     ModelChoice,
-    compute_metrics,
 )
 
 
@@ -95,7 +93,6 @@ class LogPredictionSamplesCallback(pl.Callback):
                 labels_decoded = self.tokenizer.decode(labels_display)
                 table_columns[4].append(labels_decoded)
 
-
         else:
             # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
             labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
@@ -110,7 +107,6 @@ class LogPredictionSamplesCallback(pl.Callback):
                 )
                 decoded = [s.replace("[PAD]", "").strip() for s in decoded]
                 table_columns.append(decoded)
-
 
         run_name = "latest"
         if self.wandb_logger:
@@ -161,3 +157,22 @@ class HfModelCheckpoint(ModelCheckpoint):
             fs, _ = url_to_fs(filepath)
             if fs.exists(filepath):
                 fs.rm(filepath, recursive=True)
+
+
+def gradient_norm(model: pl.LightningModule):
+    total_norm = 0.0
+    for p in model.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.detach().data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** (1.0 / 2)
+    return total_norm
+
+
+class GradientNormLogger(pl.Callback):
+    """
+    Logs the gradient norm.
+    """
+
+    def on_after_backward(self, trainer, model):
+        model.log("grad_norm_total", gradient_norm(model))
