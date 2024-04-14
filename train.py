@@ -11,7 +11,7 @@ import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
-from model.simple_bert import SimpleBertForMaskedLM, get_sane_normalizers
+from model.pretrain.bert import SimpleBertForMaskedLM, get_sane_normalizers
 from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
