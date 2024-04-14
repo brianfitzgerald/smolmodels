@@ -104,6 +104,24 @@ class RMSNorm(torch.nn.Module):
         torch.nn.init.ones_(self.weight)
 
 
+def build_rope_cache(
+    seq_len: int,
+    n_elem: int,
+    device: Optional[torch.device] = None,
+    base: int = 10000,
+    condense_ratio: int = 1,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    theta = 1.0 / (base ** (torch.arange(0, n_elem, 2, device=device).float() / n_elem))
+
+    # Create position indexes `[0, 1, ..., seq_len - 1]`
+    seq_idx = torch.arange(seq_len, device=device) / condense_ratio
+
+    # Calculate the product of position index and $\theta_i$
+    idx_theta = torch.outer(seq_idx, theta).repeat(1, 2)
+
+    return torch.cos(idx_theta), torch.sin(idx_theta)
+
+
 class KVCache(nn.Module):
     def __init__(
         self,
@@ -349,6 +367,7 @@ class GPT(SmModel):
 
         assert config.padded_vocab_size is not None
         self.config = config
+        self.max_seq_length = self.config.block_size
 
         self.lm_head = nn.Linear(
             config.n_embd, config.vocab_size, bias=config.lm_head_bias
@@ -364,6 +383,17 @@ class GPT(SmModel):
     @property
     def max_seq_length(self) -> int:
         return self._max_seq_length
+
+    def rope_cache(
+        self, device: Optional[torch.device] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        return build_rope_cache(
+            seq_len=self.max_seq_length,
+            n_elem=self.config.rope_n_elem,
+            device=device,
+            condense_ratio=self.config.rope_condense_ratio,
+            base=self.config.rope_base,
+        )
 
     @max_seq_length.setter
     def max_seq_length(self, value: int) -> None:
@@ -441,7 +471,6 @@ class GPT(SmModel):
     def _step(self, batch):
         outputs = self(
             input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
             labels=batch["labels"],
         )
 
@@ -463,12 +492,11 @@ class GPT(SmModel):
 
     def configure_optimizers(self):
         optimizer = AdamW(
-            self.model.parameters(),
+            self.parameters(),
             lr=self.params.learning_rate,
             eps=self.params.adam_epsilon,
             weight_decay=self.params.weight_decay,
         )
-        print(f"Configuring optimizers: {self.train_steps}")
         scheduler = get_cosine_schedule_with_warmup(
             optimizer,
             num_warmup_steps=self.params.warmup_steps(
