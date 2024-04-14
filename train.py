@@ -17,9 +17,16 @@ from model.utils import SmModel
 print("Loading dependencies - lightning...")
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
 import lightning.pytorch as pl
-from lightning.pytorch.callbacks import TQDMProgressBar
-from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from model.callbacks import (
+    LogPredictionSamplesCallback,
+    HfModelCheckpoint,
+    GradientNormLogger,
+)
+from lightning.pytorch.callbacks import (
+    ModelCheckpoint,
+    LearningRateMonitor,
+    TQDMProgressBar,
+)
 
 
 print("Loading dependencies - project...")
@@ -118,6 +125,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
     )
 
     learning_rate_callback = LearningRateMonitor(logging_interval="step")
+    gradient_norm_callback = GradientNormLogger()
 
     if model_choice == ModelChoice.SIMPLE_BERT:
         tokenizer._tokenizer.normalizer = get_sane_normalizers(  # type: ignore
@@ -157,6 +165,7 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
             checkpoint_callback,
             progress_bar_callback,
             learning_rate_callback,
+            gradient_norm_callback,
         ],
         logger=loggers,
         log_every_n_steps=1,
