@@ -33,7 +33,6 @@ from synthetic_data.utils import (
 
 
 class SyntheticDataTask(ABC):
-
     seed_data_format: SeedDataFormat = SeedDataFormat.SYNTHETIC
     dataset_task_format: DatasetTaskFormat = DatasetTaskFormat.SFT
 
@@ -79,7 +78,6 @@ class SyntheticDataTask(ABC):
 
 
 class PromptUpsample(SyntheticDataTask):
-
     seed_data_format = SeedDataFormat.TSV
     seed_data_location = "gs://openai-datasets/prompt-upsample/seed-data.tsv"
     output_dataset_name = "prompt-upsample"
@@ -101,7 +99,6 @@ class PromptUpsample(SyntheticDataTask):
 
 
 class Toolformer(SyntheticDataTask):
-
     seed_data_format = SeedDataFormat.SYNTHETIC
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
@@ -146,10 +143,11 @@ class Toolformer(SyntheticDataTask):
         }
 
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
-
         conversations = batch["conversations"]
 
-        dropout_types_batch = random.choices(DROPOUT_TYPES_TOOLFORMER, k=len(conversations))
+        dropout_types_batch = random.choices(
+            DROPOUT_TYPES_TOOLFORMER, k=len(conversations)
+        )
 
         conversations_batch: List[Conversation] = []
         original_rows_batch: List[ToolFormerRow] = []
@@ -173,7 +171,6 @@ class Toolformer(SyntheticDataTask):
         return conversations_batch
 
     def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
-
         # Get completions for each prompt, rank, and choos the 2 highest
         new_rows_batch = []
         dpo_rows_batch: List[ToolFormerRow] = []
@@ -215,7 +212,6 @@ class Toolformer(SyntheticDataTask):
 
 
 class SyntheticToolCalls(SyntheticDataTask):
-
     dataset_task_format = DatasetTaskFormat.DPO
     seed_data_format = SeedDataFormat.TSV
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
@@ -284,7 +280,6 @@ class SyntheticToolCalls(SyntheticDataTask):
         return batch
 
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
-
         n_samples = len(batch["tool"])
         dropout_types_batch = random.choices(DROPOUT_TYPES_JSON, k=n_samples)
 
@@ -302,7 +297,9 @@ class SyntheticToolCalls(SyntheticDataTask):
                         call_result=batch["call_result"][i],
                         agent_output=batch["agent_output"][i],
                     )
-                    tool_descriptions = get_tool_description_json(tool, dropout_types_batch[i])
+                    tool_descriptions = get_tool_description_json(
+                        tool, dropout_types_batch[i]
+                    )
                     conversation = get_toolformer_dpo_negative_completion_prompt(
                         question, tool_descriptions, True
                     )
@@ -316,7 +313,6 @@ class SyntheticToolCalls(SyntheticDataTask):
         return conversations_batch
 
     def get_dpo_dataset_output_batch(self, completions_batch: List[str]) -> List[Dict]:
-
         # Get completions for each prompt, rank, and choos the 2 highest
         new_rows_batch = []
         for completion, original_row in zip(
@@ -353,7 +349,6 @@ class SyntheticToolCalls(SyntheticDataTask):
 
 
 class GlaiveDPO(SyntheticDataTask):
-
     def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
         glaive_conversations = [
             chatml_to_conversation(chat, system)
@@ -379,7 +374,6 @@ class GlaiveDPO(SyntheticDataTask):
     ) -> List[Dict]:
         new_rows_batch = []
         for completion, glaive_conversation in zip(completions, glaive_conversations):
-
             system_msg, user_msg, accepted_msg, rejected_msg = (
                 "",
                 "",

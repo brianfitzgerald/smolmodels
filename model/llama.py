@@ -1,5 +1,6 @@
 from transformers.optimization import get_cosine_schedule_with_warmup
-from model.utils import HyperParams
+from transformers.tokenization_utils import PreTrainedTokenizer
+from model.utils import HyperParams, SmModel
 from torch.optim import AdamW
 
 import lightning.pytorch as pl
@@ -8,13 +9,15 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.llama.tokenization_llama import LlamaTokenizer
 
 
-class LlamaFineTuner(pl.LightningModule):
-    def __init__(self, params: HyperParams):
-        super(LlamaFineTuner, self).__init__()
+class LlamaFineTuner(SmModel):
+    def __init__(self, params: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
+        super().__init__(params, tokenizer)
         self.params = params
         self.hparams.update(vars(params))
 
-        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(params.base_model_checkpoint)
+        self.model: LlamaForCausalLM = LlamaForCausalLM.from_pretrained(
+            params.base_model_checkpoint
+        )
         self.tokenizer = LlamaTokenizer.from_pretrained(params.base_model_checkpoint)
         self.ckpt_name = params.base_model_checkpoint
         self.train_steps = 0
@@ -60,9 +63,12 @@ class LlamaFineTuner(pl.LightningModule):
             weight_decay=self.params.weight_decay,
         )
         print(f"Configuring optimizers: {self.train_steps}")
-        total_training_steps = self.params.num_train_epochs * self.train_steps
         scheduler = get_cosine_schedule_with_warmup(
-            optimizer, self.params.warmup_steps, total_training_steps
+            optimizer,
+            num_warmup_steps=self.params.warmup_steps(
+                self.trainer.estimated_stepping_batches
+            ),
+            num_training_steps=int(self.trainer.estimated_stepping_batches),
         )
 
         return {

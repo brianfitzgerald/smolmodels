@@ -1,7 +1,8 @@
 from datasets import load_dataset
 from typing import Optional, List, Dict
+
 from transformers.tokenization_utils import PreTrainedTokenizer
-from model.utils import IGNORE_TOKEN_INDEX, ensure_directory, FineTunerDataset
+from model.utils import IGNORE_TOKEN_INDEX, ensure_directory, SmDataset
 import os
 import re
 import torch
@@ -10,7 +11,8 @@ import torch.nn.functional as F
 
 from synthetic_data.conversion import chatml_to_conversation
 
-class FunctionCallingDataModule(FineTunerDataset):
+
+class FunctionCallingDataModule(SmDataset):
     def __init__(
         self,
         batch_size: int,
@@ -28,7 +30,7 @@ class FunctionCallingDataModule(FineTunerDataset):
 
         cache_dir = "dataset_caches/function_calling"
         ensure_directory(cache_dir, clear=False)
-        cpu_count = min(len(os.sched_getaffinity(0)), 16) # type: ignore
+        cpu_count = min(len(os.sched_getaffinity(0)), 16)  # type: ignore
         # cpu_count = 1
 
         # Set format for PyTorch

@@ -290,7 +290,9 @@ def get_toolformer_dpo_negative_completion_prompt(
     Prepares the system and user-assistant style messages for inference.
     """
 
-    examples = get_json_tool_use_examples() if use_json_examples else TOOLFORMER_EXAMPLES
+    examples = (
+        get_json_tool_use_examples() if use_json_examples else TOOLFORMER_EXAMPLES
+    )
 
     return [
         {

@@ -1,12 +1,13 @@
 from datasets import load_dataset
 from typing import Optional
-from transformers.tokenization_utils import PreTrainedTokenizer
 from typing import Dict
+
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 from model.utils import (
     PROMPT_EXPANSION_TASK_PREFIX,
+    SmDataset,
     ensure_directory,
-    FineTunerDataset,
     SAFETY_TASK_PREFIX,
 )
 
@@ -23,7 +24,7 @@ def generate_full_prompt(instruction: str, prompt: str) -> str:
     )
 
 
-class PromptUpsampleDataModule(FineTunerDataset):
+class PromptUpsampleDataModule(SmDataset):
     def __init__(
         self,
         batch_size: int,
@@ -88,7 +89,6 @@ class PromptUpsampleDataModule(FineTunerDataset):
         self.val_dataset.set_format(type="torch", columns=columns)
 
     def prepare_sample(self, examples: dict):
-
         inputs = [self.task_prefix + doc for doc in examples[self.input_column]]
 
         inputs_tokenized = self.tokenizer(

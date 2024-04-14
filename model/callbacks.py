@@ -1,0 +1,163 @@
+from typing import Optional
+from tabulate import tabulate
+import pandas as pd
+from pathlib import Path
+import shutil
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
+import lightning.pytorch as pl
+from fsspec.core import url_to_fs
+from torch import Tensor
+import torch
+
+from lightning.pytorch.loggers import WandbLogger
+import lightning.pytorch as pl
+from transformers.tokenization_utils import PreTrainedTokenizer
+
+
+from model.utils import (
+    IGNORE_TOKEN_INDEX,
+    PAD_TOKEN_ID,
+    ModelChoice,
+    compute_metrics,
+)
+
+
+class LogPredictionSamplesCallback(pl.Callback):
+    def __init__(
+        self,
+        tokenizer: PreTrainedTokenizer,
+        model_choice: ModelChoice,
+        wandb_logger: Optional[WandbLogger] = None,
+        max_new_tokens: int = 256,
+    ):
+        self.tokenizer = tokenizer
+        self.wandb_logger = wandb_logger
+        self.max_new_tokens = max_new_tokens
+        self.model_choice = model_choice
+
+        # TODO clear existing log files
+        self.log_dir = Path("logs")
+        self.log_dir.mkdir(exist_ok=True)
+        shutil.rmtree(self.log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+    def on_validation_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx: int
+    ) -> None:
+        self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
+
+    def log_prediction_samples(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs,
+        batch,
+        batch_idx,
+        dataloader_idx,
+    ):
+        if batch_idx > 0:
+            return
+        input_ids: Tensor = batch["input_ids"]
+        labels: Tensor = batch["labels"]
+
+        n = len(input_ids)
+        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
+
+        table_columns: list[list] = [[trainer.current_epoch] * n, list(range(n))]
+        mask_token_id, pad_token_id = (
+            pl_module.tokenizer.mask_token_id,
+            pl_module.tokenizer.pad_token_id,
+        )
+
+        if self.model_choice == ModelChoice.SIMPLE_BERT:
+            logits, _, _ = pl_module(input_ids, labels)
+            out = logits[input_ids == mask_token_id].argmax(dim=-1)
+
+            # add input_ids, out, label columns
+            table_columns.extend([[], [], []])
+
+            for batch_idx in range(n):
+                input_ids_display = input_ids[batch_idx]
+                input_ids_display = input_ids_display[input_ids_display != pad_token_id]
+                input_ids_decoded = self.tokenizer.decode(input_ids_display)
+                table_columns[2].append(input_ids_decoded)
+
+                out_display = out[batch_idx]
+                out_display = out_display[out_display != pad_token_id]
+                out_display = out_display[out_display != mask_token_id]
+                out_decoded = self.tokenizer.decode(out_display)
+                table_columns[3].append(out_decoded)
+
+                labels_display = labels[batch_idx]
+                labels_display = labels_display[labels_display != pad_token_id]
+                labels_display = labels_display[labels_display != mask_token_id]
+                labels_decoded = self.tokenizer.decode(labels_display)
+                table_columns[4].append(labels_decoded)
+
+
+        else:
+            # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
+            labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
+            out = pl_module.model.generate(
+                input_ids,
+                max_length=self.max_new_tokens,
+            )
+
+            for feature in [input_ids, out, labels]:
+                decoded = self.tokenizer.batch_decode(
+                    feature, clean_up_tokenization_spaces=True
+                )
+                decoded = [s.replace("[PAD]", "").strip() for s in decoded]
+                table_columns.append(decoded)
+
+
+        run_name = "latest"
+        if self.wandb_logger:
+            run_name = self.wandb_logger.experiment.name
+            table_rows = list(zip(*table_columns))
+            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
+            # metrics = compute_metrics(table_columns[3], table_columns[4])
+            # self.wandb_logger.log_metrics(metrics)
+
+        rows = [list(row) for row in zip(*table_columns)]
+        rows_df = pd.DataFrame(rows, columns=columns)
+        rows_df.to_csv(
+            self.log_dir / f"{run_name}_samples.csv",
+            mode="a",
+            header=False,
+            index=False,
+        )
+
+        new_rows = tabulate(
+            rows,
+            headers=columns,
+            maxcolwidths=[10, 10, 50, 50, 50],
+        )
+        print(new_rows)
+        with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
+            f.write(new_rows)
+            f.write("\n")
+
+
+# https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
+class HfModelCheckpoint(ModelCheckpoint):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.FILE_EXTENSION = ""
+
+    def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._save_checkpoint(trainer, filepath)
+        print(f"Saving checkpoint at {filepath}")
+        if trainer.is_global_zero:
+            trainer.lightning_module.model.save_pretrained(filepath)
+            trainer.lightning_module.tokenizer.save_pretrained(filepath)
+
+    # https://github.com/Lightning-AI/lightning/pull/16067
+    def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
+        super()._remove_checkpoint(trainer, filepath)
+        print(f"Removing checkpoint at {filepath}")
+        if trainer.is_global_zero:
+            fs, _ = url_to_fs(filepath)
+            if fs.exists(filepath):
+                fs.rm(filepath, recursive=True)
