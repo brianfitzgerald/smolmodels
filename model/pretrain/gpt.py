@@ -7,6 +7,9 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional, Type
 import math
 import lightning.pytorch as pl
+from transformers.tokenization_utils import PreTrainedTokenizer
+
+from model.utils import HyperParams, SmModel
 
 
 def find_multiple(n: int, k: int) -> int:
@@ -325,8 +328,22 @@ class Block(nn.Module):
         return x
 
 
-class GPT(pl.LightningModule):
-    def __init__(self, config: Config) -> None:
+class GPT(SmModel):
+    def __init__(self, hparams: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
+
+        config = Config(
+            scale_embeddings=False,
+            block_size=hparams.max_seq_length,
+            vocab_size=tokenizer.vocab_size,
+            n_layer=6,
+            n_head=6,
+            n_query_groups=1,
+            n_embd=256,
+            head_size=48,
+            rotary_percentage=1,
+            intermediate_size=768,
+        )
+
         assert config.padded_vocab_size is not None
         self.config = config
 

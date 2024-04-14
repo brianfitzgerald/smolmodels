@@ -12,6 +12,7 @@ import string
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
 from model.pretrain.bert import SimpleBertForMaskedLM, get_sane_normalizers
+from model.pretrain.gpt import GPT
 from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
@@ -31,7 +32,7 @@ from lightning.pytorch.callbacks import (
 
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
-from dataset.bert_pretrain import BertPretrainDataset
+from dataset.pretrain import TinyStoriesDataset, BertPretrainDataset
 from model.utils import ModelChoice, SmDataset, HyperParams
 
 
@@ -52,7 +53,6 @@ class ModelConfig:
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
-BERT_PRETRAIN_PROJECT = "simple-bert-pretrain"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -76,7 +76,7 @@ CONFIGS = {
     "simple_bert_pretrain": ModelConfig(
         SimpleBertForMaskedLM,
         BertPretrainDataset,
-        BERT_PRETRAIN_PROJECT,
+        "simple-bert-pretrain",
         HyperParams(
             # base model is only used for tokenizer
             base_model_checkpoint="bert-base-uncased",
@@ -90,16 +90,32 @@ CONFIGS = {
             max_seq_length=512,
         ),
     ),
+    "tiny_stories": ModelConfig(
+        GPT,
+        TinyStoriesDataset,
+        "tinystories-gpt-pretrain",
+        HyperParams(
+            learning_rate=1e-4,
+            warmup_ratio=0.5,
+            weight_decay=0.01,
+            max_grad_norm=0.5,
+            num_train_epochs=1,
+            train_batch_size=32,
+            gradient_accumulation_steps=16,
+            max_seq_length=1024,
+            tokenizer_checkpoint="openai-community/gpt2",
+        ),
+    ),
 }
 
 
-def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
+def main(wandb: bool = False, config: str = "tiny_stories"):
     loggers = []
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
     tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(  # type: ignore
-        hparams.tokenizer_checkpoint
+        hparams.tokenizer_checkpoint_value
     )
     data_module = model_config.data_module(
         hparams.train_batch_size, tokenizer, hparams.max_seq_length

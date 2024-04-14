@@ -30,6 +30,7 @@ class ModelChoice(Enum):
 @dataclass
 class HyperParams:
     base_model_checkpoint: str = "google/flan-t5-small"
+    tokenizer_checkpoint: Optional[str] = "google/flan-t5-small"
     max_seq_length: int = 2048
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
@@ -54,7 +55,9 @@ class HyperParams:
             raise ValueError("Either warmup_steps_count or warmup_ratio must be set")
 
     @property
-    def tokenizer_checkpoint(self) -> str:
+    def tokenizer_checkpoint_value(self) -> str:
+        if self.tokenizer_checkpoint:
+            return self.tokenizer_checkpoint
         return self.base_model_checkpoint
 
 
@@ -109,4 +112,3 @@ def ensure_directory(directory: str, clear: bool = True):
     if clear:
         shutil.rmtree(directory)
     Path(directory).mkdir(exist_ok=True, parents=True)
-
