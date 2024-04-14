@@ -330,6 +330,7 @@ class Block(nn.Module):
 
 class GPT(SmModel):
     def __init__(self, hparams: HyperParams, tokenizer: PreTrainedTokenizer) -> None:
+        super().__init__(hparams, tokenizer)
 
         config = Config(
             scale_embeddings=False,
