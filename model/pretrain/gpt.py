@@ -1,10 +1,12 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
 
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Type
+import math
+import lightning.pytorch as pl
 
 
 def find_multiple(n: int, k: int) -> int:
@@ -28,11 +30,9 @@ class Config:
     head_size: Optional[int] = None
     n_embd: int = 4096
     rotary_percentage: float = 0.25
-    parallel_residual: bool = True
     bias: bool = True
     lm_head_bias: bool = False
     n_query_groups: Optional[int] = None
-    shared_attention_norm: bool = False
     norm_eps: float = 1e-5
     gelu_approximate: str = "none"
     intermediate_size: Optional[int] = None
@@ -72,11 +72,6 @@ class Config:
 
         self.rope_n_elem = int(self.rotary_percentage * self.head_size)
 
-    @property
-    def mlp_class(self) -> Type:
-        # `self.mlp_class_name` cannot be the type to keep the config serializable
-        pass
-
 
 class RMSNorm(torch.nn.Module):
     """Root Mean Square Layer Normalization.
@@ -103,6 +98,52 @@ class RMSNorm(torch.nn.Module):
     def reset_parameters(self) -> None:
         torch.nn.init.ones_(self.weight)
 
+
+class KVCache(nn.Module):
+    def __init__(
+        self,
+        k_shape: Tuple[int, int, int, int],
+        v_shape: Tuple[int, int, int, int],
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__()
+        self.register_buffer(
+            "k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False
+        )
+
+    def forward(
+        self, input_pos: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # move the buffer to the activation dtype for when AMP is used
+        self.k = self.k.to(k.dtype)
+        self.v = self.v.to(v.dtype)
+        # update the cache
+        k = self.k.index_copy_(2, input_pos, k)
+        v = self.v.index_copy_(2, input_pos, v)
+        return k, v
+
+    def reset_parameters(self) -> None:
+        torch.nn.init.zeros_(self.k)
+        torch.nn.init.zeros_(self.v)
+
+
+def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """
+    apply the RoPE embeddings to the hidden states
+    cos and sin are applied to two halves of the hidden state
+    """
+    head_size = x.size(-1)
+    x1 = x[..., : head_size // 2]  # (B, nh, T, hs/2)
+    x2 = x[..., head_size // 2 :]  # (B, nh, T, hs/2)
+    rotated = torch.cat((-x2, x1), dim=-1)  # (B, nh, T, hs)
+    roped = (x * cos) + (rotated * sin)
+    return roped.to(dtype=x.dtype)
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -115,12 +156,14 @@ class CausalSelfAttention(nn.Module):
         self.attn = nn.Linear(config.n_embd, shape, bias=config.bias)
         # output projection
         # if `head_size` is explicitly specified in the config, `n_emd` might not be equal to `head_size * n_head`
-        self.proj = nn.Linear(config.head_size * config.n_head, config.n_embd, bias=config.bias)
+        self.proj = nn.Linear(
+            config.head_size * config.n_head, config.n_embd, bias=config.bias
+        )
         # disabled by default
         self.kv_cache: Optional[KVCache] = None
 
         self.config = config
-    
+
     def forward(
         self,
         x: torch.Tensor,
@@ -129,43 +172,129 @@ class CausalSelfAttention(nn.Module):
         mask: Optional[torch.Tensor] = None,
         input_pos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        
-        B, T, C = x.size() # batch size, sequence length, embed_dim
+
+        B, T, C = x.size()  # batch size, sequence length, embed_dim
 
         assert self.config.n_query_groups is not None
         assert self.config.n_head is not None
         assert self.config.head_size is not None
 
-        qkv = self.attn(x) # (B, T, n_head * head_size * 3) - 3 is for q, k, v
+        qkv = self.attn(x)  # (B, T, n_head * head_size * 3) - 3 is for q, k, v
         # this is the no. of query groups, i.e. num of q per kv pair
         q_per_kv = self.config.n_head // self.config.n_query_groups
-        total_qkv = q_per_kv + 2 # at least 1 more k and v
+        total_qkv = q_per_kv + 2  # at least 1 more k and v
         # split qkv into q, k, v, returning (B, T, n_head * head_size, 3)
         qkv = qkv.view(B, T, total_qkv, self.config.n_head * self.config.head_size)
         # get the qkv values to multiply per query group, for each token, for the hid_dim size
         # h is hid_dim size
-        qkv = qkv.permute(0, 2, 3, 1, 4) # (B, n_query_groups, total_qkv, T, h)
+        qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, h)
 
         q, k, v = qkv.split((q_per_kv, 1, 1), dim=2)
+
+        # maybe repeat k and v if for the non multi-head attention cases
+        # training: flash attention requires it
+        # inference: multi-query would require a full kv cache so avoid it to limit its memory usage
+        if self.config.n_query_groups != self.config.n_head and (
+            input_pos is None or self.config.n_query_groups != 1
+        ):
+            k = k.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
+            v = v.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
+
+        q = q.reshape(B, -1, T, self.config.head_size)  # (B, nh_q, T, hs)
+        k = k.reshape(B, -1, T, self.config.head_size)  # (B, nh_k, T, hs)
+        v = v.reshape(B, -1, T, self.config.head_size)  # (B, nh_v, T, hs)
+
+        q_roped = apply_rope(q[..., : self.config.rope_n_elem], cos, sin)
+        k_roped = apply_rope(k[..., : self.config.rope_n_elem], cos, sin)
+        q = torch.cat((q_roped, q[..., self.config.rope_n_elem :]), dim=-1)
+        k = torch.cat((k_roped, k[..., self.config.rope_n_elem :]), dim=-1)
+
+        if input_pos is not None:
+            if not isinstance(self.kv_cache, KVCache):
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            k, v = self.kv_cache(input_pos, k, v)
+
+        y = self.scaled_dot_product_attention(q, k, v, mask)
+
+        y = y.reshape(
+            B, T, self.config.head_size * self.config.n_head
+        )  # re-assemble all head outputs side by side
+
+        # output projection
+        return self.proj(y)
+
+    def scaled_dot_product_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        assert self.config.head_size is not None
+        scale = 1.0 / math.sqrt(self.config.head_size)
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=0.0, scale=scale, is_causal=mask is None
+        )
+        return y.transpose(1, 2)
+
+    def build_kv_cache(
+        self,
+        batch_size: int,
+        max_seq_length: int,
+        rope_cache_length: Optional[int] = None,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> KVCache:
+        assert self.config.head_size is not None
+        # 1 head if we are doing GQA, otherwise split kv cache across heads
+        heads = 1 if self.config.n_query_groups == 1 else self.config.n_head
+        # shape of the v cache
+        v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
+        if rope_cache_length is None:
+            if self.config.rotary_percentage != 1.0:
+                raise TypeError(
+                    "Please pass the `rope_cache_length=gpt.cos.size(-1)` value"
+                )
+            k_shape = v_shape
+        else:
+            k_shape = (
+                batch_size,
+                heads,
+                max_seq_length,
+                rope_cache_length + self.config.head_size - self.config.rope_n_elem,
+            )
+        return KVCache(k_shape, v_shape, device=device, dtype=dtype)
+
+
+class LLaMAMLP(nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        assert config.intermediate_size
+        self.fc_1 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.fc_2 = nn.Linear(config.n_embd, config.intermediate_size, bias=config.bias)
+        self.proj = nn.Linear(config.intermediate_size, config.n_embd, bias=config.bias)
+
+        self.config = config
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_fc_1 = self.fc_1(x)
+        x_fc_2 = self.fc_2(x)
+        x = torch.nn.functional.silu(x_fc_1) * x_fc_2
+        return self.proj(x)
 
 
 class Block(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
-        if not config.parallel_residual and config.shared_attention_norm:
-            raise NotImplementedError(
-                "No checkpoint amongst the ones we support uses this configuration"
-                " (non-parallel residual and shared attention norm)."
-            )
 
         self.norm_1 = RMSNorm(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
-        self.norm_2 = (
-            None
-            if config.shared_attention_norm
-            else RMSNorm(config.n_embd, eps=config.norm_eps)
-        )
-        self.mlp = config.mlp_class(config)
+        self.norm_2 = RMSNorm(config.n_embd, eps=config.norm_eps)
+        self.mlp = LLaMAMLP(config)
 
         self.config = config
 
@@ -188,17 +317,15 @@ class Block(nn.Module):
         x_normed = self.norm_1(x)
         # self attention
         attn_out = self.attn(x_normed, cos, sin, mask, input_pos)
-
         # apply residual
         x = attn_out + x
-
         # apply mlp and norm to attn_out
         x = self.mlp(self.norm_2(x)) + x
 
         return x
 
 
-class GPT(nn.Module):
+class GPT(pl.LightningModule):
     def __init__(self, config: Config) -> None:
         assert config.padded_vocab_size is not None
         self.config = config
@@ -253,5 +380,31 @@ class GPT(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, id):
-        pass
+    def forward(
+        self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        T = idx.size(1)
+        if self.max_seq_length < T:
+            raise ValueError(
+                f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
+            )
+
+        if input_pos is not None:  # use the kv cache
+            cos = self.cos.index_select(0, input_pos)
+            sin = self.sin.index_select(0, input_pos)
+            if self.mask_cache is None:
+                raise TypeError("You need to call `gpt.set_kv_cache()`")
+            mask = self.mask_cache.index_select(2, input_pos)
+        else:
+            cos = self.cos[:T]
+            sin = self.sin[:T]
+            mask = None
+
+        x = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        if self.config.scale_embeddings:
+            x = x * (self.config.n_embd**0.5)
+
+        for block in self.transformer.h:
+            x = block(x, cos, sin, mask, input_pos)
+        x = self.transformer.ln_f(x)
+        return self.lm_head(x)  # (b, t, vocab_size)
