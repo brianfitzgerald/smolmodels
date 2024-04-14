@@ -1,155 +1,51 @@
 print("Loading dependencies - torch...")
-from typing import Optional
 from fire import Fire
-from tabulate import tabulate
-import pandas as pd
-from transformers.models.t5.tokenization_t5 import T5Tokenizer
-from enum import Enum
-from pathlib import Path
-import shutil
-from fsspec.core import url_to_fs
 from dataclasses import dataclass
+
+from lightning import seed_everything
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.tokenization_utils import PreTrainedTokenizer
 from dataset.function_calling import FunctionCallingDataModule
 import random
 import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
+from model.simple_bert import SimpleBertForMaskedLM, get_sane_normalizers
+from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import TQDMProgressBar
+from model.callbacks import LogPredictionSamplesCallback, HfModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
 
 print("Loading dependencies - project...")
-from dataset.parti import PromptSafetyDataModule, PromptUpsampleDataModule
-from model.utils import (
-    IGNORE_TOKEN_INDEX,
-    PAD_TOKEN_ID,
-    HyperParams,
-    FineTunerDataset,
-    compute_metrics,
-)
+from dataset.parti import PromptUpsampleDataModule
+from dataset.bert_pretrain import BertPretrainDataset
+from model.utils import ModelChoice, SmDataset, HyperParams
 
 
-class LogPredictionSamplesCallback(pl.Callback):
-    def __init__(
-        self,
-        tokenizer: T5Tokenizer,
-        wandb_logger: Optional[WandbLogger] = None,
-        max_new_tokens: int = 256,
-    ):
-        self.tokenizer = tokenizer
-        self.wandb_logger = wandb_logger
-        self.max_new_tokens = max_new_tokens
-
-        # TODO clear existing log files
-        self.log_dir = Path("logs")
-        self.log_dir.mkdir(exist_ok=True)
-        shutil.rmtree(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-    def on_validation_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx: int
-    ) -> None:
-        self.log_prediction_samples(trainer, pl_module, outputs, batch, batch_idx, 0)
-
-    def log_prediction_samples(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
-    ):
-        if batch_idx > 0:
-            return
-        input_ids = batch["input_ids"]
-        labels = batch["labels"]
-        labels[labels[:, :] == IGNORE_TOKEN_INDEX] = PAD_TOKEN_ID
-        out = pl_module.model.generate(
-            input_ids,
-            max_length=self.max_new_tokens,
-        )
-
-        n = len(input_ids)
-        columns = ["Epoch", "Sample Index", "Input", "Output", "Target"]
-
-        table_columns = []
-        table_columns.append([trainer.current_epoch] * n)
-        table_columns.append(list(range(n)))
-
-        for feature in [input_ids, out, labels]:
-            decoded = self.tokenizer.batch_decode(
-                feature, skip_special_tokens=True, clean_up_tokenization_spaces=True
-            )
-            table_columns.append(decoded)
-
-        metrics = compute_metrics(table_columns[3], table_columns[4])
-
-        run_name = "latest"
-        if self.wandb_logger:
-            run_name = self.wandb_logger.experiment.name
-            table_rows = list(zip(*table_columns))
-            self.wandb_logger.log_table("Validation Samples", columns, table_rows)
-            self.wandb_logger.log_metrics(metrics)
-
-        rows = [list(row) for row in zip(*table_columns)]
-        rows_df = pd.DataFrame(rows, columns=columns)
-        rows_df.to_csv(
-            self.log_dir / f"{run_name}_samples.csv",
-            mode="a",
-            header=False,
-            index=False,
-        )
-
-        new_rows = tabulate(
-            rows,
-            headers=columns,
-            maxcolwidths=[10, 10, 50, 50, 50],
-        )
-        print(new_rows)
-        with open(self.log_dir / f"{run_name}_samples.txt", "a") as f:
-            f.write(new_rows)
-            f.write("\n")
-
-
-class ModelChoice(Enum):
-    T5 = "t5"
-    LLAMA = "llama"
-
-
-# https://github.com/Lightning-AI/pytorch-lightning/issues/3096#issuecomment-1441278197
-class HfModelCheckpoint(ModelCheckpoint):
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.FILE_EXTENSION = ""
-
-    def _save_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
-        super()._save_checkpoint(trainer, filepath)
-        print(f"Saving checkpoint at {filepath}")
-        if trainer.is_global_zero:
-            trainer.lightning_module.model.save_pretrained(filepath)
-            trainer.lightning_module.tokenizer.save_pretrained(filepath)
-
-    # https://github.com/Lightning-AI/lightning/pull/16067
-    def _remove_checkpoint(self, trainer: pl.Trainer, filepath: str) -> None:
-        super()._remove_checkpoint(trainer, filepath)
-        print(f"Removing checkpoint at {filepath}")
-        if trainer.is_global_zero:
-            fs, _ = url_to_fs(filepath)
-            if fs.exists(filepath):
-                fs.rm(filepath, recursive=True)
+MODEL_CHOICES = {
+    SimpleBertForMaskedLM: ModelChoice.SIMPLE_BERT,
+    T5FineTuner: ModelChoice.T5,
+    LlamaFineTuner: ModelChoice.LLAMA,
+}
 
 
 @dataclass
 class ModelConfig:
-    model: type[pl.LightningModule]
-    data_module: type[FineTunerDataset]
+    model: type[SmModel]
+    data_module: type[SmDataset]
     wandb_project_name: str
     hyperparams: HyperParams = HyperParams()
 
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
+BERT_PRETRAIN_PROJECT = "simple-bert-pretrain"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -170,43 +66,82 @@ CONFIGS = {
         PROMPT_UPSAMPLING_PROJECT,
         HyperParams(base_model_checkpoint="google/flan-t5-base"),
     ),
-    "prompt_safety": ModelConfig(
-        T5FineTuner,
-        PromptSafetyDataModule,
-        PROMPT_SAFETY_PROJECT,
-        HyperParams(base_model_checkpoint="google/flan-t5-small"),
+    "simple_bert_pretrain": ModelConfig(
+        SimpleBertForMaskedLM,
+        BertPretrainDataset,
+        BERT_PRETRAIN_PROJECT,
+        HyperParams(
+            # base model is only used for tokenizer
+            base_model_checkpoint="bert-base-uncased",
+            learning_rate=1e-3,
+            warmup_ratio=0.5,
+            weight_decay=0.01,
+            max_grad_norm=0.5,
+            num_train_epochs=1,
+            train_batch_size=128,
+            gradient_accumulation_steps=16,
+            max_seq_length=512,
+        ),
     ),
 }
 
 
-def main(wandb: bool = False, config: str = "prompt_safety"):
+def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
     loggers = []
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
-    model = model_config.model(hparams)
-    data_module = model_config.data_module(
-        hparams.train_batch_size, model.tokenizer, hparams.max_seq_length
+    tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(  # type: ignore
+        hparams.tokenizer_checkpoint
     )
+    data_module = model_config.data_module(
+        hparams.train_batch_size, tokenizer, hparams.max_seq_length
+    )
+    model = model_config.model(hparams, tokenizer)
 
     wandb_logger = None
     run_name = "".join(random.choices(string.ascii_letters + string.digits, k=4))
     run_name = f"{config}-{run_name}"
 
     if wandb:
-        project_name = model_config.wandb_project_name
-        wandb_logger = WandbLogger(name=run_name, project=project_name)
+        wandb_logger = WandbLogger(
+            name=run_name, project=model_config.wandb_project_name
+        )
         loggers.append(wandb_logger)
         wandb_logger.watch(model)
+    else:
+        loggers.append(CSVLogger("logs", name=run_name))
 
-    sample_callback = LogPredictionSamplesCallback(model.tokenizer, wandb_logger)
-
-    checkpoint_callback = HfModelCheckpoint(
-        dirpath="checkpoints",
-        filename=run_name,
-        monitor="val_loss",
-        mode="min",
+    model_choice: ModelChoice = MODEL_CHOICES[model.__class__]  # type: ignore
+    sample_callback = LogPredictionSamplesCallback(
+        tokenizer, model_choice, wandb_logger
     )
+
+    learning_rate_callback = LearningRateMonitor(logging_interval="step")
+
+    if model_choice == ModelChoice.SIMPLE_BERT:
+        tokenizer._tokenizer.normalizer = get_sane_normalizers(  # type: ignore
+            force_english_keyboard=True,
+            strip_accents=True,
+            force_lowercase=True,
+        )
+
+    seed_everything(hparams.seed)
+
+    if model_choice == ModelChoice.SIMPLE_BERT:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath="checkpoints",
+            filename=run_name,
+            monitor="val_loss",
+            mode="min",
+        )
+    else:
+        checkpoint_callback = HfModelCheckpoint(
+            dirpath="checkpoints",
+            filename=run_name,
+            monitor="val_loss",
+            mode="min",
+        )
 
     progress_bar_callback = TQDMProgressBar(refresh_rate=10)
     precision = "32" if model_config.model == T5FineTuner else "16-mixed"
@@ -216,8 +151,13 @@ def main(wandb: bool = False, config: str = "prompt_safety"):
         max_epochs=hparams.num_train_epochs,
         precision=precision,
         gradient_clip_val=hparams.max_grad_norm,
-        val_check_interval=0.01,
-        callbacks=[sample_callback, checkpoint_callback, progress_bar_callback],
+        val_check_interval=0.1,
+        callbacks=[
+            sample_callback,
+            checkpoint_callback,
+            progress_bar_callback,
+            learning_rate_callback,
+        ],
         logger=loggers,
         log_every_n_steps=1,
     )
