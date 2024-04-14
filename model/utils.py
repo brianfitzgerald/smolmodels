@@ -25,6 +25,7 @@ class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
     SIMPLE_BERT = "simple_bert"
+    GPT = "gpt"
 
 
 @dataclass

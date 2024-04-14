@@ -40,6 +40,7 @@ MODEL_CHOICES = {
     SimpleBertForMaskedLM: ModelChoice.SIMPLE_BERT,
     T5FineTuner: ModelChoice.T5,
     LlamaFineTuner: ModelChoice.LLAMA,
+    GPT: ModelChoice.GPT,
 }
 
 
