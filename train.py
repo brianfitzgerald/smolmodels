@@ -103,8 +103,8 @@ CONFIGS = {
             num_train_epochs=1,
             train_batch_size=32,
             gradient_accumulation_steps=16,
-            max_seq_length=1024,
-            tokenizer_checkpoint="openai-community/gpt2",
+            max_seq_length=512,
+            tokenizer_checkpoint="EleutherAI/gpt-neox-20b",
         ),
     ),
 }
@@ -150,6 +150,9 @@ def main(wandb: bool = False, config: str = "tiny_stories"):
             strip_accents=True,
             force_lowercase=True,
         )
+    
+    if model_choice == ModelChoice.GPT:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
     seed_everything(hparams.seed)
 

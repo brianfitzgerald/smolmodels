@@ -4,10 +4,12 @@ import torch
 import torch.nn as nn
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Type
+from typing import Optional
 import math
-import lightning.pytorch as pl
 from transformers.tokenization_utils import PreTrainedTokenizer
+from transformers.optimization import get_cosine_schedule_with_warmup
+from torch.optim import AdamW
+import torch.nn.functional as F
 
 from model.utils import HyperParams, SmModel
 
@@ -398,7 +400,7 @@ class GPT(SmModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(
+    def gpt_forward(
         self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         T = idx.size(1)
@@ -426,3 +428,58 @@ class GPT(SmModel):
             x = block(x, cos, sin, mask, input_pos)
         x = self.transformer.ln_f(x)
         return self.lm_head(x)  # (b, t, vocab_size)
+
+    def forward(self, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        logits = self.gpt_forward(input_ids)
+        ignore_index = self.tokenizer.pad_token_id
+        assert ignore_index
+        loss = F.cross_entropy(
+            logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=ignore_index
+        )
+        return loss
+
+    def _step(self, batch):
+        outputs = self(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            labels=batch["labels"],
+        )
+
+        return outputs.loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self._step(batch)
+        self.log(
+            "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
+        return {"loss": loss}
+
+    def validation_step(self, batch, batch_idx):
+        loss = self._step(batch)
+        self.log(
+            "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
+        )
+        return {"val_loss": loss}
+
+    def configure_optimizers(self):
+        optimizer = AdamW(
+            self.model.parameters(),
+            lr=self.params.learning_rate,
+            eps=self.params.adam_epsilon,
+            weight_decay=self.params.weight_decay,
+        )
+        print(f"Configuring optimizers: {self.train_steps}")
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=self.params.warmup_steps(
+                self.trainer.estimated_stepping_batches
+            ),
+            num_training_steps=int(self.trainer.estimated_stepping_batches),
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+            },
+        }
