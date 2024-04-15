@@ -150,13 +150,13 @@ def main(wandb: bool = False, config: str = "tiny_stories"):
             strip_accents=True,
             force_lowercase=True,
         )
-    
+
     if model_choice == ModelChoice.GPT:
         tokenizer.add_special_tokens({"pad_token": "[PAD]"})
 
     seed_everything(hparams.seed)
 
-    if model_choice == ModelChoice.SIMPLE_BERT:
+    if model_choice in (ModelChoice.SIMPLE_BERT, ModelChoice.GPT):
         checkpoint_callback = ModelCheckpoint(
             dirpath="checkpoints",
             filename=run_name,
