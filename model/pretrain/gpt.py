@@ -498,14 +498,21 @@ class GPT(SmModel):
         x = self.transformer.ln_f(x)
         return self.lm_head(x)  # (b, t, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor, input_pos: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        input_pos: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         logits = self.gpt_forward(input_ids, input_pos)
         ignore_index = self.tokenizer.pad_token_id
         assert ignore_index
         loss = torch.tensor(0.0)
         if labels is not None:
             loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=ignore_index
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=ignore_index,
             )
         return logits, loss
 
@@ -556,10 +563,10 @@ class GPT(SmModel):
 def sample(
     logits: torch.Tensor, temperature: float = 1.0, top_k: Optional[int] = None
 ) -> torch.Tensor:
-    logits = logits[0, -1]
+    logits = logits[:, -1, :]
     # optionally crop the logits to only the top k options
     if top_k is not None:
-        v, i = torch.topk(logits, min(top_k, logits.size(-1)))
+        v, i = torch.topk(logits, min(top_k, logits.size(-1)), dim=-1)
         # do not use `torch.where` as in nanogpt because it will repeat top-k collisions
         logits = torch.full_like(logits, float("-inf")).scatter_(-1, i, v)
     # optionally scale the logits and sample from a probability distribution
@@ -594,17 +601,19 @@ def generate(
     B, T = prompt.size()
 
     assert max_returned_tokens > T
-    model.set_kv_cache(batch_size=1, device=prompt.device)
+    model.set_kv_cache(batch_size=B, device=prompt.device)
     device = prompt.device
-    prev_tokens_batch = torch.empty(B, dtype=torch.long, device=device)
+    prev_tokens_batch = torch.zeros(B, dtype=torch.long, device=device)
     input_pos = torch.tensor([T], device=device)
     sampled = next_token(
         model, torch.arange(0, T, device=device), prompt, temperature, top_k
     ).clone()
-    prev_tokens_batch = torch.cat([prev_tokens_batch, sampled], dim=1)
-    for _ in range(2, max_returned_tokens - T + 1):
-        sampled = next_token(model, input_pos, sampled, temperature, top_k).clone()
-        prev_tokens_batch = torch.cat([prev_tokens_batch, sampled], dim=1)
+    prev_tokens_batch = torch.cat((prompt, sampled), dim=-1)
+    for i in range(2, max_returned_tokens - T + 1):
+        sampled = next_token(
+            model, input_pos, prev_tokens_batch, temperature, top_k
+        ).clone()
+        prev_tokens_batch = torch.cat((prompt, sampled), dim=-1)
         if sampled == eos_id:
             break
         input_pos = input_pos.add_(1)
