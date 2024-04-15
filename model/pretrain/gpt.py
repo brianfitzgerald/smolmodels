@@ -498,32 +498,33 @@ class GPT(SmModel):
         x = self.transformer.ln_f(x)
         return self.lm_head(x)  # (b, t, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        print("input_ids shape in forward", input_ids.shape)
-        logits = self.gpt_forward(input_ids)
+    def forward(self, input_ids: torch.Tensor, input_pos: Optional[torch.Tensor] = None, labels: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        logits = self.gpt_forward(input_ids, input_pos)
         ignore_index = self.tokenizer.pad_token_id
         assert ignore_index
-        loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=ignore_index
-        )
-        return loss
+        loss = torch.tensor(0.0)
+        if labels is not None:
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=ignore_index
+            )
+        return logits, loss
 
     def _step(self, batch):
-        loss = self(
+        logits, loss = self(
             input_ids=batch["input_ids"],
             labels=batch["labels"],
         )
-        return loss
+        return logits, loss
 
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        _, loss = self._step(batch)
         self.log(
             "train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
         return {"loss": loss}
 
     def validation_step(self, batch, batch_idx):
-        loss = self._step(batch)
+        _, loss = self._step(batch)
         self.log(
             "val_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True
         )
@@ -575,9 +576,7 @@ def next_token(
     temperature: float,
     top_k: Optional[int] = None,
 ) -> torch.Tensor:
-    print("input_ids shape", input_ids.shape)
-    print("input_pos shape", input_pos.shape)
-    logits = model(input_ids, input_pos)
+    logits, _ = model(input_ids, input_pos)
     next = sample(logits, temperature, top_k)
     return next.to(dtype=input_ids.dtype)
 
@@ -593,16 +592,9 @@ def generate(
     eos_id: Optional[int] = None,
 ) -> torch.Tensor:
     B, T = prompt.size()
-    assert max_returned_tokens > T
-    if model.max_seq_length < max_returned_tokens - 1:
-        # rolling the kv cache based on the `input_pos` value would be necessary. However, doing so would introduce a
-        # data dependency on the `input_pos` tensor and impact model compilation. Since this setting is uncommon, we do
-        # not support it to avoid negatively impacting the overall speed
-        raise NotImplementedError(
-            f"max_seq_length {model.max_seq_length} needs to be >= {max_returned_tokens - 1}"
-        )
 
-    model.set_kv_cache(batch_size=1)
+    assert max_returned_tokens > T
+    model.set_kv_cache(batch_size=1, device=prompt.device)
     device = prompt.device
     prev_tokens_batch = torch.empty(B, dtype=torch.long, device=device)
     input_pos = torch.tensor([T], device=device)

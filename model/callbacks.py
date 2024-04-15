@@ -97,7 +97,10 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         elif self.model_choice == ModelChoice.GPT:
             model = cast(GPT, pl_module)
-            out = generate(model, input_ids, model.config.block_size + self.max_new_tokens)
+
+            T = input_ids.size(1)
+            input_ids = input_ids[:, : T - self.max_new_tokens]
+            out = generate(model, input_ids, T)
 
             for feature in [input_ids, out, labels]:
                 decoded = self.tokenizer.batch_decode(
