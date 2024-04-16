@@ -560,7 +560,7 @@ class GPT(SmModel):
 
 
 def sample(
-    logits: torch.Tensor, temperature: float = 1.0, top_k: Optional[int] = None
+    logits: torch.Tensor, temperature: float = 0.0, top_k: Optional[int] = None
 ) -> torch.Tensor:
     logits = logits[0, -1]
     # optionally crop the logits to only the top k options
@@ -576,10 +576,14 @@ def sample(
 
 
 def next_token(
-    model: GPT, input_pos: torch.Tensor, x: torch.Tensor, **kwargs
+    model: GPT,
+    input_pos: torch.Tensor,
+    x: torch.Tensor,
+    temperature: float,
+    top_k: Optional[int],
 ) -> torch.Tensor:
     logits, _ = model(x, input_pos)
-    next = sample(logits, **kwargs)
+    next = sample(logits, temperature, top_k)
     return next.to(dtype=x.dtype)
 
 
@@ -588,7 +592,6 @@ def generate(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
-    *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     eos_id: Optional[int] = None,
@@ -607,13 +610,13 @@ def generate(
         model,
         torch.arange(0, T, device=device),
         prompt.view(1, -1),
-        temperature=temperature,
-        top_k=top_k,
+        temperature,
+        top_k,
     ).clone()
     tokens.append(token)
     for _ in range(2, max_returned_tokens - T + 1):
         token = next_token(
-            model, input_pos, token.view(1, -1), temperature=temperature, top_k=top_k
+            model, input_pos, token.view(1, -1), temperature, top_k
         ).clone()
         tokens.append(token)
         if token == eos_id:
