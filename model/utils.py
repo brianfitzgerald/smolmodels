@@ -38,7 +38,7 @@ class HyperParams:
     warmup_steps_count: Optional[int] = None
     warmup_ratio: Optional[float] = None
     train_batch_size: int = 4
-    eval_batch_size: int = 2
+    val_batch_size: int = 2
     num_train_epochs: int = 25
     gradient_accumulation_steps: int = 2
     n_gpus: int = 1

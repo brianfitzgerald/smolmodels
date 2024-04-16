@@ -472,7 +472,6 @@ class GPT(SmModel):
         self, input_ids: torch.Tensor, input_pos: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         T = input_ids.size(1)
-        print("T", T)
         if self.max_seq_length < T:
             raise ValueError(
                 f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
@@ -563,10 +562,10 @@ class GPT(SmModel):
 def sample(
     logits: torch.Tensor, temperature: float = 1.0, top_k: Optional[int] = None
 ) -> torch.Tensor:
-    logits = logits[:, -1, :]
+    logits = logits[0, -1]
     # optionally crop the logits to only the top k options
     if top_k is not None:
-        v, i = torch.topk(logits, min(top_k, logits.size(-1)), dim=-1)
+        v, i = torch.topk(logits, min(top_k, logits.size(-1)))
         # do not use `torch.where` as in nanogpt because it will repeat top-k collisions
         logits = torch.full_like(logits, float("-inf")).scatter_(-1, i, v)
     # optionally scale the logits and sample from a probability distribution
@@ -577,44 +576,47 @@ def sample(
 
 
 def next_token(
-    model: GPT,
-    input_pos: torch.Tensor,
-    input_ids: torch.Tensor,
-    temperature: float,
-    top_k: Optional[int] = None,
+    model: GPT, input_pos: torch.Tensor, x: torch.Tensor, **kwargs
 ) -> torch.Tensor:
-    logits, _ = model(input_ids, input_pos)
-    next = sample(logits, temperature, top_k)
-    return next.to(dtype=input_ids.dtype)
+    logits, _ = model(x, input_pos)
+    next = sample(logits, **kwargs)
+    return next.to(dtype=x.dtype)
 
 
-# from litgpt/generate/base.py
 @torch.inference_mode()
 def generate(
     model: GPT,
     prompt: torch.Tensor,
     max_returned_tokens: int,
+    *,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     eos_id: Optional[int] = None,
 ) -> torch.Tensor:
-    B, T = prompt.size()
-
+    T = prompt.size(0)
     assert max_returned_tokens > T
-    model.set_kv_cache(batch_size=B, device=prompt.device)
+    if model.max_seq_length < max_returned_tokens - 1:
+        raise NotImplementedError(
+            f"max_seq_length {model.max_seq_length} needs to be >= {max_returned_tokens - 1}"
+        )
+
     device = prompt.device
-    prev_tokens_batch = torch.zeros(B, dtype=torch.long, device=device)
+    tokens = [prompt]
     input_pos = torch.tensor([T], device=device)
-    sampled = next_token(
-        model, torch.arange(0, T, device=device), prompt, temperature, top_k
+    token = next_token(
+        model,
+        torch.arange(0, T, device=device),
+        prompt.view(1, -1),
+        temperature=temperature,
+        top_k=top_k,
     ).clone()
-    prev_tokens_batch = torch.cat((prompt, sampled), dim=-1)
-    for i in range(2, max_returned_tokens - T + 1):
-        sampled = next_token(
-            model, input_pos, prev_tokens_batch, temperature, top_k
+    tokens.append(token)
+    for _ in range(2, max_returned_tokens - T + 1):
+        token = next_token(
+            model, input_pos, token.view(1, -1), temperature=temperature, top_k=top_k
         ).clone()
-        prev_tokens_batch = torch.cat((prompt, sampled), dim=-1)
-        if sampled == eos_id:
+        tokens.append(token)
+        if token == eos_id:
             break
         input_pos = input_pos.add_(1)
-    return prev_tokens_batch
+    return torch.cat(tokens)
