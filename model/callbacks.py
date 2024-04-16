@@ -97,9 +97,10 @@ class LogPredictionSamplesCallback(pl.Callback):
 
         elif self.model_choice == ModelChoice.GPT:
             model = cast(GPT, pl_module)
+            model.set_kv_cache(batch_size=1, device=input_ids.device)
 
             T = input_ids.size(1)
-            input_ids = input_ids[:, : T - self.max_new_tokens]
+            input_ids = input_ids[0, : T - self.max_new_tokens]
             out = generate(model, input_ids, T)
 
             for feature in [input_ids, out, labels]:

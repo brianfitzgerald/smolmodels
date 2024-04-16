@@ -102,6 +102,7 @@ CONFIGS = {
             max_grad_norm=0.5,
             num_train_epochs=1,
             train_batch_size=32,
+            val_batch_size=1,
             gradient_accumulation_steps=16,
             max_seq_length=512,
             tokenizer_checkpoint="EleutherAI/gpt-neox-20b",
