@@ -8,6 +8,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from fsspec.core import url_to_fs
 from torch import Tensor
+import torch
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
@@ -99,9 +100,14 @@ class LogPredictionSamplesCallback(pl.Callback):
             model = cast(GPT, pl_module)
             model.set_kv_cache(batch_size=1, device=input_ids.device)
 
-            T = input_ids.size(1)
-            input_ids = input_ids[0, : T - self.max_new_tokens]
-            out = generate(model, input_ids, T)
+            B, T = input_ids.shape
+            out_batch = []
+            for i in range(B):
+                input_ids_sample = input_ids[i, : T - self.max_new_tokens]
+                out = generate(model, input_ids_sample, T)
+                out_batch.append(out)
+
+            out = torch.stack(out_batch, dim=0)
 
             for feature in [input_ids, out, labels]:
                 decoded = self.tokenizer.batch_decode(
@@ -109,7 +115,6 @@ class LogPredictionSamplesCallback(pl.Callback):
                 )
                 decoded = [s.replace("[PAD]", "").strip() for s in decoded]
                 table_columns.append(decoded)
-
 
         else:
             # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
