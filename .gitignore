@@ -188,3 +188,5 @@ gradio_tmp
 classifier_eval
 baseline_eval
 submit.sh
+*.tar
+synthetic_image_data/*
