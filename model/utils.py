@@ -25,18 +25,20 @@ class ModelChoice(Enum):
     T5 = "t5"
     LLAMA = "llama"
     SIMPLE_BERT = "simple_bert"
+    GPT = "gpt"
 
 
 @dataclass
 class HyperParams:
     base_model_checkpoint: str = "google/flan-t5-small"
+    tokenizer_checkpoint: Optional[str] = "google/flan-t5-small"
     max_seq_length: int = 2048
     learning_rate: float = 3e-4
     adam_epsilon: float = 1e-8
     warmup_steps_count: Optional[int] = None
     warmup_ratio: Optional[float] = None
     train_batch_size: int = 4
-    eval_batch_size: int = 2
+    val_batch_size: int = 2
     num_train_epochs: int = 25
     gradient_accumulation_steps: int = 2
     n_gpus: int = 1
@@ -54,7 +56,9 @@ class HyperParams:
             raise ValueError("Either warmup_steps_count or warmup_ratio must be set")
 
     @property
-    def tokenizer_checkpoint(self) -> str:
+    def tokenizer_checkpoint_value(self) -> str:
+        if self.tokenizer_checkpoint:
+            return self.tokenizer_checkpoint
         return self.base_model_checkpoint
 
 
@@ -109,4 +113,3 @@ def ensure_directory(directory: str, clear: bool = True):
     if clear:
         shutil.rmtree(directory)
     Path(directory).mkdir(exist_ok=True, parents=True)
-

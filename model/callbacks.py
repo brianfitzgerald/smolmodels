@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 from tabulate import tabulate
 import pandas as pd
 from pathlib import Path
@@ -8,12 +8,14 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning.pytorch as pl
 from fsspec.core import url_to_fs
 from torch import Tensor
+import torch
 
 from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 from transformers.tokenization_utils import PreTrainedTokenizer
 
 
+from model.pretrain.gpt import generate, GPT
 from model.utils import (
     IGNORE_TOKEN_INDEX,
     PAD_TOKEN_ID,
@@ -56,6 +58,7 @@ class LogPredictionSamplesCallback(pl.Callback):
     ):
         if batch_idx > 0:
             return
+        # TODO implement
         input_ids: Tensor = batch["input_ids"]
         labels: Tensor = batch["labels"]
 
@@ -92,6 +95,26 @@ class LogPredictionSamplesCallback(pl.Callback):
                 labels_display = labels_display[labels_display != mask_token_id]
                 labels_decoded = self.tokenizer.decode(labels_display)
                 table_columns[4].append(labels_decoded)
+
+        elif self.model_choice == ModelChoice.GPT:
+            model = cast(GPT, pl_module)
+            model.set_kv_cache(batch_size=1, device=input_ids.device)
+
+            B, T = input_ids.shape
+            out_batch = []
+            for i in range(B):
+                input_ids_sample = input_ids[i, : T - self.max_new_tokens]
+                out = generate(model, input_ids_sample, T)
+                out_batch.append(out)
+
+            out = torch.stack(out_batch, dim=0)
+
+            for feature in [input_ids, out, labels]:
+                decoded = self.tokenizer.batch_decode(
+                    feature, clean_up_tokenization_spaces=True
+                )
+                decoded = [s.replace("[PAD]", "").strip() for s in decoded]
+                table_columns.append(decoded)
 
         else:
             # IGNORE_TOKEN_INDEX is not respected in inference, so replace it with PAD_TOKEN_ID
