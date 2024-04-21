@@ -11,7 +11,8 @@ import string
 
 from model.t5 import T5FineTuner
 from model.llama import LlamaFineTuner
-from model.simple_bert import SimpleBertForMaskedLM, get_sane_normalizers
+from model.pretrain.bert import SimpleBertForMaskedLM, get_sane_normalizers
+from model.pretrain.gpt import GPT
 from model.utils import SmModel
 
 print("Loading dependencies - lightning...")
@@ -31,7 +32,7 @@ from lightning.pytorch.callbacks import (
 
 print("Loading dependencies - project...")
 from dataset.parti import PromptUpsampleDataModule
-from dataset.bert_pretrain import BertPretrainDataset
+from dataset.pretrain import TinyStoriesDataset, BertPretrainDataset
 from model.utils import ModelChoice, SmDataset, HyperParams
 
 
@@ -39,6 +40,7 @@ MODEL_CHOICES = {
     SimpleBertForMaskedLM: ModelChoice.SIMPLE_BERT,
     T5FineTuner: ModelChoice.T5,
     LlamaFineTuner: ModelChoice.LLAMA,
+    GPT: ModelChoice.GPT,
 }
 
 
@@ -52,7 +54,6 @@ class ModelConfig:
 
 PROMPT_UPSAMPLING_PROJECT = "t5-prompt-upsampling"
 PROMPT_SAFETY_PROJECT = "t5-prompt-safety"
-BERT_PRETRAIN_PROJECT = "simple-bert-pretrain"
 
 CONFIGS = {
     "fn_calling": ModelConfig(
@@ -76,7 +77,7 @@ CONFIGS = {
     "simple_bert_pretrain": ModelConfig(
         SimpleBertForMaskedLM,
         BertPretrainDataset,
-        BERT_PRETRAIN_PROJECT,
+        "simple-bert-pretrain",
         HyperParams(
             # base model is only used for tokenizer
             base_model_checkpoint="bert-base-uncased",
@@ -90,16 +91,33 @@ CONFIGS = {
             max_seq_length=512,
         ),
     ),
+    "tiny_stories": ModelConfig(
+        GPT,
+        TinyStoriesDataset,
+        "tinystories-gpt-pretrain",
+        HyperParams(
+            learning_rate=1e-4,
+            warmup_ratio=0.5,
+            weight_decay=0.01,
+            max_grad_norm=0.5,
+            num_train_epochs=1,
+            train_batch_size=32,
+            val_batch_size=1,
+            gradient_accumulation_steps=16,
+            max_seq_length=512,
+            tokenizer_checkpoint="EleutherAI/gpt-neox-20b",
+        ),
+    ),
 }
 
 
-def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
+def main(wandb: bool = False, config: str = "tiny_stories"):
     loggers = []
 
     model_config = CONFIGS[config]
     hparams = model_config.hyperparams
     tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(  # type: ignore
-        hparams.tokenizer_checkpoint
+        hparams.tokenizer_checkpoint_value
     )
     data_module = model_config.data_module(
         hparams.train_batch_size, tokenizer, hparams.max_seq_length
@@ -134,9 +152,12 @@ def main(wandb: bool = False, config: str = "simple_bert_pretrain"):
             force_lowercase=True,
         )
 
+    if model_choice == ModelChoice.GPT:
+        tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+
     seed_everything(hparams.seed)
 
-    if model_choice == ModelChoice.SIMPLE_BERT:
+    if model_choice in (ModelChoice.SIMPLE_BERT, ModelChoice.GPT):
         checkpoint_callback = ModelCheckpoint(
             dirpath="checkpoints",
             filename=run_name,
