@@ -427,14 +427,14 @@ class SquadExtractiveQA(SFTDataTask):
         self.contexts = []
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        prompts = batch["Prompt"]
+        prompts = batch["context"]
         self.ids = batch["id"]
         self.contexts = batch["context"]
         return [format_squad_extractive_json_template(prompt) for prompt in prompts]
 
     def format_output_rows(self, completions_batch: List[str]) -> List[Dict]:
         should_dropout_batch = random.choices([True, False], k=len(completions_batch))
-        out_rows = []
+        qa_rows: List[SquadExtractiveQARow] = []
         for i, completion in enumerate(completions_batch):
             json_schema = extract_json(completion)
             if not json_schema:
@@ -449,11 +449,18 @@ class SquadExtractiveQA(SFTDataTask):
                 for field_name in fields_to_dropout:
                     del json_schema[field_name]
                 remaining_fields = field_names - fields_to_dropout
-                out_row = SquadExtractiveQARow(
+                qa_row = SquadExtractiveQARow(
                     self.ids[i],
                     self.contexts[i],
                     json_schema,
                     list(remaining_fields),
                 )
-                out_rows.append(out_row)
-        return [row.__dict__ for row in out_rows]
+                qa_rows.append(qa_row)
+        
+        out_rows = []
+        for row in out_rows:
+            row = row.__dict__
+            row["json_schema"] = json.dumps(row["json_schema"])
+            out_rows.append(row)
+        return out_rows
+
