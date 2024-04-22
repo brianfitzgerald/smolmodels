@@ -7,6 +7,7 @@ from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     TOOL_USE_CATEGORIES,
     format_dalle_prompt_template,
+    format_squad_extractive_json_template,
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
     get_toolformer_prompt,
@@ -17,52 +18,52 @@ from synthetic_data.tools import (
     get_tool_description_json,
     get_tool_descriptions,
 )
+import json
 
 from synthetic_data.utils import (
     Conversation,
-    DatasetTaskFormat,
     SeedDataFormat,
     SyntheticToolCallRow,
     SyntheticToolCallDPORow,
     ToolFormerDPORow,
     ToolFormerRow,
+    SquadExtractiveQARow,
+    extract_json,
     is_valid_python,
     clean_message,
     get_matches,
 )
 
 
-class SyntheticDataTask(ABC):
+class SFTDataTask(ABC):
     seed_data_format: SeedDataFormat = SeedDataFormat.SYNTHETIC
-    dataset_task_format: DatasetTaskFormat = DatasetTaskFormat.SFT
-
-    # Only used for the toolformer DPO dataset. # TODO remove this when that project is finished.
-    seed_data_uses_conversation_format: bool = False
-
-    # Name for the dataset used to cache the seed data.
-    # Once all the seed data is generated, this dataset will be used to cache the seed data.
-    dpo_seed_cache_dataset_name: Optional[str] = None
-
-    no_dpo_completions: int = 2
 
     seed_data_location: str
     output_dataset_name: str
-    dataset_org: str
+    output_dataset_org: str = "roborovski"
 
     empty_dataset_format: Dict[str, List]
-    empty_dpo_dataset_format: Dict[str, List]
 
-    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         """
         Prompt template to use for generating initial seed data.
         """
         raise NotImplementedError
 
-    def get_seed_dataset_output_rows_batch(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(self, completions: List[str]) -> List[Dict]:
         """
         Take the completed conversation and format it into the final dataset format.
         """
         raise NotImplementedError
+
+
+class DPODataTask(SFTDataTask):
+
+    # Name for the dataset used to cache the seed data.
+    # Once all the seed data is generated, this dataset will be used to cache the seed data.
+    dpo_seed_cache_dataset_name: Optional[str] = None
+    no_dpo_completions: int = 2
+    empty_dpo_dataset_format: Dict[str, List]
 
     def format_dpo_input_conversations(self, batch: Dict) -> List[Conversation]:
         """
@@ -77,7 +78,7 @@ class SyntheticDataTask(ABC):
         raise NotImplementedError
 
 
-class PromptUpsample(SyntheticDataTask):
+class PromptUpsample(SFTDataTask):
     seed_data_format = SeedDataFormat.TSV
     seed_data_location = "gs://openai-datasets/prompt-upsample/seed-data.tsv"
     output_dataset_name = "prompt-upsample"
@@ -93,16 +94,14 @@ class PromptUpsample(SyntheticDataTask):
         super().__init__()
         self.original_rows = []
 
-    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         prompts = batch["Prompt"]
         return [format_dalle_prompt_template(prompt) for prompt in prompts]
 
 
-class Toolformer(SyntheticDataTask):
+class Toolformer(DPODataTask):
     seed_data_format = SeedDataFormat.SYNTHETIC
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
-
-    dataset_task_format = DatasetTaskFormat.DPO
 
     dpo_seed_cache_dataset_name = "synthetic-toolformer-sharegpt"
 
@@ -118,7 +117,7 @@ class Toolformer(SyntheticDataTask):
 
     original_rows_batch: List[ToolFormerRow] = []
 
-    def format_seed_input_conversation(self, batch_size: int) -> List[Conversation]:
+    def format_input_conversation(self, batch_size: int) -> List[Conversation]:
         prompt_conversations: List[Conversation] = []
         random_categories = random.sample(TOOL_USE_CATEGORIES * batch_size, batch_size)
         tool_descriptions = get_tool_descriptions()
@@ -128,7 +127,7 @@ class Toolformer(SyntheticDataTask):
             )
         return prompt_conversations
 
-    def get_seed_dataset_output_rows_batch(self, completions_batch: List[str]) -> Dict:
+    def format_output_rows(self, completions_batch: List[str]) -> Dict:
         for completion in completions_batch:
             question, tool_call, call_result, agent_output = get_matches(completion)
             row = ToolFormerRow(question, tool_call, call_result, agent_output)
@@ -211,13 +210,11 @@ class Toolformer(SyntheticDataTask):
         return new_rows_batch
 
 
-class SyntheticToolCalls(SyntheticDataTask):
-    dataset_task_format = DatasetTaskFormat.DPO
+class SyntheticToolCalls(DPODataTask):
     seed_data_format = SeedDataFormat.TSV
     seed_data_location = "seed_data_files/domain_specific_tasks.csv"
 
     dataset_org = "roborovski"
-    # TODO swap this and the output dataset name
     dpo_seed_cache_dataset_name = "synthetic-tool-calls-dpo-pairs"
 
     output_dataset_name = "synthetic-tool-calls-v2-dpo-pairs"
@@ -242,15 +239,13 @@ class SyntheticToolCalls(SyntheticDataTask):
 
     original_rows_batch: List[SyntheticToolCallRow] = []
 
-    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         conversations = []
         for category, task in zip(batch["Category"], batch["Task"]):
             conversations.append(get_tool_usage_prompt(category, task))
         return conversations
 
-    def get_seed_dataset_output_rows_batch(
-        self, completions_batch: List[str]
-    ) -> List[Dict]:
+    def format_output_rows(self, completions_batch: List[str]) -> List[Dict]:
         batch = []
         for completion in completions_batch:
             try:
@@ -348,8 +343,8 @@ class SyntheticToolCalls(SyntheticDataTask):
         return new_rows_batch
 
 
-class GlaiveDPO(SyntheticDataTask):
-    def format_seed_input_conversation(self, batch: Dict) -> List[Conversation]:
+class GlaiveDPO(DPODataTask):
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         glaive_conversations = [
             chatml_to_conversation(chat, system)
             for chat, system in zip(batch["chat"], batch["system"])
@@ -404,3 +399,61 @@ class GlaiveDPO(SyntheticDataTask):
             {"role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]], "content": msg["value"]}
             for msg in new_rows_batch
         ]
+
+
+class SquadExtractiveQA(SFTDataTask):
+    """
+    Performs the following steps:
+    - Generate JSON struct from the prompt.
+    - Dropout certain fields from the JSON struct.
+    - Save the original JSON struct and the dropout JSON struct.
+    """
+
+    seed_data_format = SeedDataFormat.HF_DATASET
+    seed_data_location = "rajpurkar/squad_v2"
+    output_dataset_name = "squad-extractive-qa"
+    output_dataset_org = "roborovski"
+
+    empty_dataset_format = {
+        "id": [],
+        "context": [],
+        "json_schema": [],
+        "fields": [],
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids = []
+        self.contexts = []
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        prompts = batch["Prompt"]
+        self.ids = batch["id"]
+        self.contexts = batch["context"]
+        return [format_squad_extractive_json_template(prompt) for prompt in prompts]
+
+    def format_output_rows(self, completions_batch: List[str]) -> List[Dict]:
+        should_dropout_batch = random.choices([True, False], k=len(completions_batch))
+        out_rows = []
+        for i, completion in enumerate(completions_batch):
+            json_schema = extract_json(completion)
+            if not json_schema:
+                print(f"Error in extracting JSON from completion: {completion}")
+                continue
+            if should_dropout_batch[i]:
+                num_fields_to_dropout = random.randint(1, len(json_schema) - 1)
+                field_names = set(json_schema.keys())
+                fields_to_dropout = set(
+                    random.sample(list(field_names), num_fields_to_dropout)
+                )
+                for field_name in fields_to_dropout:
+                    del json_schema[field_name]
+                remaining_fields = field_names - fields_to_dropout
+                out_row = SquadExtractiveQARow(
+                    self.ids[i],
+                    self.contexts[i],
+                    json_schema,
+                    list(remaining_fields),
+                )
+                out_rows.append(out_row)
+        return [row.__dict__ for row in out_rows]

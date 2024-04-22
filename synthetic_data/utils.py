@@ -1,7 +1,8 @@
 import asyncio
 from enum import Enum
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
+import json
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
@@ -10,6 +11,14 @@ from pydantic.dataclasses import dataclass
 
 Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
+
+
+@dataclass
+class SquadExtractiveQARow:
+    id: str
+    context: str
+    json_schema: Dict[str, str]
+    fields: List[str]
 
 
 @dataclass
@@ -52,16 +61,12 @@ class SyntheticToolCallDPORow:
     agent_output_rejected: str
 
 
-class DatasetTaskFormat(str, Enum):
-    SFT = "SFT"
-    DPO = "DPO"
-
-
 class GenerationSource(str, Enum):
     OPENAI = "openai"
     VLLM = "vllm"
     OPENROUTER = "openrouter"
     GROQ = "groq"
+    ANTHROPIC = "anthropic"
 
 
 class SeedDataFormat(Enum):
@@ -164,6 +169,36 @@ def clean_example(text):
         r"1\. Scenario:.*?Example API Call:|```.*?```", "", text, flags=re.DOTALL
     )
     return cleaned_paragraph.strip()
+
+
+JSON_MATCH_PATTERN = r"{.*}"
+
+
+def recursive_json_parse(data: str) -> Optional[Union[Dict, str]]:
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return data
+
+    if isinstance(data, dict):
+        return {key: recursive_json_parse(value) for key, value in data.items()}
+    return data
+
+
+def extract_json(msg: str) -> Optional[Dict[str, str]]:
+    """
+    Parse out JSON from a string, and return the parsed JSON object.
+    Works even if the JSON is embedded deep in a string or with recursive serialization.
+    """
+    msg = msg.replace("'", "").replace("\n", "")
+    match = re.search(JSON_MATCH_PATTERN, msg)
+
+    if match:
+        json_str = match.group(0)
+        json_obj = recursive_json_parse(json_str)
+        return json_obj  # type: ignore
+    return None
 
 
 async def gather_with_concurrency_limit(n: int, *coros):
