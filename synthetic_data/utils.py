@@ -7,17 +7,19 @@ import json
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
 from pydantic.dataclasses import dataclass
+from pydantic import Json
 
 
 Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
+JSONSchema = Dict[str, Union[str, int, float, bool, List, Dict]]
 
 @dataclass
 class SquadExtractiveQARow:
     id: str
     context: str
-    json_schema: Dict[str, str]
+    json_schema: JSONSchema
     fields: List[str]
 
 
@@ -186,7 +188,7 @@ def recursive_json_parse(data: str) -> Optional[Union[Dict, str]]:
     return data
 
 
-def extract_json(msg: str) -> Optional[Dict[str, str]]:
+def extract_json(msg: str) -> Optional[JSONSchema]:
     """
     Parse out JSON from a string, and return the parsed JSON object.
     Works even if the JSON is embedded deep in a string or with recursive serialization.

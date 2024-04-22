@@ -4,6 +4,7 @@ from openai.types.chat.chat_completion import ChatCompletion
 from typing import List, Dict, cast
 from datasets import Dataset, concatenate_datasets
 from anthropic.types.message_param import MessageParam
+from anthropic.types.message import Message
 from anthropic import AsyncAnthropic, AnthropicError
 
 from synthetic_data.utils import Conversation, gather_with_concurrency_limit
@@ -129,26 +130,29 @@ class AnthropicGenerationWrapper(GenerationWrapper):
         self.client = AsyncAnthropic(
             api_key=api_key,
         )
-        self.max_concurrent = 4
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
         try:
             completion_requests = []
             for conversation in conversations:
+                if conversation[0]["role"] == "system":
+                    system_prompt = conversation[0]["content"]
+                    conversation = conversation[1:]
                 conversation = cast(List[MessageParam], conversation)
                 request = self.client.messages.create(
                     model="claude-3-sonnet-20240229",
+                    system=system_prompt,
                     messages=conversation,
                     max_tokens=512,
                 )
                 completion_requests.append(request)
-            results: List[ChatCompletion] = await gather_with_concurrency_limit(
-                self.max_concurrent, *completion_requests
+            results: List[Message] = await gather_with_concurrency_limit(
+                2, *completion_requests
             )
             completions = [
-                result.choices[0].message.content
+                result.content[0].text
                 for result in results
-                if result.choices[0].message.content is not None
+                if result.content is not None
             ]
             return completions
         except AnthropicError as e:
