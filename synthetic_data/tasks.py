@@ -433,34 +433,40 @@ class SquadExtractiveQA(SFTDataTask):
         return [format_squad_extractive_json_template(prompt) for prompt in prompts]
 
     def format_output_rows(self, completions_batch: List[str]) -> List[Dict]:
-        should_dropout_batch = random.choices([True, False], k=len(completions_batch))
+        should_dropout_sample = random.choices([True, False], k=len(completions_batch))
         qa_rows: List[SquadExtractiveQARow] = []
         for i, completion in enumerate(completions_batch):
             json_schema = extract_json(completion)
-            if not json_schema:
-                print(f"Error in extracting JSON from completion: {completion}")
+            if not json_schema or isinstance(json_schema, str):
+                print(f"Could not extract JSON from completion: {completion}")
                 continue
-            if should_dropout_batch[i]:
+            field_names = set(json_schema.keys())
+            row_fields = list(field_names)
+
+            if len(field_names) == 0:
+                print(f"Empty JSON schema for completion: {completion}")
+                continue
+
+            if should_dropout_sample[i]:
                 num_fields_to_dropout = random.randint(1, len(json_schema) - 1)
-                field_names = set(json_schema.keys())
                 fields_to_dropout = set(
                     random.sample(list(field_names), num_fields_to_dropout)
                 )
                 for field_name in fields_to_dropout:
                     del json_schema[field_name]
-                remaining_fields = field_names - fields_to_dropout
-                qa_row = SquadExtractiveQARow(
-                    self.ids[i],
-                    self.contexts[i],
-                    json_schema,
-                    list(remaining_fields),
-                )
-                qa_rows.append(qa_row)
-        
+                row_fields = field_names - fields_to_dropout
+            qa_row = SquadExtractiveQARow(
+                self.ids[i],
+                self.contexts[i],
+                json_schema,
+                list(row_fields),
+                should_dropout_sample[i]
+            )
+            qa_rows.append(qa_row)
+
         out_rows = []
-        for row in out_rows:
+        for row in qa_rows:
             row = row.__dict__
             row["json_schema"] = json.dumps(row["json_schema"])
             out_rows.append(row)
         return out_rows
-

@@ -8,6 +8,7 @@ from datasets import Dataset, load_dataset
 from datasets.data_files import EmptyDatasetError
 from dotenv import dotenv_values
 from huggingface_hub import login
+from tqdm import tqdm
 from synthetic_data.tasks import (
     DPODataTask,
     PromptUpsample,
@@ -126,6 +127,7 @@ def main(
         or pairs
     ):
         if len(output_dataset) > 0 and resume_input_position:
+            print(f"Resuming from position {len(output_dataset)}")
             split = f"train[{len(output_dataset)}:]"
         input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
     elif task.seed_data_format == SeedDataFormat.TSV:
@@ -139,16 +141,15 @@ def main(
     print("Running...")
 
     for i in range(n_epochs):
+
+        # If we are generating the completion pair, i.e. the second step for DPO
         if is_dpo_task and pairs:
-            # Generate negative pairs for toolformer
-            # task, definition, tool_call, call_result, agent_output
             for batch_idx, batch in enumerate(
                 input_dataset.iter(batch_size=batch_size)
             ):
                 batch = cast(Dict, batch)
                 full_conversations_batch = task.format_dpo_input_conversations(batch)
 
-                print(f"Generating {len(full_conversations_batch)} completions...")
                 completions = asyncio.run(
                     model_wrapper.generate(full_conversations_batch)
                 )
@@ -162,7 +163,7 @@ def main(
                     )
         else:
             for batch_idx, batch in enumerate(
-                input_dataset.iter(batch_size=batch_size)
+                tqdm(input_dataset.iter(batch_size=batch_size))
             ):
                 batch = cast(Dict, batch)
                 full_conversations_batch = task.format_input_conversation(batch)
