@@ -1,7 +1,7 @@
 import asyncio
 from enum import Enum
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 import json
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
@@ -13,7 +13,9 @@ from pydantic import Json
 Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
-JSONSchema = Dict[str, Union[str, int, float, bool, List, Dict]]
+JSONSchemaKey = Union[str, int, float, bool, List[Any], Dict[str, Any]]
+JSONSchema = Dict[str, JSONSchemaKey]
+
 
 @dataclass
 class SquadExtractiveQARow:
@@ -21,6 +23,7 @@ class SquadExtractiveQARow:
     context: str
     json_schema: JSONSchema
     fields: List[str]
+    was_dropped_out: bool
 
 
 @dataclass
@@ -78,10 +81,19 @@ class SeedDataFormat(Enum):
     SYNTHETIC = "synthetic"
 
 
-def clean_message(message: str) -> str:
+def clean_message(message: JSONSchemaKey):
     """
     Clean up spaces, tabs, and newlines in a message with a JSON dict, so the dict is formatted nicely.
     """
+
+    if isinstance(message, list):
+        message = ", ".join(message)
+    elif isinstance(message, bool):
+        message = str(message)
+    elif isinstance(message, (int, float)):
+        message = str(message)
+    elif isinstance(message, dict):
+        message = json.dumps(message, indent=2)
 
     # Handle odd edge case where textwrap evaluates the value as a bool
     if message == "True" or message == "False":
@@ -93,7 +105,7 @@ def clean_message(message: str) -> str:
 
 
 def print_result_dicts(
-    results: List[Dict],
+    results: List[JSONSchema],
 ):
     if len(results) == 0:
         print("No results found, skipping print.")
@@ -105,7 +117,8 @@ def print_result_dicts(
 
     col_widths = [35] * len(columns)
     for i, column in enumerate(columns):
-        if results[0][column].isdigit():
+        col = results[0][column]
+        if isinstance(col, str) and col.isdigit():
             col_widths[i] = 10
 
     print(

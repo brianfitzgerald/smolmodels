@@ -147,7 +147,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 )
                 completion_requests.append(request)
             results: List[Message] = await gather_with_concurrency_limit(
-                2, *completion_requests
+                4, *completion_requests
             )
             completions = [
                 result.content[0].text
