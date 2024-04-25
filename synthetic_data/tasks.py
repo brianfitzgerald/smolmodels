@@ -19,6 +19,7 @@ from synthetic_data.tools import (
     get_tool_descriptions,
 )
 import json
+from pydantic import ValidationError
 
 from synthetic_data.utils import (
     Conversation,
@@ -433,7 +434,6 @@ class SquadExtractiveQA(SFTDataTask):
         return [format_squad_extractive_json_template(prompt) for prompt in prompts]
 
     def format_output_rows(self, completions_batch: List[str]) -> List[Dict]:
-        should_dropout_sample = random.choices([True, False], k=len(completions_batch))
         qa_rows: List[SquadExtractiveQARow] = []
         for i, completion in enumerate(completions_batch):
             json_schema = extract_json(completion)
@@ -447,21 +447,16 @@ class SquadExtractiveQA(SFTDataTask):
                 print(f"Empty JSON schema for completion: {completion}")
                 continue
 
-            if should_dropout_sample[i]:
-                num_fields_to_dropout = random.randint(1, len(json_schema) - 1)
-                fields_to_dropout = set(
-                    random.sample(list(field_names), num_fields_to_dropout)
+            try:
+                qa_row = SquadExtractiveQARow(
+                    self.ids[i],
+                    self.contexts[i],
+                    json_schema,
+                    list(row_fields),
                 )
-                for field_name in fields_to_dropout:
-                    del json_schema[field_name]
-                row_fields = field_names - fields_to_dropout
-            qa_row = SquadExtractiveQARow(
-                self.ids[i],
-                self.contexts[i],
-                json_schema,
-                list(row_fields),
-                should_dropout_sample[i]
-            )
+            except ValidationError as e:
+                print(f"Error in formatting completion: {e}")
+                continue
             qa_rows.append(qa_row)
 
         out_rows = []

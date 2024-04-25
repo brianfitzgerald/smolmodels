@@ -23,7 +23,6 @@ class SquadExtractiveQARow:
     context: str
     json_schema: JSONSchema
     fields: List[str]
-    was_dropped_out: bool
 
 
 @dataclass
