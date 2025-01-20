@@ -59,6 +59,9 @@ dependencies = [
     # "liger-kernel>=0.5.2",
     "jsonlines>=4.0.0",
     "kagglehub>=0.3.6",
+    "seaborn>=0.13.2",
+    "plotting>=0.0.7",
+    "pandas>=2.2.3",
 ]
 
 [tool.uv.sources]
