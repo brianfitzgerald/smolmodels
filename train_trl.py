@@ -5,6 +5,7 @@ from trl_wrapper.trainer_wrapper import (
     CONFIGS,
 )
 from typing import Optional
+from dotenv import load_dotenv
 
 
 def main(
@@ -16,6 +17,7 @@ def main(
 ):
     assert not kwargs, f"Unknown arguments: {kwargs}"
     assert config in CONFIGS, f"Unknown config: {config}"
+    load_dotenv(".env")
 
     cfg = CONFIGS[config]
     if notebook_mode:
