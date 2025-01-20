@@ -5,8 +5,9 @@ from datasets.arrow_dataset import Dataset
 from loguru import logger
 import lightning.pytorch as pl
 
-from model.utils import SmDataset
+from model.utils import SmDataset, DatasetConfig
 from synthetic_data.utils import dictl
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 
 DPO_COLS_TO_TOKENIZE = ["chosen", "rejected", "prompt"]
@@ -64,19 +65,16 @@ def create_triplets(
     }
 
 
-class UltraFeedbackDataModule(pl.LightningDataModule):
-    def __init__(
-        self,
-        max_samples: Optional[int] = None,
-        default_system_message: Optional[str] = None,
-    ):
+class UltraFeedbackDataModule(SmDataset):
+    def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
+        super().__init__(tokenizer, config)
+
         self.dataset_name = "argilla/ultrafeedback-binarized-preferences-cleaned"
-        self.max_samples = max_samples
-        self.default_system_message = default_system_message
         self.num_workers = 1
         # Not used
         self.cache_dir = "dataset_caches/ultrafeedback"
         self.use_cache = False
+        self.system_message = "You are a helpful AI assistant."
 
     def setup(self, stage: Optional[str] = None):
         # TODO offline generate reference loggerps
@@ -84,8 +82,6 @@ class UltraFeedbackDataModule(pl.LightningDataModule):
         # Load dataset and split
         dataset = load_dataset(self.dataset_name)["train"]  # type: ignore
         logger.info(f"Loaded dataset with {len(dataset)} samples")
-        if self.max_samples:
-            dataset = dataset.select(range(self.max_samples))  # type: ignore
         dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
@@ -94,7 +90,7 @@ class UltraFeedbackDataModule(pl.LightningDataModule):
         out_dict = {k: [] for k in DPO_COLS_TO_TOKENIZE}
         for i in range(len(examples["prompt"])):
             example = {k: v[i] for k, v in examples.items()}
-            triplets = create_triplets(example, self.default_system_message)
+            triplets = create_triplets(example, self.system_message)
             for response_role in DPO_COLS_TO_TOKENIZE:
                 out_dict[response_role].append(triplets[response_role])
         return out_dict

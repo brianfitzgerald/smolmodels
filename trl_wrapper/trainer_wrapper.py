@@ -22,6 +22,7 @@ from trl.trainer.sft_trainer import SFTTrainer
 
 from dataset.code import (
     CodeContestsDataModule,
+    UltraFeedbackDataModule,
 )
 from dataset.conversation import ConversationDataModule, ConversationDPODataModule
 from model.utils import (
@@ -169,6 +170,18 @@ CODECONTESTS_DPO_CONFIG = WrapperConfig(
     n_epochs=1,
 )
 
+ULTRAFEEDBACK_CONFIG = WrapperConfig(
+    model_id_or_path=LLAMA_3_2_3B,
+    wandb_project_name="ultrafeedback-dpo",
+    train_batch_size=4,
+    data_module_choice="ultra_feedback",
+    tuning_mode="dpo_lora",
+    gradient_checkpointing=False,
+    learning_rate=1e-5,
+    n_epochs=1,
+)
+
+
 
 CONFIGS = {
     "llama": LLAMA_CONFIG,
@@ -178,6 +191,7 @@ CONFIGS = {
     "codecontests_cot_sft": CODECONTESTS_COT_CONFIG,
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
     "playwright": PLAYWRIGHT_CONFIG,
+    "ultrafeedback": ULTRAFEEDBACK_CONFIG
 }
 
 REMOTE_RUNS_FOLDER = "/weka/home-brianf/runs"
@@ -229,9 +243,9 @@ class TrainerWrapper:
             ignore_mismatched_sizes=True,
             use_cache=not self.config.using_mistral,
         )
-        if self.config.special_tokens is not None:
-            logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
-            self.model.resize_token_embeddings(len(self.tokenizer))
+        # if self.config.special_tokens is not None:
+        #     logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
+        #     self.model.resize_token_embeddings(len(self.tokenizer))
 
     def init_data_module(self):
         dataset_config = DatasetConfig(
@@ -249,6 +263,8 @@ class TrainerWrapper:
             self.data_module = CodeContestsDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation":
             self.data_module = ConversationDataModule(self.tokenizer, dataset_config)
+        elif self.config.data_module_choice == "ultrafeedback":
+            self.data_module = UltraFeedbackDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation_dpo":
             self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
