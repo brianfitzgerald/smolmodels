@@ -1,17 +1,16 @@
 #!/bin/bash
 
-#SBATCH --job-name=sm
-#SBATCH --output=sm.out.%j
-#SBATCH --error=sm.out.%j
-#SBATCH --nodes=1
-#SBATCH --gpus=1
-#SBATCH --account=engineering
-#SBATCH --partition=p5
-#SBATCH --qos=idle
+set -e
 
-export WANDB_BASE_URL=https://api.wandb.ai
+rm -rf nohup.out
 
-echo "Visible CUDA devices: $CUDA_VISIBLE_DEVICES"
-echo "WANDB base URL: $WANDB_BASE_URL"
+source .venv/bin/activate
 
-python train_trl.py --config codecontests_cot_dpo --wandb --comment "py-dpo"
+nohup python train_trl.py --config ultrafeedback --wandb &
+
+pid=$!
+
+echo "PID: $pid"
+echo "to tail the logs: tail -f nohup.out"
+echo "to kill the process: kill -9 $pid"
+echo $pid > pid.txt

@@ -179,6 +179,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     gradient_checkpointing=False,
     learning_rate=1e-5,
     n_epochs=1,
+    max_samples=25000
 )
 
 
@@ -263,7 +264,7 @@ class TrainerWrapper:
             self.data_module = CodeContestsDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation":
             self.data_module = ConversationDataModule(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "ultrafeedback":
+        elif self.config.data_module_choice == "ultra_feedback":
             self.data_module = UltraFeedbackDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation_dpo":
             self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)

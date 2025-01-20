@@ -131,6 +131,9 @@ class SmDataset(pl.LightningDataModule):
             dataset = load_dataset(self.config.input_dataset_name)
             if isinstance(dataset, DatasetDict):
                 dataset = dataset["train"]
+        if self.config.max_samples:
+            logger.info(f"Selecting {self.config.max_samples} samples")
+            dataset = dataset.select(range(self.config.max_samples))  # type: ignore
         dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]

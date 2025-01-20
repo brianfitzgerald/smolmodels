@@ -201,3 +201,4 @@ out/
 notebooks/dataset_caches/*
 runs/
 eval_results/
+*.out

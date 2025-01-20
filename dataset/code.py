@@ -69,22 +69,8 @@ class UltraFeedbackDataModule(SmDataset):
     def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
         super().__init__(tokenizer, config)
 
-        self.dataset_name = "argilla/ultrafeedback-binarized-preferences-cleaned"
-        self.num_workers = 1
-        # Not used
-        self.cache_dir = "dataset_caches/ultrafeedback"
-        self.use_cache = False
         self.system_message = "You are a helpful AI assistant."
-
-    def setup(self, stage: Optional[str] = None):
-        # TODO offline generate reference loggerps
-        # TODO filter by p95 length, and compute max length for tokenization
-        # Load dataset and split
-        dataset = load_dataset(self.dataset_name)["train"]  # type: ignore
-        logger.info(f"Loaded dataset with {len(dataset)} samples")
-        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
-        self.train_dataset = dataset["train"]
-        self.val_dataset = dataset["test"]
+        self.config.input_dataset_name =  "argilla/ultrafeedback-binarized-preferences-cleaned"
 
     def process_samples_batch(self, examples: dict):
         out_dict = {k: [] for k in DPO_COLS_TO_TOKENIZE}

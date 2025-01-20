@@ -24,7 +24,7 @@
             "justMyCode": false,
             "args": [
                 "--config",
-                "codecontests_cot_sft",
+                "ultrafeedback",
                 "--notebook_mode"
             ]
         },
@@ -49,8 +49,7 @@
             "program": "gradio_ui.py",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "args": [
-            ]
+            "args": []
         },
     ]
 }
