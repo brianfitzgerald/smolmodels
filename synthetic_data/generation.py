@@ -46,8 +46,9 @@ def save_output_dataset(
         logger.info(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
         concatted_dataset.push_to_hub(dataset_name)
     elif format == DatasetFormat.PARQUET:
-        logger.info(f"Saving {len(new_dataset_rows)} new rows to parquet...")
-        concatted_dataset.to_parquet(f"{dataset_name}.parquet")
+        filename = f"{dataset_name}.parquet"
+        logger.info(f"Saving {len(new_dataset_rows)} new rows to {filename}...")
+        concatted_dataset.to_parquet(filename)
     else:
         raise ValueError(f"Unsupported output format: {format}")
 
