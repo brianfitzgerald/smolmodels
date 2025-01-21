@@ -8,15 +8,12 @@ from datasets import load_dataset
 from loguru import logger
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.constants import DUMMY_TARGET_MODULES
-from torch.amp.autocast_mode import autocast
-from tqdm import tqdm
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.trainer_utils import SchedulerType
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from trl.trainer.dpo_config import DPOConfig
-from trl.trainer.dpo_trainer import PreferenceCollator
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
@@ -24,6 +21,7 @@ from dataset.code import (
     CodeContestsDataModule,
     UltraFeedbackDataModule,
 )
+from dataset.playwright import PlaywrightSummaryToScript
 from dataset.conversation import ConversationDataModule, ConversationDPODataModule
 from model.utils import (
     DataModuleChoice,
@@ -33,12 +31,12 @@ from model.utils import (
     save_dataclass_to_json,
     short_hash,
 )
-from synthetic_data.utils import dictl
 from trl_wrapper.dpo_trainer import CustomDPOTrainer, EvalDataModeChoice
 
 MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
 LLAMA_3_2_1B = "meta-llama/Llama-3.2-1B-Instruct"
 LLAMA_3_2_3B = "meta-llama/Llama-3.2-3B-Instruct"
+LLAMA_3_2_3B_BASE = "meta-llama/Llama-3.2-3B"
 QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 LLAMA_3_1_8B = "meta-llama/Llama-3.1-8B-Instruct"
 SMOL_LM_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
@@ -125,16 +123,15 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
 )
 
 PLAYWRIGHT_CONFIG = WrapperConfig(
-    model_id_or_path=MINISTRAL_8B,
+    model_id_or_path=LLAMA_3_2_3B_BASE,
     wandb_project_name="playwright",
     train_batch_size=4,
-    data_module_choice="conversation",
+    data_module_choice="playwright_summary_to_script",
     using_mistral=True,
     tuning_mode="sft",
     learning_rate=1e-5,
-    run_suffix="cot",
     special_tokens=["<thought>", "</thought>", "<solution>", "</solution>"],
-    input_dataset_path="screenplay_conversations.parquet",
+    input_dataset_path="screenplay_scenes_summarized.parquet",
     custom_chat_template="ministral_8b",
 )
 
@@ -179,9 +176,8 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     gradient_checkpointing=False,
     learning_rate=1e-5,
     n_epochs=1,
-    max_samples=25000
+    max_samples=25000,
 )
-
 
 
 CONFIGS = {
@@ -192,7 +188,7 @@ CONFIGS = {
     "codecontests_cot_sft": CODECONTESTS_COT_CONFIG,
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
     "playwright": PLAYWRIGHT_CONFIG,
-    "ultrafeedback": ULTRAFEEDBACK_CONFIG
+    "ultrafeedback": ULTRAFEEDBACK_CONFIG,
 }
 
 REMOTE_RUNS_FOLDER = "/weka/home-brianf/runs"
@@ -260,6 +256,7 @@ class TrainerWrapper:
             custom_chat_template=self.config.custom_chat_template,
             train_on_inputs=self.config.train_on_inputs,
         )
+        # TODO clean this up
         if self.config.data_module_choice == "code_contests":
             self.data_module = CodeContestsDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation":
@@ -268,6 +265,8 @@ class TrainerWrapper:
             self.data_module = UltraFeedbackDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation_dpo":
             self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)
+        elif self.config.data_module_choice == "playwright_summary_to_script":
+            self.data_module = PlaywrightSummaryToScript(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
 
     def init_trainer(self, comment: Optional[str] = None):
@@ -456,82 +455,6 @@ class TrainerWrapper:
                     self.trainer.args.per_device_train_batch_size = (
                         self.config.train_batch_size
                     )
-
-    def compute_loss_metrics(self, batch_size: int = 1):
-        """
-        Iterate through all batches and compute metrics sample-wise.
-        Keep on batch_size=1 unless needed
-        """
-        assert self.trainer._peft_has_been_casted_to_bf16
-        # precompute reference logprobs
-        self.trainer.get_train_dataloader()
-        collator = PreferenceCollator(self.tokenizer.pad_token_id, "pt")  # type: ignore
-        outputs = []
-        with torch.no_grad(), autocast("cuda"):
-            batch_iter = tqdm(
-                self.trainer.train_dataset.iter(batch_size=batch_size),
-                desc="Computing DPO loss",
-                total=len(self.trainer.train_dataset) // batch_size,
-            )
-            for batch in batch_iter:
-                sample_collated = collator(dictl(batch))
-                metrics = self.get_sample_wise_metrics(sample_collated)
-                for j in range(batch_size):
-                    out_sample = {
-                        "prompt": batch["prompt"][j],
-                        "chosen": batch["chosen"][j],
-                        "rejected": batch["rejected"][j],
-                    }
-                    for k, v in metrics.items():
-                        if isinstance(v, list):
-                            out_sample[k] = v[j]
-                        else:
-                            out_sample[k] = v
-                    outputs.append(out_sample)
-        return outputs
-
-    def get_sample_wise_metrics(self, batch: dict):
-        """
-        Return sample-wise loss metrics for a single batch
-        """
-        metrics = {}
-
-        model_output = self.trainer.concatenated_forward(self.model, batch)  # type: ignore
-
-        # if ref_chosen_logps and ref_rejected_logps in batch use them, otherwise use the reference model
-        if "ref_chosen_logps" in batch and "ref_rejected_logps" in batch:
-            ref_chosen_logps = batch["ref_chosen_logps"]
-            ref_rejected_logps = batch["ref_rejected_logps"]
-        else:
-            ref_chosen_logps, ref_rejected_logps = self.trainer.compute_ref_log_probs(
-                batch
-            )
-
-        losses, chosen_rewards, rejected_rewards = self.trainer.dpo_loss(
-            model_output["chosen_logps"],
-            model_output["rejected_logps"],
-            ref_chosen_logps,
-            ref_rejected_logps,
-        )
-        reward_accuracies = (chosen_rewards > rejected_rewards).float()
-        reward_margins = chosen_rewards - rejected_rewards
-
-        metrics = {
-            "loss": losses.tolist(),
-            "reward_accuracy": reward_accuracies.tolist(),
-            "reward_margin": reward_margins.tolist(),
-            "chosen_rewards": chosen_rewards.tolist(),
-            "rejected_rewards": rejected_rewards.tolist(),
-        }
-
-        for k in [
-            "chosen_logps",
-            "rejected_logps",
-            "mean_chosen_logits",
-            "mean_rejected_logits",
-        ]:
-            metrics[k] = model_output[k].tolist()
-        return metrics
 
     def train(self):
         logger.info("Starting training.")

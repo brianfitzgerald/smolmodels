@@ -1,16 +1,18 @@
 import hashlib
 import json
+import os
+import re
 import shutil
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import List, Literal, Optional, Union
-import re
-import os
 
 import lightning.pytorch as pl
-from datasets import Dataset, load_dataset, DatasetDict
+import torch
+from datasets import Dataset, DatasetDict, load_dataset
 from loguru import logger
+from rich.text import Text
 from torch.utils.data import DataLoader
 from torchmetrics.text.bleu import BLEUScore
 from torchmetrics.text.rouge import ROUGEScore
@@ -25,7 +27,11 @@ PAD_TOKEN_ID = 0
 
 OptimizerChoice = Literal["AdamW", "Adafactor", "AdamW8bit"]
 DataModuleChoice = Literal[
-    "ultra_feedback", "code_contests", "conversation", "conversation_dpo"
+    "ultra_feedback",
+    "code_contests",
+    "conversation",
+    "conversation_dpo",
+    "playwright_summary_to_script",
 ]
 TuningModeChoice = Literal["dpo_lora", "dpo_full", "sft_lora", "sft"]
 
@@ -127,7 +133,9 @@ class SmDataset(pl.LightningDataModule):
             logger.info(f"Loading local dataset from {local_dataset_location}")
             dataset = Dataset.from_parquet(local_dataset_location)
         else:
-            logger.info(f"Dataset not found at expected local location {local_dataset_location}, loading from remote: {self.config.input_dataset_name}")
+            logger.info(
+                f"Dataset not found at expected local location {local_dataset_location}, loading from remote: {self.config.input_dataset_name}"
+            )
             dataset = load_dataset(self.config.input_dataset_name)
             if isinstance(dataset, DatasetDict):
                 dataset = dataset["train"]
@@ -185,6 +193,9 @@ class SmDataset(pl.LightningDataModule):
         return self._tokenize(examples[self.input_column], examples[self.target_column])
 
     def _tokenize(self, inputs: List[str], labels: List[str]) -> dict:
+        """
+        Basic tokenizing function. Inputs are samples from the dataset, and labels are the target values.
+        """
         inputs_tokenized = self.tokenizer(
             inputs,
             max_length=self.config.max_sequence_length,
@@ -216,6 +227,20 @@ class SmDataset(pl.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=8, num_workers=self.num_workers)  # type: ignore
+
+    def visualize_sample(self, input_dict: dict[str, torch.Tensor]) -> Text:
+        input_ids = input_dict["input_ids"].squeeze().tolist()
+        labels = input_dict["labels"].squeeze().tolist()
+
+        rich_text = Text()
+
+        for token, label in zip(input_ids, labels):
+            decoded = self.tokenizer.decode(token)
+            if label == 0 or label == IGNORE_TOKEN_INDEX:
+                rich_text.append(decoded, style="bright_red")
+            else:
+                rich_text.append(decoded, style="bright_green")
+        return rich_text
 
 
 class SmModel(pl.LightningModule):

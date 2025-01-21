@@ -1,12 +1,10 @@
 import torch
-from rich.text import Text
 
 from model.utils import (
+    IGNORE_TOKEN_INDEX,
     SmDataset,
 )
 from synthetic_data.utils import Conversation
-
-MASK_IDX = -100
 
 
 class ConversationDataModule(SmDataset):
@@ -40,26 +38,12 @@ class ConversationDataModule(SmDataset):
                 tokenized_out["assistant_masks"],
             )
             labels, assistant_mask = torch.tensor(labels), torch.tensor(assistant_mask)
-            labels[assistant_mask == 0] = MASK_IDX
+            labels[assistant_mask == 0] = IGNORE_TOKEN_INDEX
             return {
                 "input_ids": tokenized_out["input_ids"],
                 "attention_mask": tokenized_out["attention_mask"],
                 "labels": labels,
             }
-
-    def visualize_sample(self, input_dict) -> Text:
-        input_ids = input_dict["input_ids"].squeeze().tolist()
-        labels = input_dict["labels"].squeeze().tolist()
-
-        rich_text = Text()
-
-        for token, label in zip(input_ids, labels):
-            decoded = self.tokenizer.decode(token)
-            if label == 0 or label == MASK_IDX:
-                rich_text.append(decoded, style="bright_red")
-            else:
-                rich_text.append(decoded, style="bright_green")
-        return rich_text
 
 
 class ConversationDPODataModule(ConversationDataModule):
