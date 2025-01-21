@@ -272,7 +272,7 @@ def ldictl(dict_of_lists: List[dict]):
     )
 
 
-def dictl(dict_of_lists: Dict[str, List]) -> Sequence[dict]:
+def dictl(dict_of_lists: dict) -> Sequence[dict]:
     """
     Dict of lists to list of dicts.
     """
