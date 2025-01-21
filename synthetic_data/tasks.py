@@ -744,7 +744,7 @@ class SceneRow:
 
 
 class ScreenplaySummarize(BaseTask):
-    output_dataset_name = "screenplay_scenes_summarized"
+    output_dataset_name = "screenplay_scenes_summarized_full"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
@@ -752,7 +752,7 @@ class ScreenplaySummarize(BaseTask):
     def __init__(self, console: Console) -> None:
         super().__init__(console)
         self.in_rows_batch = []
-        self.max_samples = 10000
+        self.max_samples = 50000
 
     def load_custom(self):
         scripts_corpus_path = kagglehub.dataset_download(
@@ -791,7 +791,7 @@ class ScreenplaySummarize(BaseTask):
         dataset = Dataset.from_list(all_new_rows)
         dataset = dataset.filter(lambda x: x["scene"] != "")
         dataset = dataset.shuffle(seed=42)
-        dataset = dataset.select(range(self.max_samples))
+        # dataset = dataset.select(range(self.max_samples))
         return dataset
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
