@@ -256,6 +256,10 @@ async def gather_with_concurrency_limit(n: int, *coros):
     return await asyncio.gather(*(sem_coro(c) for c in coros))
 
 
+def get_class_name(obj):
+    return obj.__class__.__name__
+
+
 def ldictl(dict_of_lists: List[dict]):
     """
     List of dicts to dict of lists.

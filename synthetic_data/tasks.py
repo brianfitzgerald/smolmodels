@@ -3,9 +3,8 @@ import random
 import sys
 import traceback
 from abc import ABC
-from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional
 
 from datasets import Dataset
 from loguru import logger
@@ -37,6 +36,7 @@ from synthetic_data.prompts import (
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
 )
+from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tools import (
     DROPOUT_TYPES_JSON,
     DROPOUT_TYPES_TOOLFORMER,
@@ -58,6 +58,7 @@ from synthetic_data.utils import (
     flatten_list,
     get_matches,
     is_valid_python,
+    ldictl,
 )
 
 
@@ -594,7 +595,9 @@ class CodeContests(HumanEval):
             conv = format_codecontests_cot_generation_prompt(problem.prompt, fn_name)
             # return [{"role": "user", "content": f"Write the body of a function called {problem.entry_point}. Explain your reasoning."}]
         else:
-            conv = format_codecontests_cot_generation_prompt(sample["description"], None)
+            conv = format_codecontests_cot_generation_prompt(
+                sample["description"], None
+            )
         return conv
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
@@ -689,7 +692,9 @@ class CodeContests(HumanEval):
                         best_score = 1
                         worst_score = 0
                 if self.positive_completion_mode == PositiveMode.BEST_OF_N:
-                    logger.info(f"Adding row, best score: {best_score}, worst score: {worst_score}")
+                    logger.info(
+                        f"Adding row, best score: {best_score}, worst score: {worst_score}"
+                    )
                 res.append(
                     {
                         "chosen": best_completion,
@@ -722,6 +727,44 @@ class CodeContestsCoTSFT(CodeContests):
         self.using_sft_cot = True
 
 
+class ScreenplaySummarize(BaseTask):
+    output_dataset_name = "codecontests_cot_sft_v2"
+    dataset_columns = ["completions", "test_results", "name"]
+
+    def __init__(self, console: Console) -> None:
+        super().__init__(console)
+        self.original_samples = []
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        """
+        Prompt template to use for generating initial seed data.
+        """
+        samples_in = dictl(batch)
+        conv_out = []
+        for sample in samples_in:
+            parser = ScreenplayParser(sample["Script"])
+            parser.parse()
+            for scene in parser.scenes:
+                scene_string_formatted = ScreenplayParser.format_conversation(scene)
+                conv: Conversation = [
+                    {
+                        "role": "system",
+                        "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene.",
+                    },
+                    {"role": "user", "content": scene_string_formatted},
+                ]
+                conv_out.append(conv)
+            self.original_samples.append(sample.pop("Script"))
+        return conv_out
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        """
+        Take the completed conversation and format it into the final dataset format.
+        """
+        new_rows = [c[-1] for c in completions]
+        return new_rows
+
+
 ALL_TASKS: Dict[str, type[BaseTask]] = {
     "toolformer": Toolformer,
     "prompt_upsample": PromptUpsample,
@@ -732,4 +775,5 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "humaneval": HumanEval,
     "codecontests": CodeContests,
     "codecontests_cot_sft": CodeContestsCoTSFT,
+    "screenplay_summarize": ScreenplaySummarize,
 }

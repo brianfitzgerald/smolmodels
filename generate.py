@@ -20,12 +20,12 @@ from synthetic_data.utils import DatasetFormat
 
 
 def main(
+    task_name: str,
     upload_every_n_batches: int = 10,
     batch_size: int = 32,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.GPT_4O_MINI.value,
-    task_name: str = "codecontests_cot_sft",
+    model: str = RemoteModel.DEEPSEEK_V3.value,
     n_epochs: int = 5,
     **kwargs,
 ):
@@ -35,6 +35,7 @@ def main(
     or generated from a synthetic source, such as a list of subjects.
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
+    assert task_name is not None, "Task name must be passed"
 
     console = Console()
     task = ALL_TASKS[task_name](console)

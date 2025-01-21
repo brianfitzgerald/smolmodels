@@ -6,12 +6,14 @@ from typing import Literal, Optional, List
 
 DialogueType = Literal["scene_heading", "action", "dialogue", "transition"]
 
+
 @dataclass
 class DialogueLine:
     character: str
     content: str
     parenthetical: Optional[str] = None
     line_number: int = 0
+
 
 @dataclass
 class SceneElement:
@@ -210,3 +212,17 @@ class ScreenplayParser:
         # Merge consecutive elements before adding to scene
         elements = self._merge_consecutive_elements(elements)
         self.scenes.append(Scene(heading=heading, elements=elements))
+
+    @staticmethod
+    def format_conversation(scene: Scene) -> str:
+        """Format a scene's dialogue as a conversation."""
+        conversation = []
+        for element in scene.elements:
+            if element.type == "dialogue":
+                assert element.dialogue_data is not None
+                character = element.dialogue_data.character
+                line = element.dialogue_data.content
+                if element.dialogue_data.parenthetical:
+                    line = f"{element.dialogue_data.parenthetical}\n{line}"
+                conversation.append(f"{character}: {line}")
+        return "\n".join(conversation)

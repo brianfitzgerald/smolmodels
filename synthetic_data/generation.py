@@ -23,6 +23,7 @@ from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
     gather_with_concurrency_limit,
+    get_class_name,
 )
 
 SHAREGPT_TO_OPENAI_ROLE = {
@@ -96,12 +97,19 @@ MAX_RETRIES = 3
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
-    def __init__(self, args: GenWrapperArgs) -> None:
+    def __init__(
+        self,
+        args: GenWrapperArgs,
+        key_env_var_name: str = "OPENAI_API_KEY",
+        base_url: Optional[str] = None,
+    ) -> None:
         super().__init__(args)
-        api_key = args.dotenv.get("OPENAI_API_KEY")
+        api_key = args.dotenv.get(key_env_var_name)
         if api_key is None:
-            raise ValueError("OPENAI_API_KEY is required for OpenAIGenerationWrapper")
-        self.oai_client = AsyncOpenAI(api_key=api_key)
+            raise ValueError(
+                f"{key_env_var_name} is required for {get_class_name(self)}"
+            )
+        self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model_name = args.model_id or "gpt-4o-mini"
         self.n_retries = MAX_RETRIES
         self.temperature = 0.2
@@ -136,9 +144,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 if not results:
                     logger.error(results)
                     raise ValueError("No completions returned")
-                assert all(
-                    len(result.choices) > 0 for result in results
-                ), "No completions returned"
+                assert all(len(result.choices) > 0 for result in results), (
+                    "No completions returned"
+                )
                 completions = [
                     result.choices[0].message.content
                     for result in results
@@ -191,17 +199,7 @@ class VLLMWrapper(OpenAIGenerationWrapper):
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
     def __init__(self, args: GenWrapperArgs) -> None:
-        super().__init__(args)
-        api_key = args.dotenv.get("OPENROUTER_API_KEY")
-        if api_key is None:
-            raise ValueError(
-                "OPENROUTER_API_KEY is required for OpenRouterGenerationWrapper"
-            )
-        self.oai_client = AsyncOpenAI(
-            api_key=api_key,
-            base_url="https://openrouter.ai/api/v1",
-        )
-        self.temperature = 0.4
+        super().__init__(args, "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1")
 
 
 class AnthropicGenerationWrapper(GenerationWrapper):
