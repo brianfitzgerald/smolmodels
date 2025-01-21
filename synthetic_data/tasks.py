@@ -749,6 +749,11 @@ class ScreenplaySummarize(BaseTask):
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
+    def __init__(self, console: Console) -> None:
+        super().__init__(console)
+        self.in_rows_batch = []
+        self.max_samples = 10000
+
     def load_custom(self):
         scripts_corpus_path = kagglehub.dataset_download(
             "veeralakrishna/imsdb-movie-scripts"
@@ -783,23 +788,21 @@ class ScreenplaySummarize(BaseTask):
             ):
                 all_new_rows.extend(result)
 
-        return Dataset.from_list(all_new_rows)
-
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
-        self.in_rows_batch = []
+        dataset = Dataset.from_list(all_new_rows)
+        dataset = dataset.filter(lambda x: x["scene"] != "")
+        dataset = dataset.shuffle(seed=42)
+        dataset = dataset.select(range(self.max_samples))
+        return dataset
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
         conv_out = []
         for sample in samples_in:
             scene = sample["scene"]
-            if scene == "":
-                continue
             conv: Conversation = [
                 {
                     "role": "system",
-                    "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene.",
+                    "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene. Start responding with the first character's actions or dialogue.",
                 },
                 {"role": "user", "content": scene},
             ]
