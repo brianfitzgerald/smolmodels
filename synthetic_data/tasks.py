@@ -43,6 +43,7 @@ from synthetic_data.prompts import (
     get_toolformer_dpo_negative_completion_prompt,
 )
 from synthetic_data.screenplay_parser import Scene, ScreenplayParser
+from concurrent.futures import ThreadPoolExecutor
 from synthetic_data.tools import (
     DROPOUT_TYPES_JSON,
     DROPOUT_TYPES_TOOLFORMER,
@@ -757,16 +758,13 @@ class ScreenplaySummarize(BaseTask):
         return dataset
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        new_rows = []
-        for row in tqdm(dataset, desc="Splitting scenes"):
+        def process_row(row):
+            new_rows = []
             movie_title = row["Movie"]  # type: ignore
             parser = ScreenplayParser(row["Script"])  # type: ignore
             parser.parse()
             if len(parser.scenes) < 20 or len(parser.character_line_counts) < 20:
-                logger.warning(
-                    f"Skipping row {movie_title} with {len(parser.scenes)} scenes and {len(parser.character_line_counts)} characters"
-                )
-                continue
+                return new_rows
             for scene in parser.scenes:
                 new_rows.append(
                     {
@@ -774,28 +772,48 @@ class ScreenplaySummarize(BaseTask):
                         "scene": ScreenplayParser.format_conversation(scene),
                     }
                 )
-        return Dataset.from_list(new_rows)
+            return new_rows
+
+        all_new_rows = []
+        with ThreadPoolExecutor() as executor:
+            for result in tqdm(
+                executor.map(process_row, dataset),
+                desc="Splitting scenes",
+                total=len(dataset),
+            ):
+                all_new_rows.extend(result)
+
+        return Dataset.from_list(all_new_rows)
 
     def __init__(self, console: Console) -> None:
         super().__init__(console)
+        self.in_rows_batch = []
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
         conv_out = []
         for sample in samples_in:
+            scene = sample["scene"]
+            if scene == "":
+                continue
             conv: Conversation = [
                 {
                     "role": "system",
                     "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene.",
                 },
-                {"role": "user", "content": sample["scene"]},
+                {"role": "user", "content": scene},
             ]
             conv_out.append(conv)
+            self.in_rows_batch.append(sample)
         return conv_out
 
     def format_output_rows(self, completions: List[str]) -> List:
-        new_rows = [c[-1] for c in completions]
-        return new_rows
+        out_rows = []
+        for completion, row in zip(completions, self.in_rows_batch):
+            row["summary"] = completion
+            out_rows.append(row)
+        self.in_rows_batch = []
+        return out_rows
 
 
 ALL_TASKS: Dict[str, type[BaseTask]] = {

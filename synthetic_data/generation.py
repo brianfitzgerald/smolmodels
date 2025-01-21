@@ -121,17 +121,17 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         while True:
             completion_requests = []
             for conversation in conversations:
-                stop_tokens = [128001, 128008, 128009]
+                # stop_tokens = [128001, 128008, 128009]
                 request = self.oai_client.chat.completions.create(
                     model=self.model_name,
                     messages=conversation,
                     temperature=self.temperature,
                     max_completion_tokens=2048,
-                    stop=["</solution>"],
-                    extra_body={
-                        "stop_token_ids": stop_tokens,
-                        "skip_special_tokens": False,
-                    },
+                    # stop=["</solution>"],
+                    # extra_body={
+                    #     "stop_token_ids": stop_tokens,
+                    #     "skip_special_tokens": False,
+                    # },
                 )
                 completion_requests.append(request)
             try:
@@ -144,9 +144,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 if not results:
                     logger.error(results)
                     raise ValueError("No completions returned")
-                assert all(len(result.choices) > 0 for result in results), (
-                    "No completions returned"
-                )
+                assert all(
+                    len(result.choices) > 0 for result in results
+                ), "No completions returned"
                 completions = [
                     result.choices[0].message.content
                     for result in results

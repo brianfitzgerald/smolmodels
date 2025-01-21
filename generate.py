@@ -24,10 +24,10 @@ from synthetic_data.utils import DatasetFormat
 def main(
     task_name: str,
     upload_every_n_batches: int = 10,
-    batch_size: int = 32,
+    batch_size: int = 16,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.DEEPSEEK_V3.value,
+    model: str = RemoteModel.GPT_4O_MINI.value,
     n_epochs: int = 5,
     **kwargs,
 ):
@@ -78,6 +78,8 @@ def main(
                 logger.info("No existing dataset found, starting from scratch...")
         else:
             output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
+
+    output_dataset = cast(Dataset, output_dataset)
 
     input_dataset: Dataset
     input_dataset_location: Optional[str] = None
