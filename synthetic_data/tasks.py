@@ -11,6 +11,8 @@ from loguru import logger
 from pydantic import ValidationError
 from rich.console import Console
 from rich.markdown import Markdown
+import kagglehub
+import os
 
 from evaluation.code_execution import (
     CodeContestsProblem,
@@ -78,6 +80,9 @@ class BaseTask(ABC):
     def __init__(self, console: Console) -> None:
         super().__init__()
         self.console = console
+
+    def load_custom(self) -> Dataset:
+        raise NotImplementedError
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         return dataset
@@ -728,8 +733,18 @@ class CodeContestsCoTSFT(CodeContests):
 
 
 class ScreenplaySummarize(BaseTask):
-    output_dataset_name = "codecontests_cot_sft_v2"
+    output_dataset_name = "screenplay_scenes_summarized"
     dataset_columns = ["completions", "test_results", "name"]
+    seed_data_format = DatasetFormat.CUSTOM
+    output_dataset_format = DatasetFormat.HF_DATASET
+
+    def load_custom(self):
+        scripts_corpus_path = kagglehub.dataset_download(
+            "veeralakrishna/imsdb-movie-scripts"
+        )
+        scripts_pqt_path = os.path.join(scripts_corpus_path, "movie_scripts.parquet")
+        dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
+        return dataset
 
     def __init__(self, console: Console) -> None:
         super().__init__(console)

@@ -73,6 +73,7 @@ class DatasetFormat(Enum):
     # Synthetic means the data is generated from a synthetic source, so no initial data is loaded
     SYNTHETIC = "synthetic"
     PARQUET = "parquet"
+    CUSTOM = "custom"
 
 
 def clean_message(message: JSONSchemaKey):

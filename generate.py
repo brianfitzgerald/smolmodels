@@ -5,6 +5,8 @@ import fire
 import pandas as pd
 from datasets import Dataset, load_dataset
 from datasets.data_files import EmptyDatasetError
+from datasets.exceptions import DatasetNotFoundError
+from huggingface_hub import HfApi
 from loguru import logger
 from rich.console import Console
 from tqdm import tqdm
@@ -58,6 +60,13 @@ def main(
                 # TODO filter for rows that don't need completion
             except (EmptyDatasetError, ValueError):
                 logger.info("No existing dataset found, starting from scratch...")
+            except DatasetNotFoundError:
+                logger.info("No existing dataset found, starting from scratch...")
+                hf_api = HfApi()
+                hf_api.create_repo(
+                    repo_id=task.output_dataset_name,
+                    repo_type="dataset",
+                )
         elif task.output_dataset_format == DatasetFormat.PARQUET:
             try:
                 output_dataset = cast(
@@ -80,26 +89,28 @@ def main(
     logger.info(
         f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
     )
-    assert input_dataset_location
-    split = None
-    if len(output_dataset) > 0 and resume_input_position:
-        logger.info(f"Resuming from position {len(output_dataset)}")
-        split = f"{split}[{len(output_dataset)}:]"
-    if task.seed_data_format == DatasetFormat.HF_DATASET:
-        input_dataset = cast(Dataset, load_dataset(input_dataset_location, split=split))
-    elif task.seed_data_format == DatasetFormat.TSV:
-        seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
-        input_dataset = Dataset.from_pandas(seed_data)
-    elif task.seed_data_format == DatasetFormat.PARQUET:
-        input_dataset_pd = pd.read_parquet(input_dataset_location)
-        if len(output_dataset) > 0 and resume_input_position:
-            input_dataset = Dataset.from_pandas(
-                input_dataset_pd.iloc[len(output_dataset) :]
-            )
-        else:
-            input_dataset = Dataset.from_pandas(input_dataset_pd)
+    if task.seed_data_format == DatasetFormat.CUSTOM:
+        input_dataset = task.load_custom()
     else:
-        raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
+        assert (
+            input_dataset_location
+        ), f"Input dataset location must be provided, but is {input_dataset_location}"
+        if task.seed_data_format == DatasetFormat.HF_DATASET:
+            input_dataset = cast(
+                Dataset, load_dataset(input_dataset_location, split=split)
+            )
+        elif task.seed_data_format == DatasetFormat.TSV:
+            seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
+            input_dataset = Dataset.from_pandas(seed_data)
+        elif task.seed_data_format == DatasetFormat.PARQUET:
+            input_dataset = Dataset.from_parquet(input_dataset_location)  # type: ignore
+        else:
+            raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
+
+    if resume_input_position and len(output_dataset) > 0:
+        # skip first n rows
+        logger.info(f"Resuming from position {len(output_dataset)}")
+        input_dataset = input_dataset.skip(len(output_dataset))
 
     input_dataset = task.preprocess_dataset(input_dataset)
 
