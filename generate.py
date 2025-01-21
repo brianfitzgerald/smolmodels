@@ -49,11 +49,12 @@ def main(
     logger.info("Loading output dataset...")
     if not restart:
         if task.output_dataset_format == DatasetFormat.HF_DATASET:
+            ds_url = f"{task.output_dataset_org}/{task.output_dataset_name}"
             try:
                 output_dataset = cast(
                     Dataset,
                     load_dataset(
-                        f"{task.output_dataset_org}/{task.output_dataset_name}",
+                        ds_url,
                         split="train",
                     ),
                 )
@@ -67,6 +68,7 @@ def main(
                     repo_id=task.output_dataset_name,
                     repo_type="dataset",
                 )
+                output_dataset = load_dataset(ds_url, split="train")
         elif task.output_dataset_format == DatasetFormat.PARQUET:
             try:
                 output_dataset = cast(

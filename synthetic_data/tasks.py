@@ -1,3 +1,4 @@
+from collections import deque
 import json
 import random
 import sys
@@ -5,6 +6,7 @@ import traceback
 from abc import ABC
 from enum import Enum
 from typing import Dict, List, Optional
+from dataclasses import dataclass, asdict
 
 from datasets import Dataset
 from loguru import logger
@@ -13,6 +15,8 @@ from rich.console import Console
 from rich.markdown import Markdown
 import kagglehub
 import os
+
+from tqdm import tqdm
 
 from evaluation.code_execution import (
     CodeContestsProblem,
@@ -38,7 +42,7 @@ from synthetic_data.prompts import (
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
 )
-from synthetic_data.screenplay_parser import ScreenplayParser
+from synthetic_data.screenplay_parser import Scene, ScreenplayParser
 from synthetic_data.tools import (
     DROPOUT_TYPES_JSON,
     DROPOUT_TYPES_TOOLFORMER,
@@ -732,11 +736,17 @@ class CodeContestsCoTSFT(CodeContests):
         self.using_sft_cot = True
 
 
+@dataclass
+class SceneRow:
+    name: str
+    text_summary: str
+
+
 class ScreenplaySummarize(BaseTask):
     output_dataset_name = "screenplay_scenes_summarized"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.CUSTOM
-    output_dataset_format = DatasetFormat.HF_DATASET
+    output_dataset_format = DatasetFormat.PARQUET
 
     def load_custom(self):
         scripts_corpus_path = kagglehub.dataset_download(
@@ -746,36 +756,44 @@ class ScreenplaySummarize(BaseTask):
         dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
         return dataset
 
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        new_rows = []
+        for row in tqdm(dataset, desc="Splitting scenes"):
+            movie_title = row["Movie"]  # type: ignore
+            parser = ScreenplayParser(row["Script"])  # type: ignore
+            parser.parse()
+            if len(parser.scenes) < 20 or len(parser.character_line_counts) < 20:
+                logger.warning(
+                    f"Skipping row {movie_title} with {len(parser.scenes)} scenes and {len(parser.character_line_counts)} characters"
+                )
+                continue
+            for scene in parser.scenes:
+                new_rows.append(
+                    {
+                        "name": movie_title,
+                        "scene": ScreenplayParser.format_conversation(scene),
+                    }
+                )
+        return Dataset.from_list(new_rows)
+
     def __init__(self, console: Console) -> None:
         super().__init__(console)
-        self.original_samples = []
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        """
-        Prompt template to use for generating initial seed data.
-        """
         samples_in = dictl(batch)
         conv_out = []
         for sample in samples_in:
-            parser = ScreenplayParser(sample["Script"])
-            parser.parse()
-            for scene in parser.scenes:
-                scene_string_formatted = ScreenplayParser.format_conversation(scene)
-                conv: Conversation = [
-                    {
-                        "role": "system",
-                        "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene.",
-                    },
-                    {"role": "user", "content": scene_string_formatted},
-                ]
-                conv_out.append(conv)
-            self.original_samples.append(sample.pop("Script"))
+            conv: Conversation = [
+                {
+                    "role": "system",
+                    "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene.",
+                },
+                {"role": "user", "content": sample["scene"]},
+            ]
+            conv_out.append(conv)
         return conv_out
 
     def format_output_rows(self, completions: List[str]) -> List:
-        """
-        Take the completed conversation and format it into the final dataset format.
-        """
         new_rows = [c[-1] for c in completions]
         return new_rows
 
