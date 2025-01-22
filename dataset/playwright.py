@@ -25,7 +25,8 @@ class PlaywrightSummaryToScript(SmDataset):
         for summary, scene in zip(examples["summary"], examples["scene"]):
             tokenized = self.tokenizer(
                 f"<summary>{summary}<scene>{scene}",
-                padding="max_length",
+                padding=True,
+                truncation=True,
             )
             out.append(tokenized)
         return self.collator(out)

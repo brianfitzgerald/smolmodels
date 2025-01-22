@@ -132,7 +132,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     learning_rate=1e-5,
     special_tokens=["<summary>", "<scene>"],
     input_dataset_path="screenplay_scenes_summarized.parquet",
-    custom_chat_template="ministral_8b",
+    n_epochs=10,
 )
 
 # llama 3 hparams
@@ -242,7 +242,8 @@ class TrainerWrapper:
         )
         if self.config.special_tokens is not None:
             logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
-            self.model.resize_token_embeddings(len(self.tokenizer))
+            # Cannot use mean_resizing as `torch.linalg.eigvals` is not supported on CUDA 12.4
+            self.model.resize_token_embeddings(len(self.tokenizer), mean_resizing=False)
 
     def init_data_module(self):
         dataset_config = DatasetConfig(

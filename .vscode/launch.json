@@ -28,7 +28,7 @@
             "justMyCode": false,
             "args": [
                 "--config",
-                "ultrafeedback",
+                "playwright",
                 "--notebook_mode"
             ]
         },
