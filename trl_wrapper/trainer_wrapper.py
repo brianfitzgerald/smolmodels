@@ -21,8 +21,8 @@ from dataset.code import (
     CodeContestsDataModule,
     UltraFeedbackDataModule,
 )
-from dataset.playwright import PlaywrightSummaryToScript
 from dataset.conversation import ConversationDataModule, ConversationDPODataModule
+from dataset.playwright import PlaywrightSummaryToScript
 from model.utils import (
     DataModuleChoice,
     DatasetConfig,
@@ -130,7 +130,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     using_mistral=True,
     tuning_mode="sft",
     learning_rate=1e-5,
-    special_tokens=["<thought>", "</thought>", "<solution>", "</solution>"],
+    special_tokens=["<summary>", "<scene>"],
     input_dataset_path="screenplay_scenes_summarized.parquet",
     custom_chat_template="ministral_8b",
 )
@@ -240,9 +240,9 @@ class TrainerWrapper:
             ignore_mismatched_sizes=True,
             use_cache=not self.config.using_mistral,
         )
-        # if self.config.special_tokens is not None:
-        #     logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
-        #     self.model.resize_token_embeddings(len(self.tokenizer))
+        if self.config.special_tokens is not None:
+            logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
+            self.model.resize_token_embeddings(len(self.tokenizer))
 
     def init_data_module(self):
         dataset_config = DatasetConfig(
@@ -347,7 +347,7 @@ class TrainerWrapper:
                 max_seq_length=self.config.max_sequence_length,
                 dataloader_pin_memory=True,
                 run_name=run_name,
-                dataset_text_field="conversation",
+                # dataset_text_field="conversation",
                 output_dir=output_dir,
                 disable_tqdm=not self.config.notebook_mode,
                 neftune_noise_alpha=self.config.neftune_noise_alpha,

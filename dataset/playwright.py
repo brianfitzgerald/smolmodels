@@ -1,8 +1,10 @@
-from typing import List
+from transformers.tokenization_utils import PreTrainedTokenizer
 from model.utils import (
+    DatasetConfig,
     SmDataset,
 )
-from synthetic_data.utils import dictl
+from synthetic_data.utils import ldictl
+from trl.trainer.utils import DataCollatorForCompletionOnlyLM
 
 MASK_IDX = -100
 
@@ -12,33 +14,24 @@ class PlaywrightSummaryToScript(SmDataset):
     Generic data module for conversation datasets.
     """
 
+    def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
+        super().__init__(tokenizer, config)
+        self.collator = DataCollatorForCompletionOnlyLM(
+            "<scene>", "<summary>", tokenizer=tokenizer
+        )
+
     def process_samples_batch(self, examples: dict):
-        examples_list = dictl(examples)
         out = []
-        return examples
+        for summary, scene in zip(examples["summary"], examples["scene"]):
+            tokenized = self.tokenizer(
+                f"<summary>{summary}<scene>{scene}",
+                padding="max_length",
+            )
+            out.append(tokenized)
+        return self.collator(out)
 
-    def _tokenize(self, inputs: List[str], labels: List[str]) -> dict:
-        """
-        Basic tokenizing function. Inputs are samples from the dataset, and labels are the target values.
-        """
-        inputs_tokenized = self.tokenizer(
-            inputs,
-            max_length=self.config.max_sequence_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
+    def post_setup(self):
+        self.train_dataset = self.train_dataset.remove_columns(
+            ["name", "scene", "summary"]
         )
-
-        labels_tokenized = self.tokenizer(
-            labels,
-            max_length=self.config.max_sequence_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-
-        return {
-            "input_ids": inputs_tokenized["input_ids"],
-            "attention_mask": inputs_tokenized["attention_mask"],
-            "labels": labels_tokenized["input_ids"],
-        }
+        self.val_dataset = self.val_dataset.remove_columns(["name", "scene", "summary"])
