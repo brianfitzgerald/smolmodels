@@ -4,18 +4,20 @@ from datetime import datetime
 from typing import List, Optional
 
 import torch
+import torch.nn.utils.rnn
 from datasets import load_dataset
 from loguru import logger
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.constants import DUMMY_TARGET_MODULES
+from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
-from transformers.trainer_utils import SchedulerType
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from trl.trainer.dpo_config import DPOConfig
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
+from transformers.trainer_utils import SchedulerType
 
 from dataset.code import (
     CodeContestsDataModule,
@@ -31,6 +33,7 @@ from model.utils import (
     save_dataclass_to_json,
     short_hash,
 )
+from synthetic_data.utils import ldictl
 from trl_wrapper.dpo_trainer import CustomDPOTrainer, EvalDataModeChoice
 
 MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
@@ -125,9 +128,8 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
 PLAYWRIGHT_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B_BASE,
     wandb_project_name="playwright",
-    train_batch_size=4,
+    train_batch_size=8,
     data_module_choice="playwright_summary_to_script",
-    using_mistral=True,
     tuning_mode="sft",
     learning_rate=1e-5,
     special_tokens=["<summary>", "<scene>"],
@@ -355,6 +357,22 @@ class TrainerWrapper:
                 use_liger=True,
             )
 
+            def collate_fn(examples):
+                """
+                need to pad labels separately for some stupid reason, main collator doesn't do this
+                """
+                padded = self.tokenizer.pad(
+                    examples,
+                    padding="longest",
+                )
+                padded["labels"] = torch.nn.utils.rnn.pad_sequence(
+                    [torch.LongTensor(x) for x in ldictl(examples)["labels"]],
+                    padding_value=self.tokenizer.pad_token_id,  # type: ignore
+                ).transpose(0, 1)
+                padded["input_ids"] = torch.LongTensor(padded["input_ids"])
+                padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
+                return padded
+
             self.trainer = SFTTrainer(
                 self.model,
                 peft_config=peft_config,
@@ -362,6 +380,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
+                data_collator=collate_fn,
             )
         else:
             args = DPOConfig(

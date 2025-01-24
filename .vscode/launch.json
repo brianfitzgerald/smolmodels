@@ -2,6 +2,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Train - TRL",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "train_trl.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--config",
+                "playwright",
+                "--notebook_mode"
+            ]
+        },
+        {
             "name": "Evaluate",
             "type": "debugpy",
             "request": "launch",
@@ -18,19 +31,6 @@
                 "screenplay_summarize"
             ],
             "console": "integratedTerminal",
-        },
-        {
-            "name": "Train - TRL",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "train_trl.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": [
-                "--config",
-                "playwright",
-                "--notebook_mode"
-            ]
         },
         {
             "name": "vLLM Server",
