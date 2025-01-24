@@ -195,7 +195,6 @@ CONFIGS = {
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
 }
 
-REMOTE_RUNS_FOLDER = "/weka/home-brianf/runs"
 LOCAL_RUNS_FOLDER = "./runs"
 
 
@@ -274,22 +273,16 @@ class TrainerWrapper:
             self.data_module = PlaywrightSummaryToScript(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
 
-    def init_trainer(self, comment: Optional[str] = None):
+    def init_trainer(self, config_name: str):
         # Get run name
         simple_date = datetime.now().strftime("%m-%d-%-H-%-M")
         random_id = int(torch.rand(1) * 1000000)
         model_id_without_org = self.config.model_id_or_path.split("/")[-1].lower()
-        run_name = f"{simple_date}-{random_id}-{model_id_without_org}"
+        run_name = f"{simple_date}-{random_id}-{model_id_without_org}-{config_name}"
         if self.config.run_suffix is not None:
             run_name += f"-{self.config.run_suffix}"
-        if comment is not None:
-            run_name += f"-{comment}"
 
-        runs_folder = (
-            REMOTE_RUNS_FOLDER
-            if os.path.exists(REMOTE_RUNS_FOLDER)
-            else LOCAL_RUNS_FOLDER
-        )
+        runs_folder = LOCAL_RUNS_FOLDER
 
         output_dir = os.path.join(runs_folder, run_name)
         logger.info(f"Saving output to: {output_dir}")
@@ -323,7 +316,6 @@ class TrainerWrapper:
         logger.info(
             f"logprobs cache location: {self.ref_logpbrobs_cache_location} peft config: {peft_config is not None}"
         )
-        logger.info(self.config)
 
         # https://github.com/huggingface/transformers/blob/main/src/transformers/training_args.py#L143
         if self.config.tuning_mode in ("sft", "sft_lora"):
@@ -372,11 +364,6 @@ class TrainerWrapper:
                 ).transpose(0, 1)
                 padded["input_ids"] = torch.LongTensor(padded["input_ids"])
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
-                print(
-                    list(padded["labels"].shape),
-                    list(padded["input_ids"].shape),
-                    list(padded["attention_mask"].shape),
-                )
                 return padded
 
             self.trainer = SFTTrainer(

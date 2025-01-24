@@ -12,7 +12,6 @@ def main(
     config: str = "dolphin",
     notebook_mode: bool = False,
     wandb: bool = False,
-    comment: Optional[str] = None,
     **kwargs,
 ):
     assert not kwargs, f"Unknown arguments: {kwargs}"
@@ -25,7 +24,7 @@ def main(
     wrapper = TrainerWrapper(cfg, wandb)
     wrapper.init_model()
     wrapper.init_data_module()
-    wrapper.init_trainer(comment)
+    wrapper.init_trainer(config)
     logger.info(f"Starting training, config: {config}")
     wrapper.train()
 
