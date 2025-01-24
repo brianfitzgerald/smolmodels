@@ -14,6 +14,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
+from transformers.training_args import OptimizerNames
 from trl.trainer.dpo_config import DPOConfig
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
@@ -90,6 +91,7 @@ class WrapperConfig:
     custom_chat_template: Optional[str] = None
     lr_scheduler: SchedulerType = SchedulerType.CONSTANT
     neftune_noise_alpha: Optional[float] = None
+    optimizer: str = OptimizerNames.ADAFACTOR.value
 
 
 LLAMA_CONFIG = WrapperConfig(
@@ -131,10 +133,10 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     train_batch_size=8,
     data_module_choice="playwright_summary_to_script",
     tuning_mode="sft",
-    learning_rate=1e-5,
+    learning_rate=1e-6,
     special_tokens=["<summary>", "<scene>"],
     input_dataset_path="screenplay_scenes_summarized.parquet",
-    n_epochs=10,
+    n_epochs=1,
 )
 
 # llama 3 hparams
@@ -323,6 +325,7 @@ class TrainerWrapper:
         )
         logger.info(self.config)
 
+        # https://github.com/huggingface/transformers/blob/main/src/transformers/training_args.py#L143
         if self.config.tuning_mode in ("sft", "sft_lora"):
             args = SFTConfig(
                 num_train_epochs=self.config.n_epochs,
@@ -330,7 +333,7 @@ class TrainerWrapper:
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 gradient_checkpointing=self.config.gradient_checkpointing,
-                optim="adamw_torch_fused",
+                optim=self.config.optimizer,
                 learning_rate=self.config.learning_rate,
                 max_grad_norm=self.config.max_grad_norm,
                 warmup_ratio=0.1,
@@ -339,14 +342,13 @@ class TrainerWrapper:
                 save_steps=self.config.save_steps,
                 save_total_limit=2,
                 eval_strategy="steps",
-                eval_on_start=True,
+                eval_on_start=False,
                 eval_steps=self.config.eval_steps,
                 bf16=True,
-                tf32=not self.using_mps,
                 push_to_hub=False,
                 report_to="wandb" if self.use_wandb else "none",
-                dataloader_num_workers=0 if self.config.notebook_mode else 4,
-                dataset_num_proc=1 if self.config.notebook_mode else 4,
+                dataloader_num_workers=0,
+                dataset_num_proc=4,
                 max_seq_length=self.config.max_sequence_length,
                 dataloader_pin_memory=True,
                 run_name=run_name,
@@ -363,7 +365,6 @@ class TrainerWrapper:
                 """
                 padded = self.tokenizer.pad(
                     examples,
-                    padding="longest",
                 )
                 padded["labels"] = torch.nn.utils.rnn.pad_sequence(
                     [torch.LongTensor(x) for x in ldictl(examples)["labels"]],
@@ -371,6 +372,11 @@ class TrainerWrapper:
                 ).transpose(0, 1)
                 padded["input_ids"] = torch.LongTensor(padded["input_ids"])
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
+                print(
+                    list(padded["labels"].shape),
+                    list(padded["input_ids"].shape),
+                    list(padded["attention_mask"].shape),
+                )
                 return padded
 
             self.trainer = SFTTrainer(
@@ -389,7 +395,7 @@ class TrainerWrapper:
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 gradient_checkpointing=self.config.gradient_checkpointing,
-                optim="adamw_torch_fused",
+                optim=self.config.optimizer,
                 learning_rate=self.config.learning_rate,
                 max_grad_norm=self.config.max_grad_norm,
                 warmup_ratio=0.1,

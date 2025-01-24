@@ -1,12 +1,14 @@
 #!/bin/bash
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 set -e
 
 rm -rf nohup.out
 
 source .venv/bin/activate
 
-nohup python train_trl.py --config playwright --wandb &
+nohup python train_trl.py --config playwright --notebook_mode --wandb &
 # nohup python generate.py --task_name screenplay_summarize &
 
 pid=$!
