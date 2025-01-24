@@ -6,7 +6,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "train_trl.py",
-            "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
                 "--config",
@@ -19,7 +18,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "evaluate.py",
-            "console": "integratedTerminal",
         },
         {
             "name": "Generate",
@@ -30,14 +28,12 @@
                 "--task_name",
                 "screenplay_summarize"
             ],
-            "console": "integratedTerminal",
         },
         {
             "name": "vLLM Server",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/run_vllm.py",
-            "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
                 "--run",
@@ -51,9 +47,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "gradio_ui.py",
-            "console": "integratedTerminal",
             "justMyCode": false,
-            "args": []
         },
     ]
 }
