@@ -7,6 +7,7 @@ from loguru import logger
 from huggingface_hub import hf_hub_download
 import json
 
+
 def _get_eos_tokens():
     config_path = hf_hub_download(
         repo_id="meta-llama/Llama-3.2-3B-Instruct", filename="generation_config.json"
@@ -25,18 +26,21 @@ def main(
     oai_base_url = f"http://{vllm_host}:{vllm_port}/v1"
     logger.info(f"Creating OpenAI client with base url: {oai_base_url}")
     client = OpenAI(base_url=oai_base_url)
+    selected_model_id = None
 
     def _get_model_id():
-        logger.info("Fetching models from OpenAI")
         all_models = client.models.list()
 
-        logger.info(f"Models: {[x.id for x in all_models.data]}")
+        logger.info(f"Available models: {[x.id for x in all_models.data]}")
         first_model_id = all_models.data[0].id
         model_id = model or first_model_id
+        logger.info(f"Selected model: {model_id}")
         return model_id
 
     def predict(message, history):
-        model_id = _get_model_id()
+        nonlocal selected_model_id
+        if selected_model_id is None:
+            selected_model_id = _get_model_id()
         # Convert chat history to OpenAI format
         history_openai_format: Iterable[ChatCompletionMessageParam] = [
             {"role": "system", "content": "You are a great ai assistant."}
@@ -49,15 +53,12 @@ def main(
         stop_tokens = _get_eos_tokens()
 
         # Create a chat completion request and send it to the API server
-        logger.info(f"Sending message: {message} to model: {model_id}")
+        logger.info(f"Sending message: {message} to model: {selected_model_id}")
         stream = client.chat.completions.create(
             messages=history_openai_format,
-            model=model_id,
+            model=selected_model_id,
             stream=True,
-            extra_body={
-                "stop_token_ids": stop_tokens,
-                "skip_special_tokens": False
-            }
+            extra_body={"stop_token_ids": stop_tokens, "skip_special_tokens": False},
         )
 
         # Read and return generated text from response stream
@@ -67,7 +68,15 @@ def main(
             yield partial_message
 
     # Create and launch a chat interface with Gradio
-    gr.ChatInterface(predict).queue().launch(server_name=host, server_port=port)
+    gr.ChatInterface(
+        predict,
+        examples=[
+            "Can you tell me a joke?",
+            "Solve FizzBuzz in Python",
+            "Write a story about a man and his cat, in a post-apocalyptic world.",
+            "How many Rs are there in the word strawberry?",
+        ],
+    ).queue().launch(server_name=host, server_port=port)
 
 
 if __name__ == "__main__":
