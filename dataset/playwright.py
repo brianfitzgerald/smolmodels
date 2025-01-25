@@ -4,7 +4,6 @@ from model.utils import (
     SmDataset,
 )
 from synthetic_data.utils import ldictl
-import numpy as np
 from torch import Tensor
 
 MASK_IDX = -100

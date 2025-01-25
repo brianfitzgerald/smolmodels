@@ -135,7 +135,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     tuning_mode="sft",
     learning_rate=1e-6,
     special_tokens=["<summary>", "<scene>"],
-    input_dataset_path="screenplay_scenes_summarized.parquet",
+    input_dataset_path="screenplay_scenes_summarized_full.parquet",
     n_epochs=1,
 )
 

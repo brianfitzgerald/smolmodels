@@ -228,10 +228,15 @@ class SmDataset(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(self.val_dataset, batch_size=8, num_workers=self.num_workers)  # type: ignore
 
-    def visualize_sample(self, input_dict: dict[str, torch.Tensor]) -> Text:
+    def visualize_sample(self, input_dict: dict[str, torch.Tensor | list]) -> Text:
         """Visualize a sample from the dataset."""
-        input_ids = input_dict["input_ids"].squeeze().tolist()
-        labels = input_dict["labels"].squeeze().tolist()
+        input_ids, labels = input_dict["input_ids"], input_dict["labels"]
+        if isinstance(input_ids, list):
+            input_ids = torch.tensor(input_ids)
+        if isinstance(labels, list):
+            labels = torch.tensor(labels)
+        input_ids = input_ids.squeeze().tolist()
+        labels = labels.squeeze().tolist()
 
         rich_text = Text()
 
