@@ -166,8 +166,9 @@ class SmDataset(pl.LightningDataModule):
 
         assert self.train_dataset is not None
         assert self.val_dataset is not None
+        train_steps_per_epoch = len(self.train_dataset) // self.config.batch_size
         logger.info(
-            f"Train dataset size: {len(self.train_dataset)} Val dataset size: {len(self.val_dataset)}"
+            f"Train dataset samples: {len(self.train_dataset)} Val dataset samples: {len(self.val_dataset)} Train steps per epoch: {train_steps_per_epoch}"
         )
 
         self.train_dataset = self.train_dataset.map(

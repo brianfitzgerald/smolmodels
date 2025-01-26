@@ -8,7 +8,7 @@ rm -rf nohup.out
 
 source .venv/bin/activate
 
-nohup python train_trl.py --config playwright --notebook_mode --wandb &
+nohup python train_trl.py --config playwright --wandb &
 # nohup python generate.py --task_name screenplay_summarize &
 
 pid=$!

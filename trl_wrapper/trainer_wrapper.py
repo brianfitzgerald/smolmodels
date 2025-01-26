@@ -137,7 +137,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     special_tokens=["<summary>", "<scene>"],
     custom_chat_template="llama3",
     input_dataset_path="screenplay_scenes_chat_format.parquet",
-    n_epochs=1,
+    n_epochs=10,
 )
 
 # llama 3 hparams
@@ -335,7 +335,7 @@ class TrainerWrapper:
                 save_steps=self.config.save_steps,
                 save_total_limit=2,
                 eval_strategy="steps",
-                eval_on_start=False,
+                eval_on_start=not self.config.notebook_mode,
                 eval_steps=self.config.eval_steps,
                 bf16=True,
                 push_to_hub=False,
@@ -345,7 +345,6 @@ class TrainerWrapper:
                 max_seq_length=self.config.max_sequence_length,
                 dataloader_pin_memory=True,
                 run_name=run_name,
-                # dataset_text_field="conversation",
                 output_dir=output_dir,
                 disable_tqdm=not self.config.notebook_mode,
                 neftune_noise_alpha=self.config.neftune_noise_alpha,
