@@ -46,7 +46,9 @@ def main(
             raise ValueError(f"Run directory {run_directory} not found")
         checkpoints = os.listdir(run_directory)
         checkpoints = [x for x in checkpoints if x.startswith("checkpoint-")]
-        sorted_checkpoints = list(sorted(checkpoints, key=lambda x: int(x.split("-")[-1])))
+        sorted_checkpoints = list(
+            sorted(checkpoints, key=lambda x: int(x.split("-")[-1]))
+        )
         sorted_checkpoints = [int(x.split("-")[-1]) for x in sorted_checkpoints]
         if steps in sorted_checkpoints:
             checkpoint_dir = f"{run_directory}/checkpoint-{steps}"

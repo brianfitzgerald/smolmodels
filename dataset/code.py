@@ -70,7 +70,9 @@ class UltraFeedbackDataModule(SmDataset):
         super().__init__(tokenizer, config)
 
         self.system_message = "You are a helpful AI assistant."
-        self.config.input_dataset_name =  "argilla/ultrafeedback-binarized-preferences-cleaned"
+        self.config.input_dataset_name = (
+            "argilla/ultrafeedback-binarized-preferences-cleaned"
+        )
 
     def process_samples_batch(self, examples: dict):
         out_dict = {k: [] for k in DPO_COLS_TO_TOKENIZE}

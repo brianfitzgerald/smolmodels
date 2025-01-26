@@ -383,6 +383,7 @@ def format_humaneval_generation_prompt(fn_name: str, tests: str) -> Conversation
     ]
     return conv
 
+
 def extract_docstring(code: str) -> str:
     docstring_pattern = r'"""(.*?)"""|\'\'\'(.*?)\'\'\''
     match = re.search(docstring_pattern, code, re.DOTALL)
