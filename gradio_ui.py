@@ -14,20 +14,16 @@ def _get_eos_tokens():
     )
     config_json: dict = json.load(open(config_path))
     stop_tokens = config_json["eos_token_id"]
+    return stop_tokens
 
 
 def main(
     host: str = "localhost",
     port: int = 8001,
-    vllm_host: str = "localhost",
-    vllm_port: int = 8000,
+    oai_host: str = "localhost",
+    oai_port: int = 8000,
     model: Optional[str] = None,
 ):
-    oai_base_url = f"http://{vllm_host}:{vllm_port}/v1"
-    logger.info(f"Creating OpenAI client with base url: {oai_base_url}")
-    client = OpenAI(base_url=oai_base_url)
-    selected_model_id = None
-
     def _get_model_id():
         all_models = client.models.list()
 
@@ -66,6 +62,11 @@ def main(
         for chunk in stream:
             partial_message += chunk.choices[0].delta.content or ""
             yield partial_message
+
+    oai_base_url = f"http://{oai_host}:{oai_port}/v1"
+    logger.info(f"Creating OpenAI client with base url: {oai_base_url}")
+    client = OpenAI(base_url=oai_base_url)
+    selected_model_id = _get_model_id()
 
     # Create and launch a chat interface with Gradio
     gr.ChatInterface(
