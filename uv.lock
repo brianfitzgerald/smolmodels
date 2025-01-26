@@ -1383,9 +1383,8 @@ version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "torch", version = "2.5.1", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
-    { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.5.1+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
-    { name = "triton" },
+    { name = "torch", version = "2.5.1+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "platform_machine != 'aarch64' and sys_platform == 'linux'" },
+    { name = "triton", marker = "sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a6/cb/5b6debc3fc29bb6a034446a0f1e90cfdfa246772edb6484c3c7db6e295d9/liger_kernel-0.5.2.tar.gz", hash = "sha256:784b5e74848d6802f52e38766bdc0241bf723040f8bf82b153485dd2c9ba0054", size = 70272 }
 wheels = [
@@ -3143,7 +3142,6 @@ dependencies = [
     { name = "jsonlines" },
     { name = "kaggle" },
     { name = "kagglehub" },
-    { name = "lightning" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "mistune" },
@@ -3174,13 +3172,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-training = [
-    { name = "bitsandbytes", marker = "sys_platform == 'linux'" },
-    { name = "cmake" },
-    { name = "flash-attn", marker = "sys_platform == 'linux'" },
-    { name = "liger-kernel" },
+torch = [
+    { name = "lightning" },
     { name = "peft" },
-    { name = "setuptools-scm" },
     { name = "torch", version = "2.5.1", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "platform_machine == 'aarch64' and sys_platform == 'linux'" },
     { name = "torch", version = "2.5.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.5.1+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
@@ -3192,6 +3186,13 @@ training = [
     { name = "torchvision", version = "0.20.1+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
     { name = "transformers" },
     { name = "trl" },
+]
+training = [
+    { name = "bitsandbytes", marker = "sys_platform == 'linux'" },
+    { name = "cmake" },
+    { name = "flash-attn", marker = "sys_platform == 'linux'" },
+    { name = "liger-kernel", marker = "sys_platform == 'linux'" },
+    { name = "setuptools-scm" },
     { name = "vllm" },
 ]
 
@@ -3214,7 +3215,6 @@ requires-dist = [
     { name = "jsonlines", specifier = ">=4.0.0" },
     { name = "kaggle" },
     { name = "kagglehub", specifier = ">=0.3.6" },
-    { name = "lightning", specifier = ">=2.5.0.post0" },
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "mistune", specifier = ">=3.1.0" },
@@ -3245,13 +3245,9 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-training = [
-    { name = "bitsandbytes", marker = "sys_platform == 'linux'", specifier = ">=0.44.1" },
-    { name = "cmake" },
-    { name = "flash-attn", marker = "sys_platform == 'linux'" },
-    { name = "liger-kernel", specifier = ">=0.5.2" },
+torch = [
+    { name = "lightning", specifier = ">=2.5.0.post0" },
     { name = "peft", specifier = ">=0.13.2" },
-    { name = "setuptools-scm" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = "==2.5.1" },
     { name = "torchaudio", marker = "sys_platform != 'darwin'", specifier = "==2.5.1", index = "https://download.pytorch.org/whl/cu124" },
@@ -3260,6 +3256,13 @@ training = [
     { name = "torchvision", marker = "sys_platform == 'darwin'", specifier = "==0.20.1" },
     { name = "transformers", specifier = "==4.48.0" },
     { name = "trl", specifier = ">=0.12.0" },
+]
+training = [
+    { name = "bitsandbytes", marker = "sys_platform == 'linux'", specifier = ">=0.44.1" },
+    { name = "cmake" },
+    { name = "flash-attn", marker = "sys_platform == 'linux'" },
+    { name = "liger-kernel", marker = "sys_platform == 'linux'", specifier = ">=0.5.2" },
+    { name = "setuptools-scm" },
     { name = "vllm" },
 ]
 
@@ -3737,7 +3740,7 @@ name = "triton"
 version = "3.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "filelock" },
+    { name = "filelock", marker = "sys_platform == 'linux'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/86/17/d9a5cf4fcf46291856d1e90762e36cbabd2a56c7265da0d1d9508c8e3943/triton-3.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0f34f6e7885d1bf0eaaf7ba875a5f0ce6f3c13ba98f9503651c1e6dc6757ed5c", size = 209506424 },
