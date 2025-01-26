@@ -128,14 +128,15 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
 )
 
 PLAYWRIGHT_CONFIG = WrapperConfig(
-    model_id_or_path=LLAMA_3_2_3B_BASE,
+    model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="playwright",
     train_batch_size=8,
-    data_module_choice="playwright_summary_to_script",
+    data_module_choice="conversation",
     tuning_mode="sft",
     learning_rate=1e-6,
     special_tokens=["<summary>", "<scene>"],
-    input_dataset_path="screenplay_scenes_summarized_full.parquet",
+    custom_chat_template="llama3",
+    input_dataset_path="screenplay_scenes_chat_format.parquet",
     n_epochs=1,
 )
 
@@ -351,7 +352,7 @@ class TrainerWrapper:
                 use_liger=True,
             )
 
-            def collate_fn(examples):
+            def basic_pad_collator(examples):
                 """
                 need to pad labels separately for some stupid reason, main collator doesn't do this
                 """
@@ -366,6 +367,11 @@ class TrainerWrapper:
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
                 return padded
 
+            collator = (
+                basic_pad_collator
+                if self.config.data_module_choice == "playwright_summary_to_script"
+                else None
+            )
             self.trainer = SFTTrainer(
                 self.model,
                 peft_config=peft_config,
@@ -373,7 +379,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
-                data_collator=collate_fn,
+                data_collator=collator,
             )
         else:
             args = DPOConfig(
