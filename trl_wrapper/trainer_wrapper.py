@@ -134,10 +134,12 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     data_module_choice="conversation",
     tuning_mode="sft",
     learning_rate=1e-6,
-    special_tokens=["<summary>", "<scene>"],
+    # special_tokens=["<summary>", "<scene>"],
     custom_chat_template="llama3",
-    input_dataset_path="screenplay_scenes_chat_format.parquet",
+    # input_dataset_path="screenplay_scenes_chat_format.parquet",
+    input_dataset_path="pippa_conversations.parquet",
     n_epochs=10,
+    run_suffix="pippa-conv",
 )
 
 # llama 3 hparams
