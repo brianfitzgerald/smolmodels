@@ -7,23 +7,23 @@ from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper
 MODAL_IMAGE = (
     Image.debian_slim()
     .pip_install("uv")
-    .add_local_file("pyproject.toml", "/pyproject.toml")
-    .add_local_file("uv.lock", "/uv.lock")
+    .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
+    .add_local_file("uv.lock", "/uv.lock", copy=True)
     .env({"UV_PROJECT_ENVIRONMENT": "/usr/local"})
     .run_commands(
         [
-            "uv sync --frozen --compile-bytecode",
+            "uv sync --frozen --compile-bytecode --group torch",
+            "uv sync --group torch --group training --no-build-isolation",
             "uv build",
         ]
     )
 )
 
-APP_NAME = "smolmoedls"
+APP_NAME = "smolmodels"
 
 app = App(
     APP_NAME,
     secrets=[
-        Secret.from_name("my-huggingface-secret"),
         Secret.from_dict({"ALLOW_WANDB": os.environ.get("ALLOW_WANDB", "false")}),
     ],
 )

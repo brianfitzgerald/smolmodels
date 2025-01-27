@@ -69,7 +69,6 @@ training = [
     "bitsandbytes>=0.44.1; sys_platform == 'linux'",
     "liger-kernel>=0.5.2; sys_platform == 'linux'",
     "flash-attn; sys_platform == 'linux'",
-    "vllm",
 ]
 
 [tool.uv.sources]
