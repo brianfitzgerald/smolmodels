@@ -29,7 +29,7 @@ app = App(
 )
 
 
-@app.function(image=MODAL_IMAGE, gpu="l40g")
+@app.function(image=MODAL_IMAGE, gpu="l40s")
 def main(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"
 
