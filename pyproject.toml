@@ -49,6 +49,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "plotting>=0.0.7",
     "pandas>=2.2.3",
+    "modal>=0.72.50",
 ]
 
 [dependency-groups]
