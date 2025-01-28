@@ -137,7 +137,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     # special_tokens=["<summary>", "<scene>"],
     custom_chat_template="llama3",
     # input_dataset_path="screenplay_scenes_chat_format.parquet",
-    input_dataset_path="pippa_conversations.parquet",
+    input_dataset_path="/pippa_conversations.parquet",
     n_epochs=10,
     run_suffix="pippa-conv",
 )

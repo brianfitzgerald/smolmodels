@@ -29,3 +29,9 @@ llama-cpp can also be installed with `CMAKE_ARGS="-DGGML_CUDA=on" uv pip install
 ```
 pyright --createstub transformers
 ```
+
+### Modal
+
+```
+modal run modal_trl.py
+```
