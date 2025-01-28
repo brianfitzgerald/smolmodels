@@ -22,11 +22,11 @@ MODAL_IMAGE = (
     .add_local_file("uv.lock", "/uv.lock", copy=True)
     .env({"UV_PROJECT_ENVIRONMENT": "/usr/local"})
     .apt_install("git")
-    .pip_install(["huggingface_hub[hf_transfer]", "hf_transfer"])
     .env(
         {
             "CUDA_HOME": "/usr/local/cuda",
             "HF_HOME": MODEL_DIR.as_posix(),
+            "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
     .run_commands(
@@ -35,9 +35,11 @@ MODAL_IMAGE = (
             "uv sync --group torch --group training --no-build-isolation",
         ]
     )
+    .run_commands("pip install huggingface_hub[hf_transfer] hf_transfer")
     .add_local_file(
         "pippa_conversations.parquet", "/pippa_conversations.parquet", copy=True
     )
+    .add_local_dir("chat_templates", "/chat_templates", copy=True)
 )
 
 APP_NAME = "smolmodels"

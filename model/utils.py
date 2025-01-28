@@ -108,7 +108,7 @@ class SmDataset(pl.LightningDataModule):
         self.tokenizer = tokenizer
         self.num_workers = 1 if config.notebook_mode else 4
         current_dir = Path().resolve().name
-        self.prefix = ""
+        self.prefix = "/"
         if current_dir == "notebooks":
             self.prefix = "../"
         self.cache_dir = (
@@ -125,9 +125,9 @@ class SmDataset(pl.LightningDataModule):
         Cannot call load_dataset as that will shadow the load_dataset function from datasets
         """
         # Load dataset and split
-        assert (
-            self.config.input_dataset_name is not None
-        ), "Input dataset name must be set"
+        assert self.config.input_dataset_name is not None, (
+            "Input dataset name must be set"
+        )
         local_dataset_location = f"{self.prefix}{self.config.input_dataset_name}"
         if os.path.exists(local_dataset_location):
             logger.info(f"Loading local dataset from {local_dataset_location}")
