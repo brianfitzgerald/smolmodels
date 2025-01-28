@@ -52,12 +52,16 @@ app = App(
 )
 
 
+def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
+    return seconds + minutes * 60 + hours * 60 * 60
+
+
 @app.function(
     image=MODAL_IMAGE,
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODEL_DIR.as_posix(): volume},
-    timeout=60 * 5,
+    timeout=_format_timeout(hours=1, minutes=30),
 )
 def main(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"
