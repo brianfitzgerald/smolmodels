@@ -4,7 +4,7 @@ import os
 from loguru import logger
 import modal
 
-from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper
+from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODAL_RUNS_VOLUME
 
 cuda_version = "12.4.0"  # should be no greater than host CUDA version
 flavor = "devel"  #  includes full CUDA toolkit
@@ -12,8 +12,8 @@ operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
 
 volume = modal.Volume.from_name("model-weights", create_if_missing=True)
-MODEL_DIR = Path("/models")
 
+MODEL_DIR = Path(MODAL_RUNS_VOLUME)
 
 MODAL_IMAGE = (
     Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
@@ -61,7 +61,7 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODEL_DIR.as_posix(): volume},
-    timeout=_format_timeout(hours=1, minutes=30),
+    timeout=_format_timeout(hours=2, minutes=30),
 )
 def main(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"

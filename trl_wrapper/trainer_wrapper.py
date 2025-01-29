@@ -138,7 +138,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     custom_chat_template="llama3",
     # input_dataset_path="screenplay_scenes_chat_format.parquet",
     input_dataset_path="/pippa_conversations.parquet",
-    n_epochs=10,
+    n_epochs=1,
     run_suffix="pippa-conv",
 )
 
@@ -199,6 +199,7 @@ CONFIGS = {
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
+MODAL_RUNS_VOLUME = "/models"
 
 
 class TrainerWrapper:
@@ -286,6 +287,10 @@ class TrainerWrapper:
             run_name += f"-{self.config.run_suffix}"
 
         runs_folder = LOCAL_RUNS_FOLDER
+
+        if os.path.exists(MODAL_RUNS_VOLUME):
+            runs_folder = os.path.join(MODAL_RUNS_VOLUME, "runs")
+            os.makedirs(MODAL_RUNS_VOLUME, exist_ok=True)
 
         output_dir = os.path.join(runs_folder, run_name)
         logger.info(f"Saving output to: {output_dir}")
