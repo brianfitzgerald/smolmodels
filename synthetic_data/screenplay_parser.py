@@ -1,30 +1,33 @@
 from collections import defaultdict
-from dataclasses import dataclass
 import re
-from typing import Literal, Optional, List
+from typing import Optional, List
+from enum import Enum
+
+from pydantic import BaseModel
 
 
-DialogueType = Literal["scene_heading", "action", "dialogue", "transition"]
+class SceneElementType(Enum):
+    SCENE_HEADING = "scene_heading"
+    ACTION = "action"
+    DIALOGUE = "dialogue"
+    TRANSITION = "transition"
 
 
-@dataclass
-class DialogueLine:
+class DialogueLine(BaseModel):
     character: str
     content: str
-    parenthetical: Optional[str] = None
+    parenthetical: str | None = None
     line_number: int = 0
 
 
-@dataclass
-class SceneElement:
-    type: DialogueType
+class SceneElement(BaseModel):
+    type: SceneElementType
     content: str
     line_number: int
-    dialogue_data: Optional[DialogueLine] = None  # Used only for dialogue elements
+    dialogue_data: DialogueLine | None = None
 
 
-@dataclass
-class Scene:
+class Scene(BaseModel):
     heading: SceneElement
     elements: List[SceneElement]
 
@@ -151,7 +154,7 @@ class ScreenplayParser:
         dialogue_content = " ".join(dialogue_lines)
 
         return SceneElement(
-            type="dialogue",
+            type=SceneElementType.DIALOGUE,
             content=dialogue_content,
             line_number=character_line,
             dialogue_data=DialogueLine(
@@ -166,7 +169,7 @@ class ScreenplayParser:
         """Parse a single scene."""
         # Parse scene heading
         heading = SceneElement(
-            type="scene_heading",
+            type=SceneElementType.SCENE_HEADING,
             content=self.lines[self.current_line].strip(),
             line_number=self.current_line,
         )
@@ -196,7 +199,9 @@ class ScreenplayParser:
             elif self._is_transition(self.current_line):
                 elements.append(
                     SceneElement(
-                        type="transition", content=line, line_number=self.current_line
+                        type=SceneElementType.TRANSITION,
+                        content=line,
+                        line_number=self.current_line,
                     )
                 )
                 self.current_line += 1
@@ -204,7 +209,9 @@ class ScreenplayParser:
                 # Assume it's action description
                 elements.append(
                     SceneElement(
-                        type="action", content=line, line_number=self.current_line
+                        type=SceneElementType.ACTION,
+                        content=line,
+                        line_number=self.current_line,
                     )
                 )
                 self.current_line += 1

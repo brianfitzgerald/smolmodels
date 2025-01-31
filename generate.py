@@ -96,9 +96,9 @@ def main(
     if task.seed_data_format == DatasetFormat.CUSTOM:
         input_dataset = task.load_custom()
     else:
-        assert (
-            input_dataset_location
-        ), f"Input dataset location must be provided, but is {input_dataset_location}"
+        assert input_dataset_location, (
+            f"Input dataset location must be provided, but is {input_dataset_location}"
+        )
         if task.seed_data_format == DatasetFormat.HF_DATASET:
             input_dataset = cast(
                 Dataset, load_dataset(input_dataset_location, split=split)

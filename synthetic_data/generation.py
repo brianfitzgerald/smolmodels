@@ -1,4 +1,3 @@
-import asyncio
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -15,8 +14,9 @@ from datasets import Dataset, concatenate_datasets
 from dotenv import dotenv_values
 from huggingface_hub import login
 from loguru import logger
-from openai import AsyncOpenAI, OpenAI
+from openai import NOT_GIVEN, NotGiven, AsyncOpenAI, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
+from pydantic import BaseModel
 from wrapt_timeout_decorator import timeout
 
 from synthetic_data.utils import (
@@ -53,12 +53,19 @@ def save_output_dataset(
         raise ValueError(f"Unsupported output format: {format}")
 
 
+MAX_RETRIES = 3
+
+
 @dataclass
 class GenWrapperArgs:
     model_id: Optional[str] = None
     lora_name: Optional[str] = None
     dotenv: dict[str, str] = field(default_factory=dict)
     max_concurrent: int = 8
+    max_tokens: int = 4096
+    temperature: float = 0.4
+    response_format: BaseModel | NotGiven = NOT_GIVEN
+    n_retries: int = MAX_RETRIES
 
 
 class GenerationWrapper(ABC):
@@ -94,9 +101,6 @@ class MockGenerator(GenerationWrapper):
         return [MOCK_SNIPPET] * len(conversations)
 
 
-MAX_RETRIES = 3
-
-
 class OpenAIGenerationWrapper(GenerationWrapper):
     def __init__(
         self,
@@ -112,9 +116,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             )
         self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model_name = args.model_id or "gpt-4o-mini"
-        self.n_retries = MAX_RETRIES
-        self.temperature = 0.2
-        self.max_tokens = 4096
+        self.args = args
 
     @timeout(30)
     async def generate(self, conversations: List[Conversation]) -> List[str]:
@@ -122,18 +124,21 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         while True:
             completion_requests = []
             for conversation in conversations:
-                # stop_tokens = [128001, 128008, 128009]
-                request = self.oai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=conversation,
-                    temperature=self.temperature,
-                    max_completion_tokens=2048,
-                    # stop=["</solution>"],
-                    # extra_body={
-                    #     "stop_token_ids": stop_tokens,
-                    #     "skip_special_tokens": False,
-                    # },
-                )
+                if self.args.response_format:
+                    request = self.oai_client.beta.chat.completions.parse(
+                        model=self.model_name,
+                        messages=conversation,
+                        temperature=self.args.temperature,
+                        max_completion_tokens=self.args.max_tokens,
+                        response_format=self.args.response_format,  # type: ignore
+                    )
+                else:
+                    request = self.oai_client.chat.completions.create(
+                        model=self.model_name,
+                        messages=conversation,
+                        temperature=self.args.temperature,
+                        max_completion_tokens=self.args.max_tokens,
+                    )
                 completion_requests.append(request)
             try:
                 logger.info(
@@ -145,9 +150,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 if not results:
                     logger.error(results)
                     raise ValueError("No completions returned")
-                assert all(
-                    len(result.choices) > 0 for result in results
-                ), "No completions returned"
+                assert all(len(result.choices) > 0 for result in results), (
+                    "No completions returned"
+                )
                 completions = [
                     result.choices[0].message.content
                     for result in results
@@ -324,16 +329,20 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
 }
 
 
-def get_generation_wrapper(model_name: str) -> GenerationWrapper:
+def get_generation_wrapper(
+    model_name: str, args_override: GenWrapperArgs | None = None
+) -> GenerationWrapper:
     model_name_enum = RemoteModel(model_name)
     current_dir = Path(__file__).resolve().parent.parent
     dotenv: Dict[str, str] = dotenv_values(os.path.join(current_dir, ".env"))  # type: ignore
-    hf_token = dotenv["HF_TOKEN"]
-    logger.info(f"Logging in with token: {hf_token}")
-    login(token=hf_token, add_to_git_credential=True)
+    if "HF_TOKEN" not in os.environ:
+        hf_token = dotenv["HF_TOKEN"]
+        logger.info("Logging in to Hugging Face Hub")
+        login(token=hf_token, add_to_git_credential=True)
     config = MODEL_CONFIGS[model_name_enum]
-    if config.args is None:
-        config.args = GenWrapperArgs(dotenv=dotenv)
-    else:
-        config.args.dotenv = dotenv
+    if args_override:
+        config.args = args_override
+    elif config.args is None:
+        config.args = GenWrapperArgs()
+    config.args.dotenv = dotenv
     return config.model(config.args)
