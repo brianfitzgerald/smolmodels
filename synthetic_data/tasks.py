@@ -1,4 +1,3 @@
-from collections import deque
 import json
 import random
 import sys
@@ -6,7 +5,7 @@ import traceback
 from abc import ABC
 from enum import Enum
 from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from datasets import Dataset
 from loguru import logger
@@ -42,7 +41,7 @@ from synthetic_data.prompts import (
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
 )
-from synthetic_data.screenplay_parser import Scene, ScreenplayParser
+from synthetic_data.screenplay_parser import ScreenplayParser
 from concurrent.futures import ThreadPoolExecutor
 from synthetic_data.tools import (
     DROPOUT_TYPES_JSON,
@@ -65,7 +64,6 @@ from synthetic_data.utils import (
     flatten_list,
     get_matches,
     is_valid_python,
-    ldictl,
 )
 
 
