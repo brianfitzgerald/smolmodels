@@ -71,6 +71,10 @@ training = [
     "flash-attn; sys_platform == 'linux'",
 ]
 
+[tool.uv]
+default-groups = ["torch"]
+
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
 torchvision = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
