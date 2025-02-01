@@ -26,7 +26,7 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "screenplay_summarize"
+                "gutenberg_summarize"
             ],
         },
         {

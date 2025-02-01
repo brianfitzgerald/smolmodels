@@ -12,19 +12,20 @@ from rich.console import Console
 from tqdm import tqdm
 
 from synthetic_data.generation import (
+    GenWrapperArgs,
     get_generation_wrapper,
     MockGenerator,
     RemoteModel,
     save_output_dataset,
 )
-from synthetic_data.tasks import ALL_TASKS
+from synthetic_data.tasks import ALL_TASKS, Output
 from synthetic_data.utils import DatasetFormat
 
 
 def main(
     task_name: str,
     upload_every_n_batches: int = 10,
-    batch_size: int = 16,
+    batch_size: int = 8,
     restart: bool = False,
     resume_input_position: bool = True,
     model: str = RemoteModel.GPT_4O_MINI.value,
@@ -43,7 +44,13 @@ def main(
     task = ALL_TASKS[task_name](console)
     split = task.seed_data_split
 
-    generation_wrapper = get_generation_wrapper(model)
+    generation_wrapper = get_generation_wrapper(
+        # HACK
+        model,
+        GenWrapperArgs(
+            model_id="gpt-4o-mini", response_format=Output, max_concurrent=16
+        ),
+    )
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
 
     logger.info("Loading output dataset...")

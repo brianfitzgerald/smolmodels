@@ -6,10 +6,14 @@ from abc import ABC
 from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+import re
+from typing import Sequence
+from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+
 
 from datasets import Dataset
 from loguru import logger
-from pydantic import ValidationError
+from pydantic import ValidationError, BaseModel
 from rich.console import Console
 from rich.markdown import Markdown
 import kagglehub
@@ -817,6 +821,87 @@ class ScreenplaySummarize(BaseTask):
         return out_rows
 
 
+PROMPT_PREFIX_PATTERN = re.compile(r"^(?:Compose|Write) a chapter$")
+TITLE_PATTERN = re.compile(r"\[([^]]+)\]\s+(.+?)\s+--\s+(\S+)")
+
+
+def _process_gutenberg_row(row: dict):
+    prompt = row["prompt"]
+    prompt = PROMPT_PREFIX_PATTERN.sub("", prompt).strip()
+    match = TITLE_PATTERN.match(row["source"])
+    category, author, title = "", "", ""
+    if match is None:
+        raise ValueError(f"Could not parse title from prompt: {prompt}")
+    category, author, title = match.groups()
+    return {
+        "prompt": prompt,
+        "text": row["chosen"][-1]["content"],
+        "category": category,
+        "author": author,
+        "title": title,
+    }
+
+
+def _format_gutenberg_conv(sample: dict) -> Sequence[ChatCompletionMessageParam]:
+    return [
+        {
+            "role": "system",
+            "content": "Extract the dialogue, actions, and descriptions from the conversation given by the user.",
+        },
+        {"role": "user", "content": sample["text"]},
+    ]
+
+
+class GutenbergSummarize(BaseTask):
+    output_dataset_name = "screenplay_scenes_summarized_full"
+    dataset_columns = ["completions", "test_results", "name"]
+    seed_data_format = DatasetFormat.HF_DATASET
+    output_dataset_format = DatasetFormat.PARQUET
+    seed_data_location = (
+        "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
+    )
+
+    def __init__(self, console: Console) -> None:
+        super().__init__(console)
+        self.in_rows_batch = []
+
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        dataset = dataset.map(
+            lambda x: _process_gutenberg_row(x),
+        )
+        return dataset
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        samples_in = dictl(batch)
+        self.in_rows_batch = samples_in
+        return [_format_gutenberg_conv(sample) for sample in samples_in]
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        out_rows = []
+        for completion, row in zip(completions, self.in_rows_batch):
+            json_str = Output.model_validate(json.loads(completion)).model_dump_json()
+            out_rows.append({**row, "output": json_str})
+        self.in_rows_batch = []
+        return out_rows
+
+
+class SceneElementType(Enum):
+    SCENE_HEADING = "scene_heading"
+    ACTION = "action"
+    DIALOGUE = "dialogue"
+    TRANSITION = "transition"
+
+
+class SceneElement(BaseModel):
+    type: SceneElementType
+    content: str
+    character: str | None = None
+
+
+class Output(BaseModel):
+    items: List[SceneElement]
+
+
 ALL_TASKS: Dict[str, type[BaseTask]] = {
     "toolformer": Toolformer,
     "prompt_upsample": PromptUpsample,
@@ -828,4 +913,5 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "codecontests": CodeContests,
     "codecontests_cot_sft": CodeContestsCoTSFT,
     "screenplay_summarize": ScreenplaySummarize,
+    "gutenberg_summarize": GutenbergSummarize,
 }
