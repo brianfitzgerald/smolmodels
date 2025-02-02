@@ -1,3 +1,4 @@
+import functools
 import json
 import random
 import sys
@@ -10,6 +11,7 @@ import re
 from typing import Sequence
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
+import tiktoken
 
 from datasets import Dataset
 from loguru import logger
@@ -825,7 +827,7 @@ PROMPT_PREFIX_PATTERN = re.compile(r"^(?:Compose|Write) a chapter$")
 TITLE_PATTERN = re.compile(r"\[([^]]+)\]\s+(.+?)\s+--\s+(\S+)")
 
 
-def _process_gutenberg_row(row: dict):
+def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding):
     prompt = row["prompt"]
     prompt = PROMPT_PREFIX_PATTERN.sub("", prompt).strip()
     match = TITLE_PATTERN.match(row["source"])
@@ -833,9 +835,18 @@ def _process_gutenberg_row(row: dict):
     if match is None:
         raise ValueError(f"Could not parse title from prompt: {prompt}")
     category, author, title = match.groups()
+    text = row["chosen"][-1]["content"]
+    if len(text) > 16_000:
+        text_encoded = encoder.encode(text)
+        if len(text_encoded) > 32_000:
+            logger.warning(
+                f"Text is too long for prompt: {len(text_encoded)} characters, truncating."
+            )
+            text_encoded = text_encoded[:32_000]
+            text = encoder.decode(text_encoded)
     return {
         "prompt": prompt,
-        "text": row["chosen"][-1]["content"],
+        "text": text,
         "category": category,
         "author": author,
         "title": title,
@@ -864,16 +875,19 @@ class GutenbergSummarize(BaseTask):
     def __init__(self, console: Console) -> None:
         super().__init__(console)
         self.in_rows_batch = []
+        self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.map(
-            lambda x: _process_gutenberg_row(x),
+        map_fn = functools.partial(
+            _process_gutenberg_row, encoder=self.tiktoken_encoder
         )
+        dataset = dataset.map(map_fn)
         return dataset
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
         self.in_rows_batch = samples_in
+        # TODO length splitting
         return [_format_gutenberg_conv(sample) for sample in samples_in]
 
     def format_output_rows(self, completions: List[str]) -> List:

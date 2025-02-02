@@ -50,6 +50,7 @@ dependencies = [
     "pandas>=2.2.3",
     "modal>=0.72.50",
     "pydantic>=2.10.6",
+    "tiktoken>=0.8.0",
 ]
 
 [dependency-groups]
