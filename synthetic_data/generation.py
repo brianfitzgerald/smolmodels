@@ -1,6 +1,6 @@
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, cast
@@ -14,7 +14,7 @@ from datasets import Dataset, concatenate_datasets
 from dotenv import dotenv_values
 from huggingface_hub import login
 from loguru import logger
-from openai import NOT_GIVEN, NotGiven, AsyncOpenAI, OpenAI
+from openai import NOT_GIVEN, LengthFinishReasonError, NotGiven, AsyncOpenAI, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from pydantic import BaseModel
 from wrapt_timeout_decorator import timeout
@@ -64,7 +64,7 @@ class GenWrapperArgs:
     max_concurrent: int = 8
     max_tokens: int = 4096
     temperature: float = 0.4
-    response_format: BaseModel | NotGiven = NOT_GIVEN
+    response_format: type[BaseModel] | NotGiven = NOT_GIVEN
     n_retries: int = MAX_RETRIES
 
 
@@ -159,6 +159,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     if result.choices[0].message.content is not None
                 ]
                 return completions
+            except LengthFinishReasonError as e:
+                logger.error(f"Max length error: {e}")
+                return []
             except Exception as e:
                 logger.error(
                     f"Error while generating: {e}, retries left: {self.n_retries}"
@@ -341,8 +344,14 @@ def get_generation_wrapper(
         login(token=hf_token, add_to_git_credential=True)
     config = MODEL_CONFIGS[model_name_enum]
     if args_override:
-        config.args = args_override
+        for field in fields(args_override):
+            if field.default != getattr(args_override, field.name):
+                setattr(config.args, field.name, getattr(args_override, field.name))
+                logger.info(
+                    f"Overriding {field.name} in gen wrapper args with {getattr(args_override, field.name)}"
+                )
     elif config.args is None:
         config.args = GenWrapperArgs()
+    assert config.args is not None
     config.args.dotenv = dotenv
     return config.model(config.args)

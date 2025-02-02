@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import re
-from typing import Sequence
+from typing import Sequence, TypedDict
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 
 import tiktoken
@@ -36,7 +36,7 @@ from evaluation.code_execution import (
     print_code_snippet,
 )
 from synthetic_data.conversion import chatml_to_conversation
-from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
+from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE, GenWrapperArgs
 from synthetic_data.prompts import (
     format_codecontests_cot_generation_prompt,
     format_codecontests_generation_prompt,
@@ -85,6 +85,8 @@ class BaseTask(ABC):
     dataset_columns: List[str] = []
 
     eval_tasks: List[EvalTask] = []
+
+    gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
     def __init__(self, console: Console) -> None:
         super().__init__()
@@ -826,8 +828,25 @@ class ScreenplaySummarize(BaseTask):
 PROMPT_PREFIX_PATTERN = re.compile(r"^(?:Compose|Write) a chapter$")
 TITLE_PATTERN = re.compile(r"\[([^]]+)\]\s+(.+?)\s+--\s+(\S+)")
 
+MAX_LEN_TOKENS = 1536
 
-def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding):
+
+class ProcessedRow(TypedDict):
+    prompt: str
+    text: str
+    category: str
+    author: str
+    title: str
+    encoded_length: int
+
+
+def remove_last_paragraph(text: str):
+    paragraphs = text.split("\n\n")
+    paragraphs = paragraphs[:-1]
+    return "\n\n".join(paragraphs)
+
+
+def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding) -> ProcessedRow:
     prompt = row["prompt"]
     prompt = PROMPT_PREFIX_PATTERN.sub("", prompt).strip()
     match = TITLE_PATTERN.match(row["source"])
@@ -836,20 +855,19 @@ def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding):
         raise ValueError(f"Could not parse title from prompt: {prompt}")
     category, author, title = match.groups()
     text = row["chosen"][-1]["content"]
-    if len(text) > 16_000:
-        text_encoded = encoder.encode(text)
-        if len(text_encoded) > 32_000:
-            logger.warning(
-                f"Text is too long for prompt: {len(text_encoded)} characters, truncating."
-            )
-            text_encoded = text_encoded[:32_000]
-            text = encoder.decode(text_encoded)
+    text_encoded = encoder.encode(text)
+    encoded_len = len(text_encoded)
+    if len(text_encoded) > MAX_LEN_TOKENS:
+        text_encoded = text_encoded[:MAX_LEN_TOKENS]
+        text = encoder.decode(text_encoded)
+        text = remove_last_paragraph(text)
     return {
         "prompt": prompt,
         "text": text,
         "category": category,
         "author": author,
         "title": title,
+        "encoded_length": encoded_len,
     }
 
 
@@ -863,6 +881,23 @@ def _format_gutenberg_conv(sample: dict) -> Sequence[ChatCompletionMessageParam]
     ]
 
 
+class SceneElementType(Enum):
+    SCENE_HEADING = "scene_heading"
+    ACTION = "action"
+    DIALOGUE = "dialogue"
+    TRANSITION = "transition"
+
+
+class SceneElement(BaseModel):
+    type: SceneElementType
+    content: str
+    character: str | None = None
+
+
+class Output(BaseModel):
+    items: List[SceneElement]
+
+
 class GutenbergSummarize(BaseTask):
     output_dataset_name = "screenplay_scenes_summarized_full"
     dataset_columns = ["completions", "test_results", "name"]
@@ -871,6 +906,8 @@ class GutenbergSummarize(BaseTask):
     seed_data_location = (
         "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
     )
+
+    gen_wrapper_args_override = GenWrapperArgs(response_format=Output)
 
     def __init__(self, console: Console) -> None:
         super().__init__(console)
@@ -897,23 +934,6 @@ class GutenbergSummarize(BaseTask):
             out_rows.append({**row, "output": json_str})
         self.in_rows_batch = []
         return out_rows
-
-
-class SceneElementType(Enum):
-    SCENE_HEADING = "scene_heading"
-    ACTION = "action"
-    DIALOGUE = "dialogue"
-    TRANSITION = "transition"
-
-
-class SceneElement(BaseModel):
-    type: SceneElementType
-    content: str
-    character: str | None = None
-
-
-class Output(BaseModel):
-    items: List[SceneElement]
 
 
 ALL_TASKS: Dict[str, type[BaseTask]] = {

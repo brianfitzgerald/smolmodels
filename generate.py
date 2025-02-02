@@ -44,13 +44,7 @@ def main(
     task = ALL_TASKS[task_name](console)
     split = task.seed_data_split
 
-    generation_wrapper = get_generation_wrapper(
-        # HACK
-        model,
-        GenWrapperArgs(
-            model_id="gpt-4o-mini", response_format=Output, max_concurrent=16
-        ),
-    )
+    generation_wrapper = get_generation_wrapper(model, task.gen_wrapper_args_override)
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
 
     logger.info("Loading output dataset...")
