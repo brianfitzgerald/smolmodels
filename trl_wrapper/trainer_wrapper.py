@@ -139,7 +139,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     # input_dataset_path="screenplay_scenes_chat_format.parquet",
     input_dataset_path="/dataset_files/gutenberg_conversations.parquet",
     n_epochs=1,
-    run_suffix="pippa-conv",
+    run_suffix="gutenberg-conv",
 )
 
 # llama 3 hparams
