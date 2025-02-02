@@ -129,7 +129,7 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
 
 PLAYWRIGHT_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
-    wandb_project_name="playwright",
+    wandb_project_name="gutenberg",
     train_batch_size=8,
     data_module_choice="conversation",
     tuning_mode="sft",
@@ -137,7 +137,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     # special_tokens=["<summary>", "<scene>"],
     custom_chat_template="llama3",
     # input_dataset_path="screenplay_scenes_chat_format.parquet",
-    input_dataset_path="/pippa_conversations.parquet",
+    input_dataset_path="/dataset_files/gutenberg_conversations.parquet",
     n_epochs=1,
     run_suffix="pippa-conv",
 )

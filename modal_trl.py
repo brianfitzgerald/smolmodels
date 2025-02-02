@@ -36,9 +36,7 @@ MODAL_IMAGE = (
         ]
     )
     .run_commands("pip install huggingface_hub[hf_transfer] hf_transfer")
-    .add_local_file(
-        "pippa_conversations.parquet", "/pippa_conversations.parquet", copy=True
-    )
+    .add_local_dir("dataset_files", "/dataset_files", copy=True)
     .add_local_dir("chat_templates", "/chat_templates", copy=True)
 )
 
