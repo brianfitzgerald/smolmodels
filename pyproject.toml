@@ -51,6 +51,8 @@ dependencies = [
     "modal>=0.72.50",
     "pydantic>=2.10.6",
     "tiktoken>=0.8.0",
+    "llama-cpp-python[server]>=0.3.7",
+    "gguf>=0.14.0",
 ]
 
 [dependency-groups]

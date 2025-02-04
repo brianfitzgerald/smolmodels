@@ -22,16 +22,19 @@ uv pip install vllm -vv --no-build-isolation
 ```
 
 
-llama-cpp can also be installed with `CMAKE_ARGS="-DGGML_CUDA=on" uv pip install llama-cpp-python[server]`
+llama-cpp can also be installed with:
+```bash
+uv pip install "llama-cpp-python[server]" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal
+```
 
 ### Pyright dependencies
 
-```
+```bash
 pyright --createstub transformers
 ```
 
 ### Modal
 
-```
+```bash
 modal run modal_trl.py
 ```
