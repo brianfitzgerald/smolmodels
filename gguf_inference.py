@@ -1,52 +1,75 @@
 import os
-import sys
+from pathlib import Path
 import fire
 import uvicorn
+from modal import Volume
+from modal.volume import FileEntryType
+from loguru import logger
+import subprocess
 
 from llama_cpp.server.app import create_app
 from llama_cpp.server.settings import (
     ServerSettings,
     ModelSettings,
-    ConfigFileSettings,
 )
 
 
-def main(model: str, config_file: str):
-    server_settings: ServerSettings | None = None
-    model_settings: list[ModelSettings] = []
-    try:
-        # Load server settings from config_file if provided
-        config_file = os.environ.get("CONFIG_FILE", config_file)
-        if config_file:
-            if not os.path.exists(config_file):
-                raise ValueError(f"Config file {config_file} not found!")
-            with open(config_file, "rb") as f:
-                # Check if yaml file
-                if config_file.endswith(".yaml") or config_file.endswith(".yml"):
-                    import yaml
-                    import json
+def convert_hf_to_gguf(path: str):
+    command = [
+        "python",
+        "scripts/convert_hf_to_gguf.py",
+        f"{path}/",
+        "--outfile",
+        f"{path}/model.gguf",
+    ]
 
-                    config_file_settings = ConfigFileSettings.model_validate_json(
-                        json.dumps(yaml.safe_load(f))
-                    )
-                else:
-                    config_file_settings = ConfigFileSettings.model_validate_json(
-                        f.read()
-                    )
-                server_settings = ServerSettings.model_validate(config_file_settings)
-                model_settings = config_file_settings.models
-        else:
-            server_settings = ServerSettings()
-            model_settings = [ModelSettings(model=model)]
-    except Exception as e:
-        print(e, file=sys.stderr)
-        sys.exit(1)
+    logger.info(f"Running command: {' '.join(command)}")
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    logger.info(result.stdout)
+
+    return result.returncode
+
+
+def main(
+    run: str = "02-02-20-10-185429-llama-3.2-3b-instruct-playwright-gutenberg-conv",
+    checkpoint: str = "checkpoint-1034",
+):
+    vol = Volume.from_name("model-weights")
+    local_dir = f"runs/{run}/{checkpoint}"
+
+    if not os.path.exists(local_dir):
+        os.makedirs(local_dir)
+
+    # Copy files from Modal
+    for file in vol.iterdir(f"runs/{run}/{checkpoint}"):
+        if file.type == FileEntryType.FILE:
+            rel_path = file.path
+            if os.path.exists(rel_path):
+                logger.info(f"Skipping {file.path} as it already exists locally.")
+                continue
+            logger.info(f"Downloading {file.path} to {rel_path}")
+            Path(rel_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(rel_path, "wb") as file_obj:
+                vol.read_file_into_fileobj(file.path, file_obj)
+
+    logger.info("Converting HuggingFace model to GGUF format")
+    convert_hf_to_gguf(local_dir)
+
+    server_settings = ServerSettings()
+    model_settings = [ModelSettings(model=f"{local_dir}/model.gguf")]
     assert server_settings is not None
     assert model_settings is not None
     app = create_app(
         server_settings=server_settings,
         model_settings=model_settings,
     )
+
     uvicorn.run(
         app,
         host=os.getenv("HOST", server_settings.host),

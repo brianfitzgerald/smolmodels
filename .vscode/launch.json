@@ -43,6 +43,13 @@
             ]
         },
         {
+            "name": "llama.cpp Inference",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "gguf_inference.py",
+            "justMyCode": false,
+        },
+        {
             "name": "Gradio UI",
             "type": "debugpy",
             "request": "launch",
