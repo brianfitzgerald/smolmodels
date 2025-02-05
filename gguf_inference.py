@@ -55,8 +55,12 @@ def main(
                 continue
             logger.info(f"Downloading {file.path} to {rel_path}")
             Path(rel_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(rel_path, "wb") as file_obj:
-                vol.read_file_into_fileobj(file.path, file_obj)
+            try:
+                with open(rel_path, "wb") as file_obj:
+                    vol.read_file_into_fileobj(file.path, file_obj)
+            finally:
+                logger.info(f"Removing {rel_path} as download was interrupted")
+                os.remove(rel_path)
 
     logger.info("Converting HuggingFace model to GGUF format")
     convert_hf_to_gguf(local_dir)
