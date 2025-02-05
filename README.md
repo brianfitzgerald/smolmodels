@@ -14,11 +14,17 @@ uv sync --no-build-isolation --group training
 
 ### vLLM
 
-```
+CUDA:
+```bash
 export CUDA_HOME=/usr/local/cuda
 sudo apt purge cmake
 uv pip install setuptools_scm cmake
 uv pip install vllm -vv --no-build-isolation
+```
+
+Mac:
+```bash
+pip install vllm==0.7.0 --use-deprecated=legacy-resolver
 ```
 
 
