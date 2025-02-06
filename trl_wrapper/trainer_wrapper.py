@@ -9,7 +9,6 @@ from datasets import load_dataset
 from loguru import logger
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.constants import DUMMY_TARGET_MODULES
-from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
@@ -18,6 +17,8 @@ from transformers.training_args import OptimizerNames
 from trl.trainer.dpo_config import DPOConfig
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
+from trl.trainer.grpo_config import GRPOConfig
+from trl.trainer.grpo_trainer import GRPOTrainer
 from transformers.trainer_utils import SchedulerType
 
 from dataset.code import (
@@ -26,6 +27,14 @@ from dataset.code import (
 )
 from dataset.conversation import ConversationDataModule, ConversationDPODataModule
 from dataset.playwright import PlaywrightSummaryToScript
+from dataset.reasoning import GSM8KReasoningDataModule
+from model.reasoning import (
+    xmlcount_reward_func,
+    soft_format_reward_func,
+    strict_format_reward_func,
+    int_reward_func,
+    correctness_reward_func,
+)
 from model.utils import (
     DataModuleChoice,
     DatasetConfig,
@@ -47,6 +56,8 @@ SMOL_LM_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 # NOTE that mistral doesn't allow using system prompts, so it must be set to None.
 MISTRAL_7B = "mistralai/Mistral-7B-Instruct-v0.3"
 MINISTRAL_8B = "mistralai/Ministral-8B-Instruct-2410"
+
+QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 
 
 @dataclass
@@ -92,6 +103,10 @@ class WrapperConfig:
     lr_scheduler: SchedulerType = SchedulerType.CONSTANT
     neftune_noise_alpha: Optional[float] = None
     optimizer: str = OptimizerNames.ADAFACTOR.value
+
+    # Only used for GRPO
+    max_completion_length: int = 200
+    num_generations: int = 16
 
 
 LLAMA_CONFIG = WrapperConfig(
@@ -186,6 +201,18 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     max_samples=25000,
 )
 
+QWEN_MATH_GRPO_CONFIG = WrapperConfig(
+    model_id_or_path=QWEN_0_5_B,
+    wandb_project_name="qwen-math-grpo",
+    train_batch_size=1,
+    data_module_choice="gsm8k_reasoning",
+    max_prompt_length=256,
+    max_grad_norm=0.1,
+    eval_batch_size=1,
+    gradient_accumulation_steps=4,
+    learning_rate=5e-6,
+    lr_scheduler=SchedulerType.COSINE,
+)
 
 CONFIGS = {
     "llama": LLAMA_CONFIG,
@@ -196,6 +223,7 @@ CONFIGS = {
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
     "playwright": PLAYWRIGHT_CONFIG,
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
+    "qwen-math": QWEN_MATH_GRPO_CONFIG,
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
@@ -275,6 +303,8 @@ class TrainerWrapper:
             self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "playwright_summary_to_script":
             self.data_module = PlaywrightSummaryToScript(self.tokenizer, dataset_config)
+        elif self.config.data_module_choice == "gsm8k_reasoning":
+            self.data_module = GSM8KReasoningDataModule(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
 
     def init_trainer(self, config_name: str):
@@ -369,7 +399,7 @@ class TrainerWrapper:
                     [torch.LongTensor(x) for x in ldictl(examples)["labels"]],
                     padding_value=self.tokenizer.pad_token_id,  # type: ignore
                 ).transpose(0, 1)
-                padded["input_ids"] = torch.LongTensor(padded["input_ids"])
+                padded["input_ids"] = torch.LongTensor(padded["input_ids"])  # type: ignore
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
                 return padded
 
@@ -387,6 +417,47 @@ class TrainerWrapper:
                 tokenizer=self.tokenizer,  # type: ignore
                 data_collator=collator,
             )
+        elif self.config.tuning_mode == "grpo":
+            training_args = GRPOConfig(
+                output_dir=output_dir,
+                run_name=run_name,
+                learning_rate=self.config.learning_rate,
+                adam_beta1=0.9,
+                adam_beta2=0.99,
+                weight_decay=0.1,
+                warmup_ratio=0.1,
+                lr_scheduler_type=self.config.lr_scheduler.value,
+                logging_steps=1,
+                bf16=True,
+                per_device_train_batch_size=self.config.train_batch_size,
+                gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+                num_generations=16,
+                max_prompt_length=self.config.max_prompt_length,
+                max_completion_length=self.config.max_completion_length,
+                num_train_epochs=1,
+                save_steps=self.config.save_steps,
+                max_grad_norm=self.config.max_grad_norm,
+                per_device_eval_batch_size=self.config.eval_batch_size,
+                log_on_each_node=False,
+                use_vllm=True,
+                vllm_gpu_memory_utilization=0.3,
+                vllm_device="cuda:0",
+                report_to="wandb" if self.use_wandb else "none",
+            )
+            self.trainer = GRPOTrainer(
+                model=self.model,
+                args=training_args,
+                train_dataset=self.data_module.train_dataset,
+                eval_dataset=self.data_module.val_dataset,
+                reward_funcs=[
+                    xmlcount_reward_func,
+                    soft_format_reward_func,
+                    strict_format_reward_func,
+                    int_reward_func,
+                    correctness_reward_func,
+                ],  # type: ignore
+            )
+
         else:
             args = DPOConfig(
                 num_train_epochs=self.config.n_epochs,

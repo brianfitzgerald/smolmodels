@@ -9,7 +9,7 @@
             "justMyCode": false,
             "args": [
                 "--config",
-                "playwright",
+                "qwen-math",
                 "--notebook_mode"
             ]
         },

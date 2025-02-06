@@ -32,8 +32,9 @@ DataModuleChoice = Literal[
     "conversation",
     "conversation_dpo",
     "playwright_summary_to_script",
+    "gsm8k_reasoning",
 ]
-TuningModeChoice = Literal["dpo_lora", "dpo_full", "sft_lora", "sft"]
+TuningModeChoice = Literal["dpo_lora", "dpo_full", "sft_lora", "sft", "grpo"]
 
 
 class ModelChoice(Enum):
