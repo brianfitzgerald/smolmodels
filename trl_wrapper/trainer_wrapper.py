@@ -439,10 +439,7 @@ class TrainerWrapper:
                 save_steps=self.config.save_steps,
                 max_grad_norm=self.config.max_grad_norm,
                 per_device_eval_batch_size=self.config.eval_batch_size,
-                log_on_each_node=False,
-                # use_vllm=False,
-                # vllm_gpu_memory_utilization=0.3,
-                # vllm_device="cuda:0",
+                use_vllm=False,
                 report_to="wandb" if self.use_wandb else "none",
             )
             self.trainer = GRPOTrainer(
