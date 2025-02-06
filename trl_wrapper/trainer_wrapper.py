@@ -212,6 +212,7 @@ QWEN_MATH_GRPO_CONFIG = WrapperConfig(
     gradient_accumulation_steps=4,
     learning_rate=5e-6,
     lr_scheduler=SchedulerType.COSINE,
+    tuning_mode="grpo",
 )
 
 CONFIGS = {
@@ -439,9 +440,9 @@ class TrainerWrapper:
                 max_grad_norm=self.config.max_grad_norm,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 log_on_each_node=False,
-                use_vllm=True,
-                vllm_gpu_memory_utilization=0.3,
-                vllm_device="cuda:0",
+                # use_vllm=False,
+                # vllm_gpu_memory_utilization=0.3,
+                # vllm_device="cuda:0",
                 report_to="wandb" if self.use_wandb else "none",
             )
             self.trainer = GRPOTrainer(
