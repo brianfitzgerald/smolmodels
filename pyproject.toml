@@ -51,7 +51,6 @@ dependencies = [
     "modal>=0.72.50",
     "pydantic>=2.10.6",
     "tiktoken",
-    "vllm==0.7.1",
 ]
 
 [dependency-groups]
@@ -71,10 +70,9 @@ training = [
     "bitsandbytes>=0.44.1; sys_platform == 'linux'",
     "liger-kernel>=0.5.2; sys_platform == 'linux'",
     "flash-attn; sys_platform == 'linux'",
-    "vllm",
 ]
 
-inference = ["llama-cpp-python[server]>=0.3.7", "gguf"]
+inference = ["llama-cpp-python[server]>=0.3.7", "gguf", "vllm"]
 
 [tool.uv]
 default-groups = ["torch"]
