@@ -50,12 +50,13 @@ dependencies = [
     "pandas>=2.2.3",
     "modal>=0.72.50",
     "pydantic>=2.10.6",
-    "tiktoken>=0.8.0",
+    "tiktoken",
+    "vllm==0.7.1",
 ]
 
 [dependency-groups]
 torch = [
-    "transformers==4.48.0",
+    "transformers",
     "torch==2.5.1",
     "torchaudio==2.5.1",
     "torchvision==0.20.1",
@@ -73,7 +74,7 @@ training = [
     "vllm",
 ]
 
-inference = ["llama-cpp-python[server]>=0.3.7", "gguf>=0.14.0"]
+inference = ["llama-cpp-python[server]>=0.3.7", "gguf"]
 
 [tool.uv]
 default-groups = ["torch"]
