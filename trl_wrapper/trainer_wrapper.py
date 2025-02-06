@@ -148,12 +148,10 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     train_batch_size=8,
     data_module_choice="conversation",
     tuning_mode="sft",
-    learning_rate=1e-6,
-    # special_tokens=["<summary>", "<scene>"],
+    learning_rate=5e-6,
     custom_chat_template="llama3",
-    # input_dataset_path="screenplay_scenes_chat_format.parquet",
     input_dataset_path="/dataset_files/gutenberg_conversations.parquet",
-    n_epochs=1,
+    n_epochs=5,
     run_suffix="gutenberg-conv",
 )
 
