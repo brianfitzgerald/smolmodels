@@ -90,7 +90,8 @@ class WrapperConfig:
     lora_dropout: float = 0.05
     lora_alpha: int = 128
     logprob_precompute_batch_size: int = 16
-    tuning_mode: TuningModeChoice = "dpo_full"
+    tuning_mode: TuningModeChoice = "sft"
+    use_lora: bool = False
     eval_data_mode: EvalDataModeChoice = "random"
     eval_steps: int = 500
     save_steps: int = 1000
@@ -181,7 +182,7 @@ CODECONTESTS_DPO_CONFIG = WrapperConfig(
     train_batch_size=4,
     data_module_choice="conversation_dpo",
     input_dataset_path="jondurbin/py-dpo-v0.1",
-    tuning_mode="dpo_lora",
+    tuning_mode="dpo",
     gradient_checkpointing=False,
     learning_rate=1e-5,
     n_epochs=1,
@@ -192,7 +193,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     wandb_project_name="ultrafeedback-dpo",
     train_batch_size=4,
     data_module_choice="ultra_feedback",
-    tuning_mode="dpo_lora",
+    tuning_mode="dpo",
     gradient_checkpointing=False,
     learning_rate=1e-5,
     n_epochs=1,
@@ -328,7 +329,7 @@ class TrainerWrapper:
 
         # LoRA config
         peft_config = None
-        if self.config.tuning_mode in ("dpo_lora", "sft_lora"):
+        if self.config.use_lora:
             peft_config = LoraConfig(
                 lora_alpha=self.config.lora_alpha,
                 lora_dropout=self.config.lora_dropout,
@@ -510,7 +511,10 @@ class TrainerWrapper:
                 self.config.using_mistral,
             )
 
-            if self.trainer.precompute_ref_log_probs:
+            if (
+                self.trainer.precompute_ref_log_probs
+                and self.config.tuning_mode == "dpo"
+            ):
                 eval_cache_location, train_cache_location = (
                     f"{self.ref_logpbrobs_cache_location}_eval.parquet",
                     f"{self.ref_logpbrobs_cache_location}_train.parquet",

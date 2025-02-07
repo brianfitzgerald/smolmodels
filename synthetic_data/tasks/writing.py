@@ -19,6 +19,7 @@ import os
 from tqdm import tqdm
 
 from synthetic_data.generation import GenWrapperArgs
+from synthetic_data.judgemark import TASK_PROMPT
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat, dictl
@@ -213,5 +214,45 @@ class GutenbergSummarize(BaseTask):
         for completion, row in zip(completions, self.in_rows_batch):
             json_str = Output.model_validate(json.loads(completion)).model_dump_json()
             out_rows.append({**row, "output": json_str})
+        self.in_rows_batch = []
+        return out_rows
+
+
+def _format_annotate_conv(text: str) -> Sequence[ChatCompletionMessageParam]:
+    prompt_formatted = TASK_PROMPT.replace("[TEST MODEL RESPONSE]", text).replace(
+        "[TEST MODEL RESPONSE END]", ""
+    )
+
+    return [
+        {"role": "user", "content": prompt_formatted},
+    ]
+
+
+class WritingRewardAnnotate(BaseTask):
+    output_dataset_name = "writing_reward_annotated"
+    dataset_columns = ["completions", "test_results", "name"]
+    seed_data_format = DatasetFormat.HF_DATASET
+    output_dataset_format = DatasetFormat.PARQUET
+    seed_data_location = (
+        "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
+    )
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        samples_in = dictl(batch)
+        in_batch = []
+        samples_out = []
+        for sample in samples_in:
+            chosen_text = sample["chosen"][-1]["content"]
+            rejected_text = sample["rejected"][-1]["content"]
+            samples_out.append(_format_annotate_conv(chosen_text))
+            samples_out.append(_format_annotate_conv(rejected_text))
+            in_batch.extend([sample, sample])
+        self.in_rows_batch = in_batch
+        return samples_out
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        out_rows = []
+        for completion, row in zip(completions, self.in_rows_batch):
+            out_rows.append({**row, "output": completion})
         self.in_rows_batch = []
         return out_rows

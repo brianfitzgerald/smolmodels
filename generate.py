@@ -18,13 +18,18 @@ from synthetic_data.generation import (
     save_output_dataset,
 )
 from synthetic_data.tasks import BaseTask
-from synthetic_data.tasks.writing import GutenbergSummarize, ScreenplaySummarize
+from synthetic_data.tasks.writing import (
+    GutenbergSummarize,
+    ScreenplaySummarize,
+    WritingRewardAnnotate,
+)
 from synthetic_data.utils import DatasetFormat
 
 
 ALL_TASKS: Dict[str, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
     "gutenberg_summarize": GutenbergSummarize,
+    "writing_reward": WritingRewardAnnotate,
 }
 
 

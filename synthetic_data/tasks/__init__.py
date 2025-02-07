@@ -32,9 +32,15 @@ class BaseTask(ABC):
         self.console = console
 
     def load_custom(self) -> Dataset:
+        """
+        Custom dataset loading logic. Only used if seed_data_format is DatasetFormat.CUSTOM.
+        """
         raise NotImplementedError
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        """
+        Any preprocessing that needs to be done on the dataset before it is used.
+        """
         return dataset
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
@@ -55,7 +61,4 @@ class BaseTask(ABC):
         """
         Prompt template to use for generating initial seed data.
         """
-        raise NotImplementedError
-
-    def evaluate_completion(self, prompt: List[Conversation]):
         raise NotImplementedError
