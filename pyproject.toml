@@ -23,7 +23,6 @@ dependencies = [
     "webdataset",
     "wheel",
     "pytest",
-    "kaggle",
     "datacommons",
     "datacommons-pandas>=0.0.3",
     "ipykernel>=6.29.5",
@@ -44,13 +43,14 @@ dependencies = [
     "ruff>=0.8.1",
     "chardet>=5.2.0",
     "jsonlines>=4.0.0",
-    "kagglehub>=0.3.6",
     "seaborn>=0.13.2",
     "plotting>=0.0.7",
     "pandas>=2.2.3",
     "modal>=0.72.50",
     "pydantic>=2.10.6",
     "tiktoken",
+    "sigstore>=1.0.0",
+    "kagglehub>=0.3.7",
 ]
 
 [dependency-groups]

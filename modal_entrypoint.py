@@ -5,6 +5,7 @@ from loguru import logger
 import modal
 
 from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODAL_RUNS_VOLUME
+from generate import main as generate_main
 
 cuda_version = "12.4.0"  # should be no greater than host CUDA version
 flavor = "devel"  #  includes full CUDA toolkit
@@ -38,6 +39,10 @@ MODAL_IMAGE = (
     .run_commands("pip install huggingface_hub[hf_transfer] hf_transfer")
     .add_local_dir("dataset_files", "/dataset_files", copy=True)
     .add_local_dir("chat_templates", "/chat_templates", copy=True)
+    .add_local_dir(".env", "/.env", copy=True)
+    .add_local_python_source(
+        "dataset", "evaluation", "generate", "model", "synthetic_data", "trl_wrapper"
+    )
 )
 
 APP_NAME = "smolmodels"
@@ -61,7 +66,7 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     volumes={MODEL_DIR.as_posix(): volume},
     timeout=_format_timeout(hours=5),
 )
-def main(config: str = "playwright"):
+def training(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"
 
     cfg = CONFIGS[config]
@@ -71,3 +76,13 @@ def main(config: str = "playwright"):
     wrapper.init_trainer(config)
     logger.info(f"Starting training, config: {config}")
     wrapper.train()
+
+
+@app.function(
+    image=MODAL_IMAGE,
+    secrets=[modal.Secret.from_name("smolmodels")],
+    volumes={MODEL_DIR.as_posix(): volume},
+    timeout=_format_timeout(hours=12),
+)
+def generation(task: str = "playwright"):
+    generate_main(task_name=task)

@@ -13,7 +13,8 @@ import tiktoken
 from datasets import Dataset
 from pydantic import BaseModel
 from rich.console import Console
-import kagglehub
+
+# import kagglehub
 import os
 
 from tqdm import tqdm
@@ -43,12 +44,13 @@ class ScreenplaySummarize(BaseTask):
         self.max_samples = 50000
 
     def load_custom(self):
-        scripts_corpus_path = kagglehub.dataset_download(
-            "veeralakrishna/imsdb-movie-scripts"
-        )
-        scripts_pqt_path = os.path.join(scripts_corpus_path, "movie_scripts.parquet")
-        dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
-        return dataset
+        return Dataset.from_dict({})
+        # scripts_corpus_path = kagglehub.dataset_download(
+        #     "veeralakrishna/imsdb-movie-scripts"
+        # )
+        # scripts_pqt_path = os.path.join(scripts_corpus_path, "movie_scripts.parquet")
+        # dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
+        # return dataset
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         def process_row(row):
