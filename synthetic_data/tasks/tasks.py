@@ -1,28 +1,15 @@
-import functools
 import json
 import random
 import sys
 import traceback
-from abc import ABC
 from enum import Enum
 from typing import Dict, List, Optional
-from dataclasses import dataclass
-import re
-from typing import Sequence, TypedDict
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-
-import tiktoken
-
 from datasets import Dataset
 from loguru import logger
-from pydantic import ValidationError, BaseModel
+from pydantic import ValidationError
 from rich.console import Console
 from rich.markdown import Markdown
-import kagglehub
-import os
-
-from tqdm import tqdm
-
+from synthetic_data.tasks import BaseTask
 from evaluation.code_execution import (
     CodeContestsProblem,
     CodeExecutionMode,
@@ -36,7 +23,7 @@ from evaluation.code_execution import (
     print_code_snippet,
 )
 from synthetic_data.conversion import chatml_to_conversation
-from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE, GenWrapperArgs
+from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     format_codecontests_cot_generation_prompt,
     format_codecontests_generation_prompt,
@@ -47,8 +34,6 @@ from synthetic_data.prompts import (
     get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
 )
-from synthetic_data.screenplay_parser import ScreenplayParser
-from concurrent.futures import ThreadPoolExecutor
 from synthetic_data.tools import (
     DROPOUT_TYPES_JSON,
     DROPOUT_TYPES_TOOLFORMER,
@@ -71,55 +56,6 @@ from synthetic_data.utils import (
     get_matches,
     is_valid_python,
 )
-
-
-class BaseTask(ABC):
-    seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
-    seed_data_split = "train"
-
-    seed_data_location: str
-    output_dataset_name: str
-    output_dataset_org: str = "roborovski"
-    output_dataset_format: DatasetFormat = DatasetFormat.HF_DATASET
-
-    dataset_columns: List[str] = []
-
-    eval_tasks: List[EvalTask] = []
-
-    gen_wrapper_args_override: Optional[GenWrapperArgs] = None
-
-    def __init__(self, console: Console) -> None:
-        super().__init__()
-        self.console = console
-
-    def load_custom(self) -> Dataset:
-        raise NotImplementedError
-
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        return dataset
-
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        """
-        Prompt template to use for generating initial seed data.
-        """
-        raise NotImplementedError
-
-    def format_output_rows(self, completions: List[str]) -> List:
-        """
-        Take the completed conversation and format it into the final dataset format.
-        """
-        raise NotImplementedError
-
-    def format_inference_conversation(
-        self, sample: Dict, eval_task: Optional[EvalTask] = None
-    ) -> Conversation:
-        """
-        Prompt template to use for generating initial seed data.
-        """
-        raise NotImplementedError
-
-    def evaluate_completion(self, prompt: List[Conversation]):
-        raise NotImplementedError
 
 
 class DPOTask(BaseTask):
@@ -741,211 +677,3 @@ class CodeContestsCoTSFT(CodeContests):
         self.n_completions_per_sample = 1
         self.positive_completion_mode = PositiveMode.NO_COMPARISON
         self.using_sft_cot = True
-
-
-@dataclass
-class SceneRow:
-    name: str
-    text_summary: str
-
-
-class ScreenplaySummarize(BaseTask):
-    output_dataset_name = "screenplay_scenes_summarized_full"
-    dataset_columns = ["completions", "test_results", "name"]
-    seed_data_format = DatasetFormat.CUSTOM
-    output_dataset_format = DatasetFormat.PARQUET
-
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
-        self.in_rows_batch = []
-        self.max_samples = 50000
-
-    def load_custom(self):
-        scripts_corpus_path = kagglehub.dataset_download(
-            "veeralakrishna/imsdb-movie-scripts"
-        )
-        scripts_pqt_path = os.path.join(scripts_corpus_path, "movie_scripts.parquet")
-        dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
-        return dataset
-
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        def process_row(row):
-            new_rows = []
-            movie_title = row["Movie"]  # type: ignore
-            parser = ScreenplayParser(row["Script"])  # type: ignore
-            parser.parse()
-            if len(parser.scenes) < 20 or len(parser.character_line_counts) < 20:
-                return new_rows
-            for scene in parser.scenes:
-                new_rows.append(
-                    {
-                        "name": movie_title,
-                        "scene": ScreenplayParser.format_conversation(scene),
-                    }
-                )
-            return new_rows
-
-        all_new_rows = []
-        with ThreadPoolExecutor() as executor:
-            for result in tqdm(
-                executor.map(process_row, dataset),
-                desc="Splitting scenes",
-                total=len(dataset),
-            ):
-                all_new_rows.extend(result)
-
-        dataset = Dataset.from_list(all_new_rows)
-        dataset = dataset.filter(lambda x: x["scene"] != "")
-        dataset = dataset.shuffle(seed=42)
-        # dataset = dataset.select(range(self.max_samples))
-        return dataset
-
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
-        conv_out = []
-        for sample in samples_in:
-            scene = sample["scene"]
-            conv: Conversation = [
-                {
-                    "role": "system",
-                    "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene. Start responding with the first character's actions or dialogue.",
-                },
-                {"role": "user", "content": scene},
-            ]
-            conv_out.append(conv)
-            self.in_rows_batch.append(sample)
-        return conv_out
-
-    def format_output_rows(self, completions: List[str]) -> List:
-        out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
-            row["summary"] = completion
-            out_rows.append(row)
-        self.in_rows_batch = []
-        return out_rows
-
-
-PROMPT_PREFIX_PATTERN = re.compile(r"^(?:Compose|Write) a chapter$")
-TITLE_PATTERN = re.compile(r"\[([^]]+)\]\s+(.+?)\s+--\s+(\S+)")
-
-MAX_LEN_TOKENS = 1536
-
-
-class ProcessedRow(TypedDict):
-    prompt: str
-    text: str
-    category: str
-    author: str
-    title: str
-    encoded_length: int
-
-
-def remove_last_paragraph(text: str):
-    paragraphs = text.split("\n\n")
-    paragraphs = paragraphs[:-1]
-    return "\n\n".join(paragraphs)
-
-
-def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding) -> ProcessedRow:
-    prompt = row["prompt"]
-    prompt = PROMPT_PREFIX_PATTERN.sub("", prompt).strip()
-    match = TITLE_PATTERN.match(row["source"])
-    category, author, title = "", "", ""
-    if match is None:
-        raise ValueError(f"Could not parse title from prompt: {prompt}")
-    category, author, title = match.groups()
-    text = row["chosen"][-1]["content"]
-    text_encoded = encoder.encode(text)
-    encoded_len = len(text_encoded)
-    if len(text_encoded) > MAX_LEN_TOKENS:
-        text_encoded = text_encoded[:MAX_LEN_TOKENS]
-        text = encoder.decode(text_encoded)
-        text = remove_last_paragraph(text)
-    return {
-        "prompt": prompt,
-        "text": text,
-        "category": category,
-        "author": author,
-        "title": title,
-        "encoded_length": encoded_len,
-    }
-
-
-def _format_gutenberg_conv(sample: dict) -> Sequence[ChatCompletionMessageParam]:
-    return [
-        {
-            "role": "system",
-            "content": "Extract the dialogue, actions, and descriptions from the conversation given by the user.",
-        },
-        {"role": "user", "content": sample["text"]},
-    ]
-
-
-class SceneElementType(Enum):
-    SCENE_HEADING = "scene_heading"
-    ACTION = "action"
-    DIALOGUE = "dialogue"
-    TRANSITION = "transition"
-
-
-class SceneElement(BaseModel):
-    type: SceneElementType
-    content: str
-    character: str | None = None
-
-
-class Output(BaseModel):
-    items: List[SceneElement]
-
-
-class GutenbergSummarize(BaseTask):
-    output_dataset_name = "screenplay_scenes_summarized_full"
-    dataset_columns = ["completions", "test_results", "name"]
-    seed_data_format = DatasetFormat.HF_DATASET
-    output_dataset_format = DatasetFormat.PARQUET
-    seed_data_location = (
-        "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
-    )
-
-    gen_wrapper_args_override = GenWrapperArgs(response_format=Output)
-
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
-        self.in_rows_batch = []
-        self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
-
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        map_fn = functools.partial(
-            _process_gutenberg_row, encoder=self.tiktoken_encoder
-        )
-        dataset = dataset.map(map_fn)
-        return dataset
-
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
-        self.in_rows_batch = samples_in
-        # TODO length splitting
-        return [_format_gutenberg_conv(sample) for sample in samples_in]
-
-    def format_output_rows(self, completions: List[str]) -> List:
-        out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
-            json_str = Output.model_validate(json.loads(completion)).model_dump_json()
-            out_rows.append({**row, "output": json_str})
-        self.in_rows_batch = []
-        return out_rows
-
-
-ALL_TASKS: Dict[str, type[BaseTask]] = {
-    "toolformer": Toolformer,
-    "prompt_upsample": PromptUpsample,
-    "synthetic_tool_calls": SyntheticToolCalls,
-    "squad_extractive_qa": SquadExtractiveQA,
-    "dolly_entity_extraction": DollyEntityExtraction,
-    "goody": Goody2,
-    "humaneval": HumanEval,
-    "codecontests": CodeContests,
-    "codecontests_cot_sft": CodeContestsCoTSFT,
-    "screenplay_summarize": ScreenplaySummarize,
-    "gutenberg_summarize": GutenbergSummarize,
-}

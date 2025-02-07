@@ -59,7 +59,7 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODEL_DIR.as_posix(): volume},
-    timeout=_format_timeout(hours=2, minutes=30),
+    timeout=_format_timeout(hours=5),
 )
 def main(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"

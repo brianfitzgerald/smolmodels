@@ -21,7 +21,7 @@ from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.tasks import ALL_TASKS
+from synthetic_data.tasks.tasks import ALL_TASKS
 from synthetic_data.utils import Conversation, dictl, ensure_directory
 
 
