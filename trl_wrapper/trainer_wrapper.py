@@ -227,7 +227,7 @@ CONFIGS = {
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
-MODAL_RUNS_VOLUME = "/models"
+MODELS_FOLDER = "/models"
 
 
 class TrainerWrapper:
@@ -318,9 +318,9 @@ class TrainerWrapper:
 
         runs_folder = LOCAL_RUNS_FOLDER
 
-        if os.path.exists(MODAL_RUNS_VOLUME):
-            runs_folder = os.path.join(MODAL_RUNS_VOLUME, "runs")
-            os.makedirs(MODAL_RUNS_VOLUME, exist_ok=True)
+        if os.path.exists(MODELS_FOLDER):
+            runs_folder = os.path.join(MODELS_FOLDER, "runs")
+            os.makedirs(MODELS_FOLDER, exist_ok=True)
 
         output_dir = os.path.join(runs_folder, run_name)
         logger.info(f"Saving output to: {output_dir}")

@@ -36,12 +36,13 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
 
 def main(
     task_name: str,
-    upload_every_n_batches: int = 10,
-    batch_size: int = 8,
+    save_every_n_batches: int = 20,
+    batch_size: int = 16,
     restart: bool = False,
     resume_input_position: bool = True,
     model: str = RemoteModel.GPT_4O_MINI.value,
     n_epochs: int = 5,
+    dataset_output_dir: str = "dataset_files",
     **kwargs,
 ):
     """
@@ -168,13 +169,15 @@ def main(
 
             output_rows_batch = task.format_output_rows(completions)
             new_dataset_rows.extend(output_rows_batch)
-            if batch_idx % upload_every_n_batches == 0 and batch_idx > 0:
+            if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
                 save_output_dataset(
                     output_dataset,
                     task.output_dataset_name,
                     new_dataset_rows,
                     task.output_dataset_format,
+                    dataset_output_dir,
                 )
+                new_dataset_rows = []
 
 
 if __name__ == "__main__":

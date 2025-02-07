@@ -4,7 +4,7 @@ import os
 from loguru import logger
 import modal
 
-from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODAL_RUNS_VOLUME
+from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODELS_FOLDER
 from generate import main as generate_main
 
 cuda_version = "12.4.0"  # should be no greater than host CUDA version
@@ -12,9 +12,9 @@ flavor = "devel"  #  includes full CUDA toolkit
 operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
 
-volume = modal.Volume.from_name("model-weights", create_if_missing=True)
+weights_volume = modal.Volume.from_name("model-weights", create_if_missing=True)
 
-MODEL_DIR = Path(MODAL_RUNS_VOLUME)
+model_path = Path(MODELS_FOLDER)
 
 MODAL_IMAGE = (
     Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
@@ -26,7 +26,7 @@ MODAL_IMAGE = (
     .env(
         {
             "CUDA_HOME": "/usr/local/cuda",
-            "HF_HOME": MODEL_DIR.as_posix(),
+            "HF_HOME": model_path.as_posix(),
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
@@ -63,7 +63,7 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     image=MODAL_IMAGE,
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={MODEL_DIR.as_posix(): volume},
+    volumes={model_path.as_posix(): weights_volume},
     timeout=_format_timeout(hours=5),
 )
 def training(config: str = "playwright"):
@@ -81,8 +81,11 @@ def training(config: str = "playwright"):
 @app.function(
     image=MODAL_IMAGE,
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={MODEL_DIR.as_posix(): volume},
+    volumes={model_path.as_posix(): weights_volume},
     timeout=_format_timeout(hours=12),
 )
 def generation(task: str = "gutenberg_summarize"):
-    generate_main(task_name=task)
+    generate_main(
+        task_name=task,
+        dataset_output_dir=os.path.join(model_path.as_posix(), "dataset_files"),
+    )

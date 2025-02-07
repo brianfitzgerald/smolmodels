@@ -38,17 +38,18 @@ def save_output_dataset(
     dataset_name: str,
     new_dataset_rows: List[Dict],
     format: DatasetFormat,
+    dataset_output_dir: str,
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
     concatted_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
 
     if format == DatasetFormat.HF_DATASET:
-        logger.info(f"Uploading {len(new_dataset_rows)} new rows to the Hub...")
+        logger.info(f"Uploading {len(new_dataset_rows)} rows to the Hub...")
         concatted_dataset.push_to_hub(dataset_name)
     elif format == DatasetFormat.PARQUET:
         filename = f"{dataset_name}.parquet"
-        logger.info(f"Saving {len(new_dataset_rows)} new rows to {filename}...")
-        concatted_dataset.to_parquet(filename)
+        logger.info(f"Saving {len(new_dataset_rows)} rows to {filename}...")
+        concatted_dataset.to_parquet(os.path.join(dataset_output_dir, filename))
     else:
         raise ValueError(f"Unsupported output format: {format}")
 
