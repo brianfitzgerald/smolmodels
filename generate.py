@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict, List, Optional, cast
 
+from dotenv import dotenv_values, load_dotenv
 import fire
 import pandas as pd
 from datasets import Dataset, load_dataset
@@ -55,6 +56,7 @@ def main(
     task = ALL_TASKS[task_name](console)
     split = task.seed_data_split
 
+    load_dotenv(".env")
     generation_wrapper = get_generation_wrapper(model, task.gen_wrapper_args_override)
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
 

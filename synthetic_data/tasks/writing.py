@@ -234,7 +234,7 @@ class WritingRewardAnnotate(BaseTask):
     output_dataset_name = "writing_reward_annotated"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.HF_DATASET
-    output_dataset_format = DatasetFormat.PARQUET
+    output_dataset_format = DatasetFormat.HF_DATASET
     seed_data_location = (
         "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
     )

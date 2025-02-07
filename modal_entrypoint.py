@@ -39,7 +39,7 @@ MODAL_IMAGE = (
     .run_commands("pip install huggingface_hub[hf_transfer] hf_transfer")
     .add_local_dir("dataset_files", "/dataset_files", copy=True)
     .add_local_dir("chat_templates", "/chat_templates", copy=True)
-    .add_local_dir(".env", "/.env", copy=True)
+    .add_local_file(".env", "/.env", copy=True)
     .add_local_python_source(
         "dataset", "evaluation", "generate", "model", "synthetic_data", "trl_wrapper"
     )
@@ -84,5 +84,5 @@ def training(config: str = "playwright"):
     volumes={MODEL_DIR.as_posix(): volume},
     timeout=_format_timeout(hours=12),
 )
-def generation(task: str = "playwright"):
+def generation(task: str = "gutenberg_summarize"):
     generate_main(task_name=task)

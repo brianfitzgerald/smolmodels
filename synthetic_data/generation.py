@@ -60,7 +60,6 @@ MAX_RETRIES = 3
 class GenWrapperArgs:
     model_id: Optional[str] = None
     lora_name: Optional[str] = None
-    dotenv: dict[str, str] = field(default_factory=dict)
     max_concurrent: int = 8
     max_tokens: int = 4096
     temperature: float = 0.4
@@ -109,7 +108,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         base_url: Optional[str] = None,
     ) -> None:
         super().__init__(args)
-        api_key = args.dotenv.get(key_env_var_name)
+        api_key = os.environ.get(key_env_var_name)
         if api_key is None:
             raise ValueError(
                 f"{key_env_var_name} is required for {get_class_name(self)}"
@@ -213,7 +212,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 class AnthropicGenerationWrapper(GenerationWrapper):
     def __init__(self, args: GenWrapperArgs) -> None:
-        api_key = args.dotenv.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
         if api_key is None:
             raise ValueError(
                 "ANTHROPIC_API_KEY is required for AnthropicGenerationWrapper"
@@ -267,7 +266,7 @@ def _openai_conversation_to_gemini(conversation: Conversation):
 
 class GeminiWrapper(GenerationWrapper):
     def __init__(self, args: GenWrapperArgs) -> None:
-        api_key = args.dotenv.get("GOOGLE_API_KEY")
+        api_key = os.environ.get("GOOGLE_API_KEY")
         if api_key is None:
             raise ValueError("GOOGLE_API_KEY is required for GeminiWrapper")
         self.client = genai.Client(api_key=api_key)
@@ -336,16 +335,17 @@ def get_generation_wrapper(
     model_name: str, args_override: GenWrapperArgs | None = None
 ) -> GenerationWrapper:
     model_name_enum = RemoteModel(model_name)
-    current_dir = Path(__file__).resolve().parent.parent
-    dotenv: Dict[str, str] = dotenv_values(os.path.join(current_dir, ".env"))  # type: ignore
     if "HF_TOKEN" not in os.environ:
-        hf_token = dotenv["HF_TOKEN"]
+        hf_token = os.environ["HF_TOKEN"]
         logger.info("Logging in to Hugging Face Hub")
         login(token=hf_token, add_to_git_credential=True)
     config = MODEL_CONFIGS[model_name_enum]
     if args_override:
         for field in fields(args_override):
-            if field.default != getattr(args_override, field.name):
+            if (
+                field.default != getattr(args_override, field.name)
+                and field.name != "dotenv"
+            ):
                 setattr(config.args, field.name, getattr(args_override, field.name))
                 logger.info(
                     f"Overriding {field.name} in gen wrapper args with {getattr(args_override, field.name)}"
@@ -353,5 +353,4 @@ def get_generation_wrapper(
     elif config.args is None:
         config.args = GenWrapperArgs()
     assert config.args is not None
-    config.args.dotenv = dotenv
     return config.model(config.args)
