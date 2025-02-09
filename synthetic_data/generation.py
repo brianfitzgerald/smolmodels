@@ -34,21 +34,22 @@ SHAREGPT_TO_OPENAI_ROLE = {
 
 
 def save_output_dataset(
-    hf_dataset: Dataset,
+    output_dataset: Dataset,
     dataset_name: str,
     new_dataset_rows: List[Dict],
     format: DatasetFormat,
     dataset_output_dir: str,
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
-    concatted_dataset = concatenate_datasets([hf_dataset, dataset_new_rows])
+    concatted_dataset = concatenate_datasets([output_dataset, dataset_new_rows])
+    logger.info(
+        f"Saving {len(new_dataset_rows)} new rows to {dataset_name}, {len(concatted_dataset)} total."
+    )
 
     if format == DatasetFormat.HF_DATASET:
-        logger.info(f"Uploading {len(new_dataset_rows)} rows to the Hub...")
         concatted_dataset.push_to_hub(dataset_name)
     elif format == DatasetFormat.PARQUET:
         filename = f"{dataset_name}.parquet"
-        logger.info(f"Saving {len(new_dataset_rows)} rows to {filename}...")
         concatted_dataset.to_parquet(os.path.join(dataset_output_dir, filename))
     else:
         raise ValueError(f"Unsupported output format: {format}")
@@ -300,6 +301,7 @@ class RemoteModel(str, Enum):
     QWEN_QWQ = "qwen-qwq"
     DEEPSEEK_V3 = "deepseek-v3"
     GPT_4O_MINI = "gpt-4o-mini"
+    GPT_4O = "gpt-4o"
     MOCK = "mock"
     VLLM = "vllm"
 
@@ -321,6 +323,10 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(AnthropicGenerationWrapper),
     RemoteModel.GPT_4O_MINI: RemoteModelChoice(
+        OpenAIGenerationWrapper,
+        GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=64),
+    ),
+    RemoteModel.GPT_4O: RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=32),
     ),

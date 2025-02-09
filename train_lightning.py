@@ -1,8 +1,6 @@
 from loguru import logger
 from typing import Optional
 
-logger.level("INFO")
-logger.info("Loading dependencies - Torch...")
 import random
 import string
 from dataclasses import dataclass

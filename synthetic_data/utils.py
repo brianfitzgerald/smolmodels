@@ -7,6 +7,7 @@ from loguru import logger
 from pathlib import Path
 import shutil
 import ast
+import traceback
 
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from tabulate import tabulate
@@ -171,7 +172,8 @@ def is_valid_python(json_str: str):
     json_str = json_str.strip().replace("`", "")
     try:
         compile(json_str, "<string>", "single")
-    except SyntaxError as e:
+    except SyntaxError:
+        traceback.print_exc()
         return False
     return True
 

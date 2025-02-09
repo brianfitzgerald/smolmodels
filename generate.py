@@ -36,13 +36,13 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
 
 def main(
     task_name: str,
-    save_every_n_batches: int = 20,
-    batch_size: int = 16,
+    save_every_n_batches: int = 5,
+    batch_size: int = 32,
     restart: bool = False,
     resume_input_position: bool = True,
     model: str = RemoteModel.GPT_4O_MINI.value,
     n_epochs: int = 5,
-    dataset_output_dir: str = "dataset_files",
+    dataset_root_path: str = "dataset_files",
     **kwargs,
 ):
     """
@@ -136,7 +136,7 @@ def main(
     logger.info(
         f"Input dataset length: {len(input_dataset)} Output dataset: {len(output_dataset)}"
     )
-    new_dataset_rows: List[Dict] = []
+    all_new_dataset_rows: List[Dict] = []
     logger.info(f"Generating with model {model} for task {task_name}")
 
     n_batches = len(input_dataset) // batch_size
@@ -168,16 +168,15 @@ def main(
                 continue
 
             output_rows_batch = task.format_output_rows(completions)
-            new_dataset_rows.extend(output_rows_batch)
+            all_new_dataset_rows.extend(output_rows_batch)
             if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
                 save_output_dataset(
                     output_dataset,
                     task.output_dataset_name,
-                    new_dataset_rows,
+                    all_new_dataset_rows,
                     task.output_dataset_format,
-                    dataset_output_dir,
+                    dataset_root_path,
                 )
-                new_dataset_rows = []
 
 
 if __name__ == "__main__":

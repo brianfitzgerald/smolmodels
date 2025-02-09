@@ -14,7 +14,7 @@ tag = f"{cuda_version}-{flavor}-{operating_sys}"
 
 weights_volume = modal.Volume.from_name("model-weights", create_if_missing=True)
 
-model_path = Path(MODELS_FOLDER)
+model_volume_path = Path(MODELS_FOLDER)
 
 MODAL_IMAGE = (
     Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
@@ -26,7 +26,7 @@ MODAL_IMAGE = (
     .env(
         {
             "CUDA_HOME": "/usr/local/cuda",
-            "HF_HOME": model_path.as_posix(),
+            "HF_HOME": model_volume_path.as_posix(),
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
         }
     )
@@ -63,7 +63,7 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     image=MODAL_IMAGE,
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={model_path.as_posix(): weights_volume},
+    volumes={model_volume_path.as_posix(): weights_volume},
     timeout=_format_timeout(hours=5),
 )
 def training(config: str = "playwright"):
@@ -72,7 +72,9 @@ def training(config: str = "playwright"):
     cfg = CONFIGS[config]
     wrapper = TrainerWrapper(cfg, True)
     wrapper.init_model()
-    wrapper.init_data_module()
+    wrapper.init_data_module(
+        # dataset_root_path=model_volume_path.as_posix()
+    )
     wrapper.init_trainer(config)
     logger.info(f"Starting training, config: {config}")
     wrapper.train()
@@ -81,11 +83,11 @@ def training(config: str = "playwright"):
 @app.function(
     image=MODAL_IMAGE,
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={model_path.as_posix(): weights_volume},
+    volumes={model_volume_path.as_posix(): weights_volume},
     timeout=_format_timeout(hours=12),
 )
 def generation(task: str = "gutenberg_summarize"):
     generate_main(
         task_name=task,
-        dataset_output_dir=os.path.join(model_path.as_posix(), "dataset_files"),
+        dataset_root_path=os.path.join(model_volume_path.as_posix(), "dataset_files"),
     )

@@ -73,7 +73,6 @@ class WrapperConfig:
     eval_batch_size: int = 2
     gradient_accumulation_steps: int = 1
     gradient_checkpointing: bool = True
-    root_dir: Optional[str] = None
     data_module_choice: DataModuleChoice = "ultra_feedback"
     wandb_project_name: str = "codecontests-llama-3b"
     n_epochs: int = 1
@@ -99,7 +98,7 @@ class WrapperConfig:
     run_suffix: Optional[str] = None
     special_tokens: Optional[List[str]] = None
     # Only used for Conversation dataset format
-    input_dataset_path: Optional[str] = None
+    dataset_path: Optional[str] = None
     custom_chat_template: Optional[str] = None
     lr_scheduler: SchedulerType = SchedulerType.CONSTANT
     neftune_noise_alpha: Optional[float] = None
@@ -143,7 +142,7 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
     learning_rate=1e-5,
 )
 
-PLAYWRIGHT_CONFIG = WrapperConfig(
+GUTENBERG_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="gutenberg",
     train_batch_size=8,
@@ -151,7 +150,7 @@ PLAYWRIGHT_CONFIG = WrapperConfig(
     tuning_mode="sft",
     learning_rate=5e-6,
     custom_chat_template="llama3",
-    input_dataset_path="/dataset_files/gutenberg_conversations.parquet",
+    dataset_path="dataset_files/gutenberg_conversations.parquet",
     n_epochs=5,
     run_suffix="gutenberg-conv",
 )
@@ -171,7 +170,7 @@ CODECONTESTS_COT_CONFIG = WrapperConfig(
     train_on_inputs=False,
     special_tokens=["<thought>", "</thought>", "<solution>", "</solution>"],
     custom_chat_template="llama3",
-    input_dataset_path="openo1_sft_formatted_thoughts_conversations.parquet",
+    dataset_path="openo1_sft_formatted_thoughts_conversations.parquet",
     neftune_noise_alpha=5,
     lr_scheduler=SchedulerType.COSINE,
 )
@@ -181,7 +180,7 @@ CODECONTESTS_DPO_CONFIG = WrapperConfig(
     wandb_project_name="codecontests-dpo",
     train_batch_size=4,
     data_module_choice="conversation_dpo",
-    input_dataset_path="jondurbin/py-dpo-v0.1",
+    dataset_path="jondurbin/py-dpo-v0.1",
     tuning_mode="dpo",
     gradient_checkpointing=False,
     learning_rate=1e-5,
@@ -221,7 +220,7 @@ CONFIGS = {
     "codecontests_sft": CODECONTESTS_SFT_CONFIG,
     "codecontests_cot_sft": CODECONTESTS_COT_CONFIG,
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
-    "playwright": PLAYWRIGHT_CONFIG,
+    "playwright": GUTENBERG_CONFIG,
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
     "qwen-math": QWEN_MATH_GRPO_CONFIG,
 }
@@ -280,9 +279,13 @@ class TrainerWrapper:
             # Cannot use mean_resizing as `torch.linalg.eigvals` is not supported on CUDA 12.4
             self.model.resize_token_embeddings(len(self.tokenizer), mean_resizing=False)
 
-    def init_data_module(self):
+    def init_data_module(self, dataset_root_path: str = ""):
+        dataset_path = self.config.dataset_path
+        if dataset_path is not None and not os.path.isabs(dataset_path):
+            dataset_path = os.path.join(dataset_root_path, dataset_path)
+            logger.info(f"Using dataset path: {dataset_path}")
         dataset_config = DatasetConfig(
-            input_dataset_name=self.config.input_dataset_path,
+            input_dataset_name=dataset_path,
             batch_size=self.config.train_batch_size,
             max_sequence_length=self.config.max_sequence_length,
             using_mistral=self.config.using_mistral,
