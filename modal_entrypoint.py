@@ -3,6 +3,7 @@ from modal import Image, App, Secret
 import os
 from loguru import logger
 import modal
+from scripts.run_vllm import main as vllm_main
 
 from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODELS_FOLDER
 from generate import main as generate_main
@@ -16,7 +17,7 @@ weights_volume = modal.Volume.from_name("model-weights", create_if_missing=True)
 
 model_volume_path = Path(MODELS_FOLDER)
 
-MODAL_IMAGE = (
+SMOLMODELS_IMAGE = (
     Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
     .pip_install("uv")
     .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
@@ -59,8 +60,13 @@ def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
     return seconds + minutes * 60 + hours * 60 * 60
 
 
+VLLM_IMAGE = modal.Image.debian_slim(python_version="3.12").pip_install(
+    "vllm==0.7.1", "fastapi[standard]==0.115.8"
+)
+
+
 @app.function(
-    image=MODAL_IMAGE,
+    image=SMOLMODELS_IMAGE,
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={model_volume_path.as_posix(): weights_volume},
@@ -81,7 +87,7 @@ def training(config: str = "playwright"):
 
 
 @app.function(
-    image=MODAL_IMAGE,
+    image=SMOLMODELS_IMAGE,
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={model_volume_path.as_posix(): weights_volume},
     timeout=_format_timeout(hours=12),
@@ -91,3 +97,14 @@ def generation(task: str = "gutenberg_summarize"):
         task_name=task,
         dataset_root_path=os.path.join(model_volume_path.as_posix(), "dataset_files"),
     )
+
+
+@app.function(
+    image=VLLM_IMAGE,
+    gpu="l40s",
+    secrets=[modal.Secret.from_name("smolmodels")],
+    volumes={model_volume_path.as_posix(): weights_volume},
+    timeout=_format_timeout(hours=6),
+)
+def inference():
+    vllm_main()
