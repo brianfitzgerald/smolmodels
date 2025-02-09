@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import Optional
 import modal
+from vllm import AsyncEngineArgs, AsyncLLMEngine
 
 from scripts.modal_definitons import (
     MODEL_WEIGHTS_VOLUME,
@@ -10,6 +11,8 @@ from scripts.modal_definitons import (
     format_timeout,
     app,
 )
+from vllm.usage.usage_lib import UsageContext
+
 
 import uvloop
 from vllm.entrypoints.openai.api_server import (
@@ -86,11 +89,22 @@ TOKEN = "brianf"
 
 
 async def get_server(args, **uvicorn_kwargs):
-    async with build_async_engine_client(args) as engine_client:
-        fastapi_app = build_app(args)
+    engine_args = AsyncEngineArgs(
+        model=args.model,
+        tensor_parallel_size=1,
+        gpu_memory_utilization=0.90,
+        max_model_len=8096,
+        enforce_eager=False,  # capture the graph for faster inference, but slower cold starts (30s > 20s)
+    )
 
-        model_config = await engine_client.get_model_config()
-        await init_app_state(engine_client, model_config, fastapi_app.state, args)
+    engine = AsyncLLMEngine.from_engine_args(
+        engine_args, usage_context=UsageContext.OPENAI_API_SERVER
+    )
+
+    fastapi_app = build_app(args)
+
+    model_config = await engine.get_model_config()
+    await init_app_state(engine, model_config, fastapi_app.state, args)
 
     return fastapi_app
 
@@ -142,5 +156,7 @@ def serve():
     else:
         # When using single vLLM without engine_use_ray
         server = asyncio.run(get_server(args))
+
+    print("got server", server)
 
     return server
