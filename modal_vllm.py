@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Optional
 import modal
@@ -84,42 +85,14 @@ def get_model_config(engine):
 TOKEN = "brianf"
 
 
-async def get_server(args, **uvicorn_kwargs) -> None:
-    # workaround to make sure that we bind the port before the engine is set up.
-    # This avoids race conditions with ray.
-    # see https://github.com/vllm-project/vllm/issues/8204
-    sock_addr = (args.host or "", args.port)
-    sock = create_server_socket(sock_addr)
-
-    # workaround to avoid footguns where uvicorn drops requests with too
-    # many concurrent requests active
-    set_ulimit()
-
+async def get_server(args, **uvicorn_kwargs):
     async with build_async_engine_client(args) as engine_client:
         fastapi_app = build_app(args)
 
         model_config = await engine_client.get_model_config()
-        await init_app_state(engine_client, model_config, app.state, args)
+        await init_app_state(engine_client, model_config, fastapi_app.state, args)
 
-        shutdown_task = await serve_http(
-            fastapi_app,
-            host=args.host,
-            port=args.port,
-            log_level=args.uvicorn_log_level,
-            timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
-            ssl_keyfile=args.ssl_keyfile,
-            ssl_certfile=args.ssl_certfile,
-            ssl_ca_certs=args.ssl_ca_certs,
-            ssl_cert_reqs=args.ssl_cert_reqs,
-            # Workaround to work on macOS
-            fd=None,
-            **uvicorn_kwargs,
-        )
-
-    # NB: Await server shutdown only after the backend context is exited
-    await shutdown_task
-
-    sock.close()
+    return fastapi_app
 
 
 @app.function(
@@ -128,13 +101,11 @@ async def get_server(args, **uvicorn_kwargs) -> None:
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
+    container_idle_timeout=format_timeout(minutes=1),
+    allow_concurrent_inputs=1,
 )
-@modal.web_endpoint()
-def serve(
-    model: Optional[str] = "meta-llama/Llama-3.2-3B-Instruct",
-    run: Optional[str] = None,
-    steps: Optional[int] = None,
-):
+@modal.asgi_app()
+def serve():
     """
     base_run_dir is the directory containing the runs.
     If model is provided, use that ckpt.
@@ -149,8 +120,27 @@ def serve(
     # don't actually parse cli args, just return the object
     args = parser.parse_args([])
     args.model = get_checkpoint_dir(
-        os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"), model, run, steps
+        os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"),
+        "meta-llama/Llama-3.2-3B-Instruct",
+        None,
     )
+    # HACK
+    print(f"args.model: {args.model}")
+    args.model = "meta-llama/Llama-3.2-3B-Instruct"
+    print(f"args.model: {args.model}")
     validate_parsed_serve_args(args)
 
-    uvloop.run(run_server(args))
+    try:  # adapted from vLLM source -- https://github.com/vllm-project/vllm/blob/507ef787d85dec24490069ffceacbd6b161f4f72/vllm/entrypoints/openai/api_server.py#L235C1-L247C1
+        event_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        event_loop = None
+
+    if event_loop is not None and event_loop.is_running():
+        # If the current is instanced by Ray Serve,
+        # there is already a running event loop
+        server = event_loop.run_until_complete(get_server(args))
+    else:
+        # When using single vLLM without engine_use_ray
+        server = asyncio.run(get_server(args))
+
+    return server

@@ -53,7 +53,7 @@ SMOLMODELS_IMAGE = (
 
 
 def format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
-    return seconds + minutes * 60 + hours * 60 * 60
+    return seconds + (minutes * 60) + (hours * 60 * 60)
 
 
 VLLM_IMAGE = (
@@ -74,5 +74,6 @@ VLLM_IMAGE = (
     .run_commands(
         ["uv pip install vllm==0.7.1 fastapi[standard]==0.115.8 loguru fire --system"]
     )
+    .run_commands("uv pip install huggingface_hub[hf_transfer] hf_transfer --system")
     .add_local_python_source("scripts")
 )
