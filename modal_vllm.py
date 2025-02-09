@@ -1,5 +1,4 @@
 import os
-import fire
 from typing import Optional
 import modal
 
@@ -10,6 +9,26 @@ from scripts.modal_definitons import (
     format_timeout,
     app,
 )
+
+import uvloop
+from vllm.entrypoints.openai.api_server import (
+    run_server,
+    init_app_state,
+    create_server_socket,
+    build_async_engine_client,
+    build_app,
+)
+from vllm.utils import (
+    FlexibleArgumentParser,
+    set_ulimit,
+)
+from vllm.entrypoints.launcher import serve_http
+from vllm.entrypoints.openai.cli_args import (
+    make_arg_parser,
+    validate_parsed_serve_args,
+)
+
+from scripts.run_vllm import TIMEOUT_KEEP_ALIVE
 
 
 def get_checkpoint_dir(
@@ -65,6 +84,44 @@ def get_model_config(engine):
 TOKEN = "brianf"
 
 
+async def get_server(args, **uvicorn_kwargs) -> None:
+    # workaround to make sure that we bind the port before the engine is set up.
+    # This avoids race conditions with ray.
+    # see https://github.com/vllm-project/vllm/issues/8204
+    sock_addr = (args.host or "", args.port)
+    sock = create_server_socket(sock_addr)
+
+    # workaround to avoid footguns where uvicorn drops requests with too
+    # many concurrent requests active
+    set_ulimit()
+
+    async with build_async_engine_client(args) as engine_client:
+        fastapi_app = build_app(args)
+
+        model_config = await engine_client.get_model_config()
+        await init_app_state(engine_client, model_config, app.state, args)
+
+        shutdown_task = await serve_http(
+            fastapi_app,
+            host=args.host,
+            port=args.port,
+            log_level=args.uvicorn_log_level,
+            timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
+            ssl_keyfile=args.ssl_keyfile,
+            ssl_certfile=args.ssl_certfile,
+            ssl_ca_certs=args.ssl_ca_certs,
+            ssl_cert_reqs=args.ssl_cert_reqs,
+            # Workaround to work on macOS
+            fd=None,
+            **uvicorn_kwargs,
+        )
+
+    # NB: Await server shutdown only after the backend context is exited
+    await shutdown_task
+
+    sock.close()
+
+
 @app.function(
     image=VLLM_IMAGE,
     gpu="l40s",
@@ -72,8 +129,9 @@ TOKEN = "brianf"
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
 )
+@modal.web_endpoint()
 def serve(
-    model: Optional[str] = None,
+    model: Optional[str] = "meta-llama/Llama-3.2-3B-Instruct",
     run: Optional[str] = None,
     steps: Optional[int] = None,
 ):
@@ -83,79 +141,16 @@ def serve(
     If run is provided, use the run specified by the run_name.
     If steps is provided, use that ckpt, otherwise use latest.
     """
-    import fastapi
-    import vllm.entrypoints.openai.api_server as api_server  # type: ignore
-    from vllm.engine.arg_utils import AsyncEngineArgs  # type: ignore
-    from vllm.engine.async_llm_engine import AsyncLLMEngine  # type: ignore
-    from vllm.entrypoints.logger import RequestLogger  # type: ignore
-    from vllm.entrypoints.openai.serving_chat import OpenAIServingChat  # type: ignore
-    from vllm.entrypoints.openai.serving_completion import (  # type: ignore
-        OpenAIServingCompletion,
+
+    parser = FlexibleArgumentParser(
+        description="vLLM OpenAI-Compatible RESTful API server."
     )
-    from vllm.entrypoints.openai.serving_models import BaseModelPath  # type: ignore
-    from vllm.usage.usage_lib import UsageContext  # type: ignore
-
-    # create a fastAPI app that uses vLLM's OpenAI-compatible router
-    web_app = fastapi.FastAPI(
-        title="OpenAI-compatible vLLM server",
-        description="Run an OpenAI-compatible LLM server with vLLM on modal.com 🚀",
-        version="0.0.1",
-        docs_url="/docs",
-    )
-
-    web_app.add_middleware(
-        fastapi.middleware.cors.CORSMiddleware,  # type: ignore
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    router = fastapi.APIRouter()
-
-    # wrap vllm's router in auth router
-    router.include_router(api_server.router)
-    # add authed vllm to our fastAPI app
-    web_app.include_router(router)
-
-    checkpoint_dir = get_checkpoint_dir(
+    parser = make_arg_parser(parser)
+    # don't actually parse cli args, just return the object
+    args = parser.parse_args([])
+    args.model = get_checkpoint_dir(
         os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"), model, run, steps
     )
+    validate_parsed_serve_args(args)
 
-    engine_args = AsyncEngineArgs(
-        model=checkpoint_dir,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.90,
-        max_model_len=8096,
-        enforce_eager=False,  # capture the graph for faster inference, but slower cold starts (30s > 20s)
-    )
-
-    engine = AsyncLLMEngine.from_engine_args(
-        engine_args, usage_context=UsageContext.OPENAI_API_SERVER
-    )
-
-    model_config = get_model_config(engine)
-
-    request_logger = RequestLogger(max_log_len=2048)
-
-    base_model_paths = [BaseModelPath(name="default", model_path=checkpoint_dir)]
-
-    api_server.chat = lambda s: OpenAIServingChat(
-        engine,
-        model_config=model_config,
-        base_model_paths=base_model_paths,
-        chat_template=None,
-        response_role="assistant",
-        lora_modules=[],
-        prompt_adapters=[],
-        request_logger=request_logger,
-    )
-    api_server.completion = lambda s: OpenAIServingCompletion(
-        engine,
-        model_config=model_config,
-        base_model_paths=base_model_paths,
-        lora_modules=[],
-        prompt_adapters=[],
-        request_logger=request_logger,
-    )
-
-    return web_app
+    uvloop.run(run_server(args))

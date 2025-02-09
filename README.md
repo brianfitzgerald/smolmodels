@@ -24,6 +24,7 @@ uv pip install vllm -vv --no-build-isolation
 
 Mac:
 ```bash
+uv pip install pip
 pip install vllm==0.7.0 --use-deprecated=legacy-resolver
 ```
 
