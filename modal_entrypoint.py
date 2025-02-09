@@ -1,76 +1,24 @@
-from pathlib import Path
-from modal import Image, App, Secret
 import os
 from loguru import logger
 import modal
-from scripts.run_vllm import main as vllm_main
 
-from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper, MODELS_FOLDER
+from scripts.modal_definitons import (
+    SMOLMODELS_IMAGE,
+    format_timeout,
+    app,
+    MODELS_VOLUME_PATH,
+    MODEL_WEIGHTS_VOLUME,
+)
+from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper
 from generate import main as generate_main
-
-cuda_version = "12.4.0"  # should be no greater than host CUDA version
-flavor = "devel"  #  includes full CUDA toolkit
-operating_sys = "ubuntu22.04"
-tag = f"{cuda_version}-{flavor}-{operating_sys}"
-
-weights_volume = modal.Volume.from_name("model-weights", create_if_missing=True)
-
-model_volume_path = Path(MODELS_FOLDER)
-
-SMOLMODELS_IMAGE = (
-    Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
-    .pip_install("uv")
-    .add_local_file("pyproject.toml", "/pyproject.toml", copy=True)
-    .add_local_file("uv.lock", "/uv.lock", copy=True)
-    .env({"UV_PROJECT_ENVIRONMENT": "/usr/local"})
-    .apt_install("git")
-    .env(
-        {
-            "CUDA_HOME": "/usr/local/cuda",
-            "HF_HOME": model_volume_path.as_posix(),
-            "HF_HUB_ENABLE_HF_TRANSFER": "1",
-        }
-    )
-    .run_commands(
-        [
-            "uv sync --frozen --group torch",
-            "uv sync --group torch --group training --no-build-isolation",
-        ]
-    )
-    .run_commands("pip install huggingface_hub[hf_transfer] hf_transfer")
-    .add_local_dir("dataset_files", "/dataset_files", copy=True)
-    .add_local_dir("chat_templates", "/chat_templates", copy=True)
-    .add_local_file(".env", "/.env", copy=True)
-    .add_local_python_source(
-        "dataset", "evaluation", "generate", "model", "synthetic_data", "trl_wrapper"
-    )
-)
-
-APP_NAME = "smolmodels"
-
-app = App(
-    APP_NAME,
-    secrets=[
-        Secret.from_dict({"ALLOW_WANDB": os.environ.get("ALLOW_WANDB", "false")}),
-    ],
-)
-
-
-def _format_timeout(seconds: int = 0, minutes: int = 0, hours: int = 0):
-    return seconds + minutes * 60 + hours * 60 * 60
-
-
-VLLM_IMAGE = modal.Image.debian_slim(python_version="3.12").pip_install(
-    "vllm==0.7.1", "fastapi[standard]==0.115.8"
-)
 
 
 @app.function(
     image=SMOLMODELS_IMAGE,
     gpu="l40s",
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={model_volume_path.as_posix(): weights_volume},
-    timeout=_format_timeout(hours=5),
+    volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
+    timeout=format_timeout(hours=5),
 )
 def training(config: str = "playwright"):
     assert config in CONFIGS, f"Unknown config: {config}"
@@ -89,22 +37,11 @@ def training(config: str = "playwright"):
 @app.function(
     image=SMOLMODELS_IMAGE,
     secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={model_volume_path.as_posix(): weights_volume},
-    timeout=_format_timeout(hours=12),
+    volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
+    timeout=format_timeout(hours=12),
 )
 def generation(task: str = "gutenberg_summarize"):
     generate_main(
         task_name=task,
-        dataset_root_path=os.path.join(model_volume_path.as_posix(), "dataset_files"),
+        dataset_root_path=os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files"),
     )
-
-
-@app.function(
-    image=VLLM_IMAGE,
-    gpu="l40s",
-    secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={model_volume_path.as_posix(): weights_volume},
-    timeout=_format_timeout(hours=6),
-)
-def inference():
-    vllm_main()
