@@ -135,12 +135,13 @@ def serve():
     args = parser.parse_args([])
     args.model = get_checkpoint_dir(
         os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"),
-        "meta-llama/Llama-3.2-3B-Instruct",
         None,
+        # "meta-llama/Llama-3.2-3B-Instruct",
+        "02-09-8-49-321849-llama-3.2-3b-instruct-playwright-gutenberg-conv",
     )
     # HACK
     print(f"args.model: {args.model}")
-    args.model = "meta-llama/Llama-3.2-3B-Instruct"
+    # args.model = "meta-llama/Llama-3.2-3B-Instruct"
     print(f"args.model: {args.model}")
     validate_parsed_serve_args(args)
 
