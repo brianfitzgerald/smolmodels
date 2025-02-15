@@ -291,3 +291,13 @@ def short_hash(input_string: str, truncate_to: int = 8) -> str:
 def save_dataclass_to_json(dataclass_instance, file_path: str):
     with open(file_path, "w") as file:
         json.dump(asdict(dataclass_instance), file, indent=4)
+
+
+def get_available_device():
+    return torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.mps.is_available()
+        else "cpu"
+    )

@@ -62,51 +62,61 @@ QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 
 @dataclass
 class WrapperConfig:
+    # Model & Adapter Configuration
     model_id_or_path: str = LLAMA_3_2_1B
+    using_mistral: bool = False
+    adapter_path: Optional[str] = None
+
+    # Experiment / Environment Settings
     notebook_mode: bool = False
-    # Sequence length to trim completions to
-    max_sequence_length: int = 1512
+    wandb_project_name: str = "codecontests-llama-3b"
+    run_suffix: Optional[str] = None
+    special_tokens: Optional[List[str]] = None
+
+    # Data & Evaluation Configuration
+    data_module_choice: DataModuleChoice = "ultra_feedback"
+    dataset_path: Optional[str] = None
+    custom_chat_template: Optional[str] = None
+    eval_data_mode: EvalDataModeChoice = "random"
+    # Max samples to use for training
+    max_samples: Optional[int] = None
+    max_eval_dataset_size: Optional[int] = None
+    eval_steps: int = 500
+    save_steps: int = 1000
+
+    # Prompt & Sequence Lengths
+    max_sequence_length: int = 1512  # sequence length for trimming completions
     max_prompt_length: int = 1024
     max_eval_sample_length: int = 1024
-    max_samples: Optional[int] = None
+    max_completion_length: int = 200
+
+    # Training Parameters
     train_batch_size: int = 4
     eval_batch_size: int = 2
     gradient_accumulation_steps: int = 1
     gradient_checkpointing: bool = True
-    data_module_choice: DataModuleChoice = "ultra_feedback"
-    wandb_project_name: str = "codecontests-llama-3b"
     n_epochs: int = 1
-    max_eval_dataset_size: Optional[int] = None
-    # SFT only
     train_on_inputs: bool = True
-    # adapter to load before training
-    adapter_path: Optional[str] = None
-    dpo_beta: float = 0.1
+
+    # Optimization & Scheduling
     learning_rate: float = 5e-5
     max_grad_norm: float = 0.3
-    # lora config``
+    lr_scheduler: SchedulerType = SchedulerType.CONSTANT
+    optimizer: str = OptimizerNames.ADAFACTOR.value
+    neftune_noise_alpha: Optional[float] = None
+    dpo_beta: float = 0.1
+
+    # Tuning / LoRA Configuration
+    tuning_mode: TuningModeChoice = "sft"
+    use_lora: bool = False
     lora_rank: int = 256
     lora_dropout: float = 0.05
     lora_alpha: int = 128
     logprob_precompute_batch_size: int = 16
-    tuning_mode: TuningModeChoice = "sft"
-    use_lora: bool = False
-    eval_data_mode: EvalDataModeChoice = "random"
-    eval_steps: int = 500
-    save_steps: int = 1000
-    using_mistral: bool = False
-    run_suffix: Optional[str] = None
-    special_tokens: Optional[List[str]] = None
-    # Only used for Conversation dataset format
-    dataset_path: Optional[str] = None
-    custom_chat_template: Optional[str] = None
-    lr_scheduler: SchedulerType = SchedulerType.CONSTANT
-    neftune_noise_alpha: Optional[float] = None
-    optimizer: str = OptimizerNames.ADAFACTOR.value
 
-    # Only used for GRPO
-    max_completion_length: int = 200
-    num_generations: int = 16
+    # Generation Parameters
+    use_vllm: bool = False
+    num_generations: int = 1
 
 
 LLAMA_CONFIG = WrapperConfig(
@@ -199,10 +209,10 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     max_samples=25000,
 )
 
-QWEN_MATH_GRPO_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_0_5_B,
+GRPO_MATH_CONFIG = WrapperConfig(
+    model_id_or_path=SMOL_LM_135M,
     wandb_project_name="qwen-math-grpo",
-    train_batch_size=1,
+    train_batch_size=4,
     data_module_choice="gsm8k_reasoning",
     max_prompt_length=256,
     max_grad_norm=0.1,
@@ -211,6 +221,8 @@ QWEN_MATH_GRPO_CONFIG = WrapperConfig(
     learning_rate=5e-6,
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
+    use_vllm=False,
+    num_generations=2,
 )
 
 CONFIGS = {
@@ -222,7 +234,7 @@ CONFIGS = {
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
     "playwright": GUTENBERG_CONFIG,
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
-    "qwen-math": QWEN_MATH_GRPO_CONFIG,
+    "grpo_math": GRPO_MATH_CONFIG,
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
@@ -310,11 +322,13 @@ class TrainerWrapper:
             self.data_module = GSM8KReasoningDataModule(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
 
-    def init_trainer(self, config_name: str):
+    def init_trainer(self, config_name: str | None = None):
         # Get run name
         simple_date = datetime.now().strftime("%m-%d-%-H-%-M")
         random_id = int(torch.rand(1) * 1000000)
         model_id_without_org = self.config.model_id_or_path.split("/")[-1].lower()
+        if not config_name:
+            config_name = ""
         run_name = f"{simple_date}-{random_id}-{model_id_without_org}-{config_name}"
         if self.config.run_suffix is not None:
             run_name += f"-{self.config.run_suffix}"
@@ -348,15 +362,17 @@ class TrainerWrapper:
         ensure_directory(output_dir)
         save_dataclass_to_json(self.config, f"{output_dir}/wrapper_config.json")
         model_id_hash = short_hash(self.config.model_id_or_path)
-        self.ref_logpbrobs_cache_location = (
-            f"{self.data_module.cache_dir}/{model_id_hash}/ref_logprobs_cache"
-        )
+        assert self.data_module is not None, "Data module not initialized"
         logger.info(
             f"Initializing trainer, run_name: {run_name}, wandb project: {self.config.wandb_project_name}"
         )
-        logger.info(
-            f"logprobs cache location: {self.ref_logpbrobs_cache_location} peft config: {peft_config is not None}"
-        )
+        if self.config.tuning_mode == "dpo":
+            self.ref_logpbrobs_cache_location = (
+                f"{self.data_module.cache_dir}/{model_id_hash}/ref_logprobs_cache"
+            )
+            logger.info(
+                f"logprobs cache location: {self.ref_logpbrobs_cache_location} peft config: {peft_config is not None}"
+            )
 
         # https://github.com/huggingface/transformers/blob/main/src/transformers/training_args.py#L143
         if self.config.tuning_mode in ("sft", "sft_lora"):
@@ -434,14 +450,14 @@ class TrainerWrapper:
                 bf16=True,
                 per_device_train_batch_size=self.config.train_batch_size,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
-                num_generations=16,
+                num_generations=self.config.num_generations,
                 max_prompt_length=self.config.max_prompt_length,
                 max_completion_length=self.config.max_completion_length,
                 num_train_epochs=1,
                 save_steps=self.config.save_steps,
                 max_grad_norm=self.config.max_grad_norm,
                 per_device_eval_batch_size=self.config.eval_batch_size,
-                use_vllm=True,
+                use_vllm=self.config.use_vllm,
                 vllm_gpu_memory_utilization=0.3,
                 vllm_device="cuda:0",
                 report_to="wandb" if self.use_wandb else "none",
