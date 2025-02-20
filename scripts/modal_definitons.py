@@ -38,7 +38,7 @@ SMOLMODELS_IMAGE = (
     )
     .run_commands(
         [
-            "uv sync --frozen --group torch",
+            "uv sync --frozen",
             "uv sync --group torch --group training --no-build-isolation",
         ]
     )
