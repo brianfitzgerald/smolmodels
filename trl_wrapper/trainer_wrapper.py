@@ -158,7 +158,7 @@ GUTENBERG_CONFIG = WrapperConfig(
     train_batch_size=8,
     data_module_choice="conversation",
     tuning_mode="sft",
-    learning_rate=5e-6,
+    learning_rate=1e-6,
     custom_chat_template="llama3",
     dataset_path="dataset_files/gutenberg_conversations.parquet",
     n_epochs=5,
@@ -213,16 +213,16 @@ GRPO_MATH_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
     wandb_project_name="qwen-math-grpo",
     train_batch_size=4,
+    gradient_accumulation_steps=4,
     data_module_choice="gsm8k_reasoning",
     max_prompt_length=256,
     max_grad_norm=0.1,
     eval_batch_size=1,
-    gradient_accumulation_steps=4,
     learning_rate=5e-6,
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
     use_vllm=False,
-    num_generations=2,
+    num_generations=4,
 )
 
 CONFIGS = {
@@ -232,8 +232,8 @@ CONFIGS = {
     "codecontests_sft": CODECONTESTS_SFT_CONFIG,
     "codecontests_cot_sft": CODECONTESTS_COT_CONFIG,
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
-    "playwright": GUTENBERG_CONFIG,
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
+    "gutenberg": GUTENBERG_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
 }
 

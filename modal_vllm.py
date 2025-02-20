@@ -14,25 +14,17 @@ from scripts.modal_definitons import (
 from vllm.usage.usage_lib import UsageContext
 
 
-import uvloop
 from vllm.entrypoints.openai.api_server import (
-    run_server,
     init_app_state,
-    create_server_socket,
-    build_async_engine_client,
     build_app,
 )
 from vllm.utils import (
     FlexibleArgumentParser,
-    set_ulimit,
 )
-from vllm.entrypoints.launcher import serve_http
 from vllm.entrypoints.openai.cli_args import (
     make_arg_parser,
     validate_parsed_serve_args,
 )
-
-from scripts.run_vllm import TIMEOUT_KEEP_ALIVE
 
 
 def get_checkpoint_dir(
@@ -120,28 +112,20 @@ async def get_server(args, **uvicorn_kwargs):
 )
 @modal.asgi_app()
 def serve():
-    """
-    base_run_dir is the directory containing the runs.
-    If model is provided, use that ckpt.
-    If run is provided, use the run specified by the run_name.
-    If steps is provided, use that ckpt, otherwise use latest.
-    """
-
     parser = FlexibleArgumentParser(
         description="vLLM OpenAI-Compatible RESTful API server."
     )
     parser = make_arg_parser(parser)
+
     # don't actually parse cli args, just return the object
     args = parser.parse_args([])
+
     args.model = get_checkpoint_dir(
         os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"),
-        None,
         # "meta-llama/Llama-3.2-3B-Instruct",
+        None,
         "02-09-8-49-321849-llama-3.2-3b-instruct-playwright-gutenberg-conv",
     )
-    # HACK
-    print(f"args.model: {args.model}")
-    # args.model = "meta-llama/Llama-3.2-3B-Instruct"
     print(f"args.model: {args.model}")
     validate_parsed_serve_args(args)
 

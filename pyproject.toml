@@ -72,7 +72,7 @@ training = [
     "flash-attn; sys_platform == 'linux'",
 ]
 
-inference = ["llama-cpp-python[server]>=0.3.7", "gguf", "vllm"]
+inference = ["vllm"]
 
 [tool.uv]
 default-groups = ["torch"]
