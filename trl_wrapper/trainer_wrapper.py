@@ -103,7 +103,7 @@ class WrapperConfig:
     learning_rate: float = 5e-5
     max_grad_norm: float = 0.3
     lr_scheduler: SchedulerType = SchedulerType.CONSTANT
-    optimizer: str = OptimizerNames.ADAFACTOR.value
+    optimizer: str = OptimizerNames.ADAMW_8BIT.value
     neftune_noise_alpha: Optional[float] = None
     dpo_beta: float = 0.1
 
@@ -157,13 +157,12 @@ GUTENBERG_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="gutenberg",
     train_batch_size=8,
-    gradient_accumulation_steps=2,
+    gradient_accumulation_steps=16,
     data_module_choice="conversation",
     tuning_mode="sft",
-    learning_rate=2e-6,
-    custom_chat_template="llama3",
+    learning_rate=1e-5,
     dataset_path="dataset_files/gutenberg_conversations.parquet",
-    n_epochs=5,
+    n_epochs=1,
     run_suffix="gutenberg-conv",
 )
 
@@ -175,7 +174,6 @@ GUTENBERG_DPO_CONFIG = WrapperConfig(
     data_module_choice="conversation_dpo",
     tuning_mode="dpo",
     learning_rate=1e-6,
-    custom_chat_template="llama3",
     dataset_path="jondurbin/gutenberg-dpo-v0.1",
     n_epochs=5,
     run_suffix="gutenberg-dpo",
@@ -196,7 +194,6 @@ CODECONTESTS_COT_CONFIG = WrapperConfig(
     n_epochs=10,
     train_on_inputs=False,
     special_tokens=["<thought>", "</thought>", "<solution>", "</solution>"],
-    custom_chat_template="llama3",
     dataset_path="openo1_sft_formatted_thoughts_conversations.parquet",
     neftune_noise_alpha=5,
     lr_scheduler=SchedulerType.COSINE,
@@ -241,6 +238,13 @@ GRPO_MATH_CONFIG = WrapperConfig(
     use_vllm=False,
     num_generations=4,
 )
+
+CHAT_TEMPLATE_OVERRIDES = {
+    "llama3": {LLAMA_3_1_8B, LLAMA_3_2_3B, LLAMA_3_2_1B},
+    "smollmv2": {SMOL_LM_135M},
+    "ministral": {MINISTRAL_8B},
+}
+
 
 CONFIGS = {
     "llama": LLAMA_CONFIG,
@@ -314,6 +318,12 @@ class TrainerWrapper:
         if dataset_path is not None and not os.path.isabs(dataset_path):
             dataset_path = os.path.join(dataset_root_path, dataset_path)
             logger.info(f"Using dataset path: {dataset_path}")
+
+        for k, v in CHAT_TEMPLATE_OVERRIDES.items():
+            if self.config.model_id_or_path in v:
+                logger.info(f"Using chat template override: {k}")
+                self.config.custom_chat_template = k
+
         dataset_config = DatasetConfig(
             input_dataset_name=dataset_path,
             batch_size=self.config.train_batch_size,
