@@ -301,6 +301,7 @@ def flatten_list(lst):
 def log_to_file(
     all_eval_rows: list, new_rows_to_log: list, output_dir: str, current_step: int
 ):
+    ensure_directory(output_dir, clear=False)
     all_rows_pd = pd.DataFrame(all_eval_rows)
     all_rows_pd.to_parquet(f"{output_dir}/eval_samples.parquet")
 

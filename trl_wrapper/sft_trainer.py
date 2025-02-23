@@ -12,7 +12,7 @@ from transformers.generation.configuration_utils import GenerationConfig
 from trl.trainer.utils import pad_to_length
 from datasets import Dataset
 
-from synthetic_data.utils import EvalDataModeChoice, clean_message
+from synthetic_data.utils import EvalDataModeChoice, clean_message, log_to_file
 
 
 class CustomSFTTrainer(SFTTrainer):
@@ -95,8 +95,12 @@ class CustomSFTTrainer(SFTTrainer):
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
 
+            labels_corrected = random_batch["labels"].clone()
+            labels_corrected[labels_corrected == -100] = (
+                self.processing_class.pad_token_id
+            )
             reference_completion_decoded = self.processing_class.batch_decode(  # type: ignore
-                random_batch["labels"],
+                labels_corrected,
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
 
@@ -122,6 +126,12 @@ class CustomSFTTrainer(SFTTrainer):
                         rows=new_rows_wandb_format,
                     )  # type: ignore
                 }
+            )
+            log_to_file(
+                self.all_eval_rows,
+                new_rows_to_log,
+                self.output_dir,
+                self.state.global_step,
             )
 
             self.all_eval_rows.extend(new_rows_to_log)
