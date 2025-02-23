@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
+import traceback
 from typing import Dict, List, Optional, cast
 
 import google.genai as genai
@@ -167,6 +168,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 logger.error(
                     f"Error while generating: {e}, retries left: {self.n_retries}"
                 )
+                traceback.print_exc()
                 self.n_retries -= 1
                 if self.n_retries <= 0:
                     raise e
@@ -319,16 +321,16 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     ),
     RemoteModel.DEEPSEEK_V3: RemoteModelChoice(
         OpenRouterGenerationWrapper,
-        GenWrapperArgs(model_id="deepseek/deepseek-chat", max_concurrent=16),
+        GenWrapperArgs(model_id="deepseek/deepseek-chat", max_concurrent=4),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(AnthropicGenerationWrapper),
     RemoteModel.GPT_4O_MINI: RemoteModelChoice(
         OpenAIGenerationWrapper,
-        GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=64),
+        GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=4),
     ),
     RemoteModel.GPT_4O: RemoteModelChoice(
         OpenAIGenerationWrapper,
-        GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=32),
+        GenWrapperArgs(model_id="gpt-4o", max_concurrent=32),
     ),
     RemoteModel.MOCK: RemoteModelChoice(MockGenerator),
     RemoteModel.VLLM: RemoteModelChoice(

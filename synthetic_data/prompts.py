@@ -430,3 +430,44 @@ def format_codecontests_cot_generation_prompt(
         },
     ]
     return conv
+
+
+def format_gutenberg_backtranslation_prompt(chunk: str) -> Conversation:
+    conv: Conversation = [
+        {
+            "role": "user",
+            "content": f"""
+You are tasked with creating an instruction for a large language model to recreate a paragraph from a book through a process called "back-translation." Here is the original paragraph:
+
+<original_paragraph>
+{chunk}
+</original_paragraph>
+
+Back-translation involves taking a piece of text, conceptually translating it into another form or language, and then providing instructions to recreate the original text based on that conceptual translation. Your goal is to create an instruction that, when given to a large language model, would result in the recreation of a paragraph very similar in style, tone, and content to the original, without directly copying the exact wording.
+
+Follow these steps:
+
+1. Carefully analyze the original paragraph, paying attention to:
+   - Writing style (e.g., formal, casual, literary)
+   - Tone (e.g., serious, humorous, melancholic)
+   - Content and themes
+   - Sentence structure and complexity
+   - Vocabulary level and any unique word choices
+   - Literary devices or techniques used (if any)
+
+2. Based on your analysis, create a detailed instruction for a large language model to write a paragraph that captures the essence of the original. Your instruction should:
+   - Describe the overall style and tone to aim for
+   - Outline the main ideas or plot points to include
+   - Suggest the type of vocabulary or literary devices to use
+   - Indicate the desired length and complexity of sentences
+   - Provide any other relevant details that would help recreate the paragraph's feel
+
+3. Ensure your instruction does not include any direct quotes or specific unique phrases from the original paragraph. The goal is to guide the creation of a similar paragraph, not an exact replica.
+
+4. Your instruction should be detailed enough to capture the essence of the original paragraph but general enough to allow for creativity in the recreation process.
+
+Present your final instruction without any other formatting. Aim for an instruction between 100-200 words.
+""",
+        },
+    ]
+    return conv

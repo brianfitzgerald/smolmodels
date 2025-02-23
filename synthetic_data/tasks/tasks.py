@@ -419,16 +419,16 @@ class Goody2(BaseTask):
 
 
 class HumanEval(DPOTask):
-    def __init__(self, console) -> None:
-        super().__init__(console)
-        self.n_completions_per_sample = 4
-
     seed_data_format = DatasetFormat.HF_DATASET
     seed_data_location = "openai/openai_humaneval"
     seed_data_split = "test"
     output_dataset_name = "humaneval-dpo"
 
     dataset_columns = ["chosen", "rejected", "id", "prompt"]
+
+    def __init__(self) -> None:
+        self.console = Console()
+        self.n_completions_per_sample = 4
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         fn_name, tests = batch["entry_point"], batch["test"]
@@ -514,13 +514,13 @@ class CodeContests(HumanEval):
         # ),
     ]
 
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
+    def __init__(self) -> None:
         self.n_completions_per_sample = 1
         self.print_definitions = False
         self.positive_completion_mode = PositiveMode.REFERENCE_COMPLETION
         self.execution_mode: CodeExecutionMode = "exec"
         self.using_sft_cot = False
+        self.console = Console()
 
     def format_inference_conversation(
         self, sample: Dict, eval_task: Optional[EvalTask] = None
@@ -672,8 +672,7 @@ class CodeContestsCoTSFT(CodeContests):
     output_dataset_name = "codecontests_cot_sft_v2"
     dataset_columns = ["completions", "test_results", "name"]
 
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
+    def __init__(self) -> None:
         self.n_completions_per_sample = 1
         self.positive_completion_mode = PositiveMode.NO_COMPARISON
         self.using_sft_cot = True

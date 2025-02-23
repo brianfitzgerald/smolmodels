@@ -40,7 +40,7 @@ def training(config: str = "playwright"):
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=12),
 )
-def generation(task: str = "gutenberg_summarize"):
+def generation(task: str = "gutenberg_extraction"):
     generate_main(
         task_name=task,
         dataset_root_path=os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files"),

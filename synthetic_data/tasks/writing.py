@@ -6,13 +6,16 @@ from typing import Dict, List
 from dataclasses import dataclass
 import re
 from typing import Sequence, TypedDict
+from loguru import logger
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+from huggingface_hub import snapshot_download
+from datasets import load_dataset
+import polars as pl
 
 import tiktoken
 
 from datasets import Dataset
 from pydantic import BaseModel
-from rich.console import Console
 
 # import kagglehub
 import os
@@ -20,10 +23,12 @@ import os
 from tqdm import tqdm
 
 from synthetic_data.generation import GenWrapperArgs
+from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
 from synthetic_data.judgemark import TASK_PROMPT
+from synthetic_data.prompts import format_gutenberg_backtranslation_prompt
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
-from synthetic_data.utils import Conversation, DatasetFormat, dictl
+from synthetic_data.utils import Conversation, DatasetFormat, dictl, flatten_list
 
 
 @dataclass
@@ -38,8 +43,7 @@ class ScreenplaySummarize(BaseTask):
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
+    def __init__(self) -> None:
         self.in_rows_batch = []
         self.max_samples = 50000
 
@@ -130,7 +134,9 @@ def remove_last_paragraph(text: str):
     return "\n\n".join(paragraphs)
 
 
-def _process_gutenberg_row(row: dict, encoder: tiktoken.Encoding) -> ProcessedRow:
+def _process_gutenberg_extraction_row(
+    row: dict, encoder: tiktoken.Encoding
+) -> ProcessedRow:
     prompt = row["prompt"]
     prompt = PROMPT_PREFIX_PATTERN.sub("", prompt).strip()
     match = TITLE_PATTERN.match(row["source"])
@@ -182,7 +188,11 @@ class Output(BaseModel):
     items: List[SceneElement]
 
 
-class GutenbergSummarize(BaseTask):
+class GutenbergExtraction(BaseTask):
+    """
+    Extract dialogue and actions from Gutenberg snippets.
+    """
+
     output_dataset_name = "screenplay_scenes_summarized_full"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.HF_DATASET
@@ -193,14 +203,13 @@ class GutenbergSummarize(BaseTask):
 
     gen_wrapper_args_override = GenWrapperArgs(response_format=Output)
 
-    def __init__(self, console: Console) -> None:
-        super().__init__(console)
+    def __init__(self) -> None:
         self.in_rows_batch = []
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         map_fn = functools.partial(
-            _process_gutenberg_row, encoder=self.tiktoken_encoder
+            _process_gutenberg_extraction_row, encoder=self.tiktoken_encoder
         )
         dataset = dataset.map(map_fn)
         return dataset
@@ -256,5 +265,94 @@ class WritingRewardAnnotate(BaseTask):
         out_rows = []
         for completion, row in zip(completions, self.in_rows_batch):
             out_rows.append({**row, "output": completion})
+        self.in_rows_batch = []
+        return out_rows
+
+
+def _contains_dialogue(text):
+    return bool(DIALOGUE_REGEX.search(text))
+
+
+def _count_sentences(text):
+    return len(re.findall(r"[.!?]", text))
+
+
+def _get_chunks_gutenberg(row: dict):
+    text = row["text"]
+
+    def find_valid_chunks(lst: list[str]):
+        chunks, current_chunk = [], []
+
+        for item in lst:
+            if (
+                item != "[deleted]"
+                and _contains_dialogue(item)
+                and _count_sentences(item) >= 3
+            ):
+                current_chunk.append(item)
+            else:
+                if len(current_chunk) >= 2:
+                    chunks.append(current_chunk)
+                current_chunk = []
+
+        if len(current_chunk) >= 3:
+            chunks.append(current_chunk)
+
+        return chunks
+
+    paragraphs = super_cleaner(text)
+    return find_valid_chunks(paragraphs)
+
+
+def _get_gutenberg_subset(n_shards: int = 1) -> pl.DataFrame:
+    gutenberg_location = snapshot_download("SaylorTwift/Gutenberg", repo_type="dataset")
+    files = os.listdir(os.path.join(gutenberg_location, "data"))
+    files.sort()
+    out_pl = None
+    for shard_idx in range(n_shards):
+        file = files[shard_idx]
+        df = pl.read_parquet(os.path.join(gutenberg_location, "data", file))
+        if out_pl is None:
+            out_pl = df
+        else:
+            out_pl = out_pl.vstack(df)
+    assert out_pl is not None, "could not find any shards"
+    return out_pl
+
+
+class GutenbergBacktranslation(BaseTask):
+    """
+    Generate a high quality prompt from a Gutenberg chunk.
+    """
+
+    output_dataset_name = "gutenberg_backtranslate"
+    dataset_columns = ["text", "title", "author", "category", "type", "story_id"]
+    seed_data_format = DatasetFormat.CUSTOM
+    output_dataset_format = DatasetFormat.PARQUET
+
+    def __init__(self) -> None:
+        self.in_rows_batch = []
+        self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
+
+    def load_custom(self) -> Dataset:
+        shards_pl = _get_gutenberg_subset(2)
+        logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
+        return Dataset.from_polars(shards_pl)
+
+    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+        dataset = dataset.shuffle(seed=64)
+        return dataset
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        samples_in = dictl(batch)
+        self.in_rows_batch = samples_in
+        all_chunks = [_get_chunks_gutenberg(sample) for sample in samples_in]
+        all_chunks = flatten_list(all_chunks)
+        return [format_gutenberg_backtranslation_prompt(chunk) for chunk in all_chunks]
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        out_rows = []
+        for completion, row in zip(completions, self.in_rows_batch):
+            out_rows.append({**row, "instruction": completion})
         self.in_rows_batch = []
         return out_rows

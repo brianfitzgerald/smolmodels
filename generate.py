@@ -11,6 +11,7 @@ from huggingface_hub import HfApi
 from loguru import logger
 from rich.console import Console
 from tqdm import tqdm
+import os
 
 from synthetic_data.generation import (
     get_generation_wrapper,
@@ -20,16 +21,18 @@ from synthetic_data.generation import (
 )
 from synthetic_data.tasks import BaseTask
 from synthetic_data.tasks.writing import (
-    GutenbergSummarize,
+    GutenbergExtraction,
+    GutenbergBacktranslation,
     ScreenplaySummarize,
     WritingRewardAnnotate,
 )
-from synthetic_data.utils import DatasetFormat
+from synthetic_data.utils import DatasetFormat, print_result_dicts
 
 
 ALL_TASKS: Dict[str, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
-    "gutenberg_summarize": GutenbergSummarize,
+    "gutenberg_extraction": GutenbergExtraction,
+    "gutenberg_backtranslation": GutenbergBacktranslation,
     "writing_reward": WritingRewardAnnotate,
 }
 
@@ -37,11 +40,11 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
 def main(
     task_name: str,
     save_every_n_batches: int = 5,
-    batch_size: int = 32,
+    batch_size: int = 1,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.GPT_4O_MINI.value,
-    n_epochs: int = 5,
+    model: str = RemoteModel.DEEPSEEK_V3.value,
+    n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,
 ):
@@ -52,9 +55,9 @@ def main(
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
     assert task_name is not None, "Task name must be passed"
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
-    console = Console()
-    task = ALL_TASKS[task_name](console)
+    task = ALL_TASKS[task_name]()
     split = task.seed_data_split
 
     load_dotenv(".env")
@@ -168,6 +171,7 @@ def main(
                 continue
 
             output_rows_batch = task.format_output_rows(completions)
+            print_result_dicts(output_rows_batch)
             all_new_dataset_rows.extend(output_rows_batch)
             if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
                 save_output_dataset(

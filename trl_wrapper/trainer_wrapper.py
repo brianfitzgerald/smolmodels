@@ -157,12 +157,13 @@ GUTENBERG_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="gutenberg",
     train_batch_size=8,
-    gradient_accumulation_steps=16,
+    gradient_accumulation_steps=4,
     data_module_choice="conversation",
     tuning_mode="sft",
     learning_rate=1e-5,
     dataset_path="dataset_files/gutenberg_conversations.parquet",
-    n_epochs=1,
+    n_epochs=5,
+    eval_steps=50,
     run_suffix="gutenberg-conv",
 )
 

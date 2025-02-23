@@ -27,10 +27,6 @@ class BaseTask(ABC):
 
     gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
-    def __init__(self, console: Console) -> None:
-        super().__init__()
-        self.console = console
-
     def load_custom(self) -> Dataset:
         """
         Custom dataset loading logic. Only used if seed_data_format is DatasetFormat.CUSTOM.

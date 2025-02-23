@@ -47,7 +47,7 @@ class CustomSFTTrainer(SFTTrainer):
 
         generation_config = GenerationConfig(
             do_sample=True,
-            max_new_tokens=self.max_eval_sample_length - input_ids.shape[-1],
+            max_new_tokens=self.max_eval_sample_length,
             max_time=20,
             # https://github.com/huggingface/trl/issues/1217
             use_cache=not self.using_mistral,
