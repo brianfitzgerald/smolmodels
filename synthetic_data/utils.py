@@ -1,24 +1,26 @@
-import asyncio
-from enum import Enum
-import re
-from typing import Dict, List, Optional, Sequence, Union, Any
-import json
-from loguru import logger
-from pathlib import Path
-import shutil
 import ast
+import asyncio
+import json
+import re
+import shutil
 import traceback
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Sequence, Union
 
+import pandas as pd
+from loguru import logger
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-from tabulate import tabulate
 from pydantic.dataclasses import dataclass
-
+from tabulate import tabulate
 
 Conversation = Sequence[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
 JSONSchemaKey = Union[str, int, float, bool, List[Any], Dict[str, Any], None]
 JSONSchema = Dict[str, JSONSchemaKey]
+
+EvalDataModeChoice = Literal["random", "fixed"]
 
 
 @dataclass
@@ -294,3 +296,31 @@ def flatten_list(lst):
         else:
             flat_list.append(item)
     return flat_list
+
+
+def log_to_file(
+    all_eval_rows: list, new_rows_to_log: list, output_dir: str, current_step: int
+):
+    all_rows_pd = pd.DataFrame(all_eval_rows)
+    all_rows_pd.to_parquet(f"{output_dir}/eval_samples.parquet")
+
+    tabulate_str = tabulate(
+        new_rows_to_log,
+        headers="keys",
+        tablefmt="simple_grid",
+        maxcolwidths=[50] * 5,
+    )
+    print(tabulate_str)
+    with open(f"{output_dir}/eval_samples.txt", "a") as f:
+        f.write("\n" * 2)
+        f.write(
+            "".join(
+                ["#" for _ in range(40)]
+                + [f"  Eval samples for step: {current_step}  "]
+                + ["#" for _ in range(40)]
+                + ["\n" * 2]
+            )
+        )
+        f.write(tabulate_str)
+
+    logger.info("Saved eval samples.")

@@ -45,6 +45,7 @@ from model.utils import (
 )
 from synthetic_data.utils import ldictl
 from trl_wrapper.dpo_trainer import CustomDPOTrainer, EvalDataModeChoice
+from trl_wrapper.sft_trainer import CustomSFTTrainer
 
 MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
 LLAMA_3_2_1B = "meta-llama/Llama-3.2-1B-Instruct"
@@ -439,20 +440,23 @@ class TrainerWrapper:
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
                 return padded
 
-            collator = (
-                basic_pad_collator
-                if self.config.data_module_choice == "playwright_summary_to_script"
-                else None
-            )
-            self.trainer = SFTTrainer(
+            collator = basic_pad_collator
+            self.trainer = CustomSFTTrainer(
                 self.model,
                 peft_config=peft_config,
                 args=args,
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
-                data_collator=collator,
             )
+            self.trainer.set_custom_args(
+                self.config.max_eval_sample_length,
+                True,
+                output_dir,
+                self.config.eval_data_mode,
+                self.config.using_mistral,
+            )
+
         elif self.config.tuning_mode == "grpo":
             training_args = GRPOConfig(
                 output_dir=output_dir,

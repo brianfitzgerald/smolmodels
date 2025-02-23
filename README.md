@@ -10,6 +10,7 @@ uv venv
 source .venv/bin/activate
 uv sync --group torch
 uv sync --no-build-isolation --group training
+pyright --createstub transformers
 ```
 
 ### vLLM

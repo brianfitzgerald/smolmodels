@@ -1,24 +1,19 @@
-from trl import DPOTrainer
-import torch
-
 import random
+from contextlib import nullcontext
+from typing import Dict, List, Optional, Tuple
+
+import torch
 import wandb
 from loguru import logger
-from typing import Dict, List, Optional, Tuple, Literal
-from contextlib import nullcontext
 from torch.amp.autocast_mode import autocast
-from transformers.generation.configuration_utils import GenerationConfig
-
 from torch.utils.data import DataLoader
-from transformers.trainer_utils import EvalLoopOutput
+from transformers.generation.configuration_utils import GenerationConfig
 from transformers.trainer import Trainer
+from transformers.trainer_utils import EvalLoopOutput
+from trl import DPOTrainer
 from trl.trainer.utils import pad_to_length
-from tabulate import tabulate
-import pandas as pd
 
-from synthetic_data.utils import clean_message
-
-EvalDataModeChoice = Literal["random", "fixed"]
+from synthetic_data.utils import EvalDataModeChoice, clean_message, log_to_file
 
 
 class CustomDPOTrainer(DPOTrainer):
@@ -124,9 +119,7 @@ class CustomDPOTrainer(DPOTrainer):
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> EvalLoopOutput:
-        # Sample and save to game log if requested (for one batch to save time)
         if self.generate_during_eval:
-            # Generate random indices within the range of the total number of samples
             num_samples = len(dataloader.dataset)  # type: ignore
 
             if self.eval_data_mode == "fixed":
@@ -143,19 +136,19 @@ class CustomDPOTrainer(DPOTrainer):
 
             logger.info("Generating samples...")
             policy_output_decoded, ref_output_decoded = (
-                self.generate_from_model_and_ref(self.model, random_batch)
+                self.generate_from_model_and_ref(self.model, random_batch)  # type: ignore
             )  # type: ignore
             logger.info("Generated samples.")
-            prompt_decoded = self.processing_class.batch_decode(
+            prompt_decoded = self.processing_class.batch_decode(  # type: ignore
                 random_batch["prompt_input_ids"],
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
 
-            chosen_completion_decoded = self.processing_class.batch_decode(
+            chosen_completion_decoded = self.processing_class.batch_decode(  # type: ignore
                 random_batch["chosen_input_ids"],
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
-            rejected_completion_decoded = self.processing_class.batch_decode(
+            rejected_completion_decoded = self.processing_class.batch_decode(  # type: ignore
                 random_batch["rejected_input_ids"],
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
@@ -179,7 +172,6 @@ class CustomDPOTrainer(DPOTrainer):
             new_rows_wandb_format = [k.values() for k in new_rows_to_log]
             wandb_headers = list(new_rows_to_log[0].keys())
 
-            # TODO log to tabulate table if not using wandb, and save to txt file
             self.log(
                 {
                     "eval_samples": wandb.Table(
@@ -189,33 +181,13 @@ class CustomDPOTrainer(DPOTrainer):
                 }
             )
 
-            self.all_eval_rows.extend(new_rows_to_log)
-
-            all_rows_pd = pd.DataFrame(self.all_eval_rows)
-            all_rows_pd.to_parquet(f"{self.output_dir}/eval_samples.parquet")
-
-            tabulate_str = tabulate(
+            log_to_file(
+                self.all_eval_rows,
                 new_rows_to_log,
-                headers="keys",
-                tablefmt="simple_grid",
-                maxcolwidths=[50] * 5,
+                self.output_dir,
+                self.state.global_step,
             )
-            print(tabulate_str)
-            current_step = self.state.global_step
-            with open(f"{self.output_dir}/eval_samples.txt", "a") as f:
-                f.write("\n" * 2)
-                f.write(
-                    "".join(
-                        ["#" for _ in range(40)]
-                        + [f"  Eval samples for step: {current_step}  "]
-                        + ["#" for _ in range(40)]
-                        + ["\n" * 2]
-                    )
-                )
-                f.write(tabulate_str)
-
-            logger.info("Saved eval samples.")
-
+            self.all_eval_rows.extend(new_rows_to_log)
             self.state.log_history.pop()
 
         # Base evaluation
