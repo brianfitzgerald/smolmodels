@@ -97,7 +97,7 @@ class WrapperConfig:
     gradient_accumulation_steps: int = 1
     gradient_checkpointing: bool = True
     n_epochs: int = 1
-    train_on_inputs: bool = True
+    train_on_inputs: bool = False
 
     # Optimization & Scheduling
     learning_rate: float = 5e-5
@@ -423,6 +423,8 @@ class TrainerWrapper:
                 disable_tqdm=not self.config.notebook_mode,
                 neftune_noise_alpha=self.config.neftune_noise_alpha,
                 use_liger=True,
+                remove_unused_columns=False,
+                dataset_kwargs={"skip_prepare_dataset": True},
             )
 
             def basic_pad_collator(examples):
@@ -438,9 +440,12 @@ class TrainerWrapper:
                 ).transpose(0, 1)
                 padded["input_ids"] = torch.LongTensor(padded["input_ids"])  # type: ignore
                 padded["attention_mask"] = torch.LongTensor(padded["attention_mask"])
+                if "assistant_mask" in examples:
+                    padded["assistant_mask"] = torch.LongTensor(
+                        padded["assistant_mask"]
+                    )
                 return padded
 
-            collator = basic_pad_collator
             self.trainer = CustomSFTTrainer(
                 self.model,
                 peft_config=peft_config,
@@ -448,6 +453,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
+                data_collator=basic_pad_collator,
             )
             self.trainer.set_custom_args(
                 self.config.max_eval_sample_length,

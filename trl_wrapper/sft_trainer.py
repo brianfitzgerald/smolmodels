@@ -12,6 +12,7 @@ from transformers.generation.configuration_utils import GenerationConfig
 from trl.trainer.utils import pad_to_length
 from datasets import Dataset
 
+from model.utils import IGNORE_TOKEN_INDEX, PAD_TOKEN_ID
 from synthetic_data.utils import EvalDataModeChoice, clean_message, log_to_file
 
 
@@ -36,7 +37,9 @@ class CustomSFTTrainer(SFTTrainer):
         self.using_mistral = using_mistral
         self.generate_during_eval = True
 
-    def generate_from_model(self, model, batch: Dict[str, torch.Tensor]) -> List[str]:
+    def generate_from_model(
+        self, model, input_ids: torch.Tensor, attention_mask: torch.Tensor
+    ) -> List[str]:
         """Generate samples from the model."""
 
         # If one uses `generate_during_eval` with peft + bf16, we need to explicitly call generate with
@@ -57,8 +60,8 @@ class CustomSFTTrainer(SFTTrainer):
                 f"Generating policy samples, max length: {self.max_eval_sample_length}..."
             )
             model_output = model.generate(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
+                input_ids=input_ids,
+                attention_mask=attention_mask,
                 pad_token_id=pad_token_id,
                 generation_config=generation_config,
             )
@@ -88,28 +91,38 @@ class CustomSFTTrainer(SFTTrainer):
             random_batch = self._prepare_inputs(batch)
 
             logger.info("Generating samples...")
-            policy_output_decoded = self.generate_from_model(self.model, random_batch)  # type: ignore
-            logger.info("Generated samples.")
-            prompt_decoded = self.processing_class.batch_decode(  # type: ignore
+            input_ids, labels, assistant_mask = (
                 random_batch["input_ids"],
+                random_batch["labels"],
+                torch.tensor(
+                    random_batch["assistant_mask"],
+                    device=random_batch["input_ids"].device,
+                ),
+            )
+            input_ids = torch.where(assistant_mask == 1, PAD_TOKEN_ID, input_ids)
+            prompt_decoded = self.processing_class.batch_decode(  # type: ignore
+                input_ids,
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
-
-            labels_corrected = random_batch["labels"].clone()
-            labels_corrected[labels_corrected == -100] = (
+            labels_decodeable = labels.clone()
+            labels_decodeable[labels_decodeable == -100] = (
                 self.processing_class.pad_token_id
             )
-            reference_completion_decoded = self.processing_class.batch_decode(  # type: ignore
-                labels_corrected,
+            labels_decoded = self.processing_class.batch_decode(  # type: ignore
+                labels_decodeable,
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
+            policy_output_decoded = self.generate_from_model(
+                self.model, input_ids, attention_mask=batch["attention_mask"]
+            )  # type: ignore
+            logger.info("Generated samples.")
 
             new_rows_to_log = []
 
             for i in range(len(prompt_decoded)):
                 new_row_dict = {
                     "prompt": prompt_decoded[i],
-                    "ref": reference_completion_decoded[i],
+                    "ref": labels_decoded[i],
                     "policy": policy_output_decoded[i],
                 }
                 new_row_dict = {k: clean_message(v) for k, v in new_row_dict.items()}

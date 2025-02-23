@@ -6,6 +6,15 @@ from model.utils import (
 )
 from synthetic_data.utils import Conversation
 
+COLS_TO_REMOVE = [
+    "prompt",
+    "category",
+    "author",
+    "title",
+    "output",
+    "conversation",
+]
+
 
 class ConversationDataModule(SmDataset):
     """
@@ -13,8 +22,9 @@ class ConversationDataModule(SmDataset):
     """
 
     def post_setup(self):
-        self.train_dataset = self.train_dataset.remove_columns("conversation")
-        self.val_dataset = self.val_dataset.remove_columns("conversation")
+        self.train_dataset = self.train_dataset.remove_columns(COLS_TO_REMOVE)
+        self.val_dataset = self.val_dataset.remove_columns(COLS_TO_REMOVE)
+        print(self.train_dataset.column_names)
 
     def process_samples_batch(self, examples: dict):
         out = self._tokenize_conversation(examples["conversation"])
@@ -38,10 +48,11 @@ class ConversationDataModule(SmDataset):
                 tokenized_out["assistant_masks"],
             )
             labels, assistant_mask = torch.tensor(labels), torch.tensor(assistant_mask)
-            labels[assistant_mask == 0] = IGNORE_TOKEN_INDEX
+            labels = torch.where(assistant_mask == 0, IGNORE_TOKEN_INDEX, labels)
             return {
                 "input_ids": tokenized_out["input_ids"],
                 "attention_mask": tokenized_out["attention_mask"],
+                "assistant_mask": tokenized_out["assistant_masks"],
                 "labels": labels,
             }
 

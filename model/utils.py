@@ -187,6 +187,7 @@ class SmDataset(pl.LightningDataModule):
             cache_file_name=f"{self.cache_dir}/validation.parquet",
             num_proc=self.num_workers,
         )
+        self.post_setup()
 
     def post_setup(self):
         pass
