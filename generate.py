@@ -27,6 +27,7 @@ from synthetic_data.tasks.writing import (
     WritingRewardAnnotate,
 )
 from synthetic_data.utils import DatasetFormat, print_result_dicts
+from gyms import TwentyQuestionsPolicyEnvironment
 
 
 ALL_TASKS: Dict[str, type[BaseTask]] = {
@@ -34,6 +35,11 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
     "writing_reward": WritingRewardAnnotate,
+}
+
+
+ALL_ENVIRONMENTS = {
+    "twenty_questions": TwentyQuestionsPolicyEnvironment,
 }
 
 

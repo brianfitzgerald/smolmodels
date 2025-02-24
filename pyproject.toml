@@ -51,6 +51,7 @@ dependencies = [
     "tiktoken",
     "sigstore>=1.0.0",
     "kagglehub>=0.3.7",
+    "nltk>=3.9.1",
 ]
 
 [dependency-groups]
@@ -62,6 +63,7 @@ torch = [
     "peft>=0.13.2",
     "trl>=0.15.0",
     "lightning>=2.5.0.post0",
+    "nltk",
 ]
 
 training = [
