@@ -24,7 +24,10 @@
             "type": "debugpy",
             "request": "launch",
             "program": "generate.py",
-            "args": [],
+            "args": [
+                "--task_name",
+                "gutenberg_backtranslation"
+            ],
         },
         {
             "name": "vLLM Server",

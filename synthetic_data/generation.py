@@ -5,6 +5,9 @@ from enum import Enum
 from pathlib import Path
 import traceback
 from typing import Dict, List, Optional, cast
+from datetime import datetime, timedelta
+import asyncio
+from collections import deque
 
 import google.genai as genai
 import google.genai.types
@@ -64,6 +67,7 @@ class GenWrapperArgs:
     model_id: Optional[str] = None
     lora_name: Optional[str] = None
     max_concurrent: int = 8
+    max_rps: float = 8.0
     max_tokens: int = 4096
     temperature: float = 0.4
     response_format: type[BaseModel] | NotGiven = NOT_GIVEN
@@ -103,6 +107,30 @@ class MockGenerator(GenerationWrapper):
         return [MOCK_SNIPPET] * len(conversations)
 
 
+class RPSLimiter:
+    def __init__(self, max_rps: float):
+        self.max_rps = max_rps
+        self.request_times = deque()
+
+    async def acquire(self):
+        now = datetime.now()
+
+        # Remove old requests outside the 1 second window
+        while self.request_times and (now - self.request_times[0]) > timedelta(
+            seconds=1
+        ):
+            self.request_times.popleft()
+
+        # If at RPS limit, wait until we can make another request
+        if len(self.request_times) >= self.max_rps:
+            wait_time = 1.0 - (now - self.request_times[0]).total_seconds()
+            if wait_time > 0:
+                logger.info(f"Waiting {wait_time} seconds to not exceed RPS limit")
+                await asyncio.sleep(wait_time)
+
+        self.request_times.append(now)
+
+
 class OpenAIGenerationWrapper(GenerationWrapper):
     def __init__(
         self,
@@ -119,6 +147,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model_name = args.model_id or "gpt-4o-mini"
         self.args = args
+        self.rps_limiter = RPSLimiter(args.max_rps)
 
     @timeout(30)
     async def generate(self, conversations: List[Conversation]) -> List[str]:
@@ -126,6 +155,8 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         while True:
             completion_requests = []
             for conversation in conversations:
+                await self.rps_limiter.acquire()
+
                 if self.args.response_format:
                     request = self.oai_client.beta.chat.completions.parse(
                         model=self.model_name,
@@ -144,10 +175,10 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 completion_requests.append(request)
             try:
                 logger.info(
-                    f"Generating {len(completion_requests)} requests with {self.model_name}, max concurrent: {self.args.max_concurrent}"
+                    f"Generating {len(completion_requests)} requests with {self.model_name}, max RPS: {self.args.max_rps}"
                 )
-                results: List[ChatCompletion] = await gather_with_concurrency_limit(
-                    self.args.max_concurrent, *completion_requests
+                results: List[ChatCompletion] = await asyncio.gather(
+                    *completion_requests
                 )
                 if not results:
                     logger.error(results)
@@ -317,25 +348,28 @@ class RemoteModelChoice:
 MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     RemoteModel.QWEN_QWQ: RemoteModelChoice(
         OpenRouterGenerationWrapper,
-        GenWrapperArgs(model_id="qwen/qwq-32b-preview"),
+        GenWrapperArgs(model_id="qwen/qwq-32b-preview", max_rps=500),
     ),
     RemoteModel.DEEPSEEK_V3: RemoteModelChoice(
         OpenRouterGenerationWrapper,
-        GenWrapperArgs(model_id="deepseek/deepseek-chat", max_concurrent=4),
+        GenWrapperArgs(model_id="deepseek/deepseek-chat", max_rps=500),
     ),
-    RemoteModel.CLAUDE_3_5: RemoteModelChoice(AnthropicGenerationWrapper),
+    RemoteModel.CLAUDE_3_5: RemoteModelChoice(
+        AnthropicGenerationWrapper,
+        GenWrapperArgs(max_rps=50 / 60),
+    ),
     RemoteModel.GPT_4O_MINI: RemoteModelChoice(
         OpenAIGenerationWrapper,
-        GenWrapperArgs(model_id="gpt-4o-mini", max_concurrent=4),
+        GenWrapperArgs(model_id="gpt-4o-mini", max_rps=5000 / 60),
     ),
     RemoteModel.GPT_4O: RemoteModelChoice(
         OpenAIGenerationWrapper,
-        GenWrapperArgs(model_id="gpt-4o", max_concurrent=32),
+        GenWrapperArgs(model_id="gpt-4o", max_rps=5000 / 60),
     ),
     RemoteModel.MOCK: RemoteModelChoice(MockGenerator),
     RemoteModel.VLLM: RemoteModelChoice(
         VLLMWrapper,
-        GenWrapperArgs(max_concurrent=8),
+        GenWrapperArgs(max_rps=8.0),
     ),
 }
 

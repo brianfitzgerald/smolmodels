@@ -150,6 +150,9 @@ def main(
         ):
             batch = cast(Dict, batch)
             conversations_batch = task.format_input_conversation(batch)
+            if len(conversations_batch) == 0:
+                logger.warning(f"Skipping empty batch {batch_idx}")
+                continue
 
             if isinstance(generation_wrapper, MockGenerator):
                 generation_wrapper.set_mock_completions(

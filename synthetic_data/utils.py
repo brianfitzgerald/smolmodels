@@ -79,7 +79,7 @@ class DatasetFormat(Enum):
     CUSTOM = "custom"
 
 
-def clean_message(message: JSONSchemaKey):
+def clean_message(message: JSONSchemaKey, truncate_length: int | None = None):
     """
     Clean up spaces, tabs, and newlines in a message with a JSON dict, so the dict is formatted nicely.
     """
@@ -101,6 +101,8 @@ def clean_message(message: JSONSchemaKey):
     message = message.strip()
     message = message.replace("<|endoftext|>", "")
     message = re.sub(r"\n+|\t+", "", message)
+    if truncate_length is not None and len(message) > truncate_length:
+        message = message[:truncate_length] + "..."
     return message
 
 
@@ -112,7 +114,8 @@ def print_result_dicts(
         return
     columns = list(results[0].keys())
     new_dataset_row_elements = [
-        [clean_message(row[column]) for column in columns] for row in results
+        [clean_message(row[column], truncate_length=1000) for column in columns]
+        for row in results
     ]
 
     col_widths = [40] * len(columns)
