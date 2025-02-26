@@ -16,12 +16,12 @@ from evaluation.code_execution import (
     eval_results_to_markdown,
     evaluate_codecontests,
 )
+from generate import ALL_TASKS
 from synthetic_data.generation import (
     RemoteModel,
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.tasks.tasks import ALL_TASKS
 from synthetic_data.utils import Conversation, dictl, ensure_directory
 
 
@@ -54,7 +54,7 @@ async def main(
     gen_source: str = RemoteModel.VLLM.value,
 ):
     console = Console()
-    task = ALL_TASKS[task_name](console)
+    task = ALL_TASKS[task_name]()
 
     console = Console()
     model_wrapper = get_generation_wrapper(gen_source)

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, List, Optional, cast
 
-from dotenv import dotenv_values, load_dotenv
+from dotenv import load_dotenv
 import fire
 import pandas as pd
 from datasets import Dataset, load_dataset
@@ -9,10 +9,10 @@ from datasets.data_files import EmptyDatasetError
 from datasets.exceptions import DatasetNotFoundError
 from huggingface_hub import HfApi
 from loguru import logger
-from rich.console import Console
 from tqdm import tqdm
 import os
 
+from gyms.twenty_questions.env import TextEnv
 from synthetic_data.generation import (
     get_generation_wrapper,
     MockGenerator,
@@ -38,13 +38,14 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
 }
 
 
-ALL_ENVIRONMENTS = {
+ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
     "twenty_questions": TwentyQuestionsPolicyEnvironment,
 }
 
 
 def main(
     task_name: str,
+    environment_name: str,
     save_every_n_batches: int = 5,
     batch_size: int = 1,
     restart: bool = False,
@@ -69,6 +70,16 @@ def main(
     load_dotenv(".env")
     generation_wrapper = get_generation_wrapper(model, task.gen_wrapper_args_override)
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
+
+    if task_name and environment_name:
+        raise ValueError("Only one of task_name or environment should be passed")
+
+    if environment_name:
+        env = ALL_ENVIRONMENTS[environment_name]()
+        env.reset()
+        return
+
+    # Load output dataset
 
     logger.info("Loading output dataset...")
     if not restart:
@@ -105,6 +116,8 @@ def main(
 
     output_dataset = cast(Dataset, output_dataset)
 
+    # Load input dataset
+
     input_dataset: Dataset
     input_dataset_location: Optional[str] = None
     if task.seed_data_format in (
@@ -135,6 +148,8 @@ def main(
         else:
             raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
+    # Resume from position
+
     if resume_input_position and len(output_dataset) > 0:
         # skip first n rows
         logger.info(f"Resuming from position {len(output_dataset)}")
@@ -149,6 +164,8 @@ def main(
     logger.info(f"Generating with model {model} for task {task_name}")
 
     n_batches = len(input_dataset) // batch_size
+
+    # Generation loop
 
     for _ in range(n_epochs):
         for batch_idx, batch in enumerate(
