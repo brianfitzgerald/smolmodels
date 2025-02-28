@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import random
 import nltk
 
+from synthetic_data.utils import Conversation
+
 
 @dataclass(frozen=True)
 class Text:
@@ -14,9 +16,6 @@ class Text:
 
 
 TextHistory = Tuple[Text, ...]
-
-
-INITIAL_STR = "Questions:\n"
 
 
 @dataclass(frozen=True)
@@ -40,13 +39,11 @@ class TextTrajectory:
 
 class TextEnv(ABC):
     @abstractmethod
-    async def step(self, text_history: TextHistory) -> Tuple[TextHistory, float, bool]:
+    async def step(self, conversation: Conversation) -> Tuple[float, bool]:
         pass
 
     @abstractmethod
-    def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
-    ) -> TextHistory:
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         pass
 
     def close(self) -> None:

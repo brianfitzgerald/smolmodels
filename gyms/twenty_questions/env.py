@@ -4,7 +4,7 @@ import random
 import nltk
 
 from gyms.twenty_questions.data import WordVariants
-from gyms.utils import INITIAL_STR, Text, TextEnv, TextHistory, TextTrajectory
+from gyms.utils import Text, TextEnv, TextHistory, TextTrajectory
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.utils import Conversation
 
@@ -54,50 +54,17 @@ def is_done(word_var: WordVariants, question: str):
     return False
 
 
-def create_trajectory_from_history(
-    word_var: WordVariants,
-    text_history: TextHistory,
-    max_conversation_len: int = 20,
-) -> TextTrajectory:
-    """Create a TextTrajectory from a TextHistory"""
-    assert len(text_history) % 2 == 1, (
-        "TextHistory should be [initial str, question1, answer1, ..., questionN, answerN]."
-    )
-    assert all(question_text.is_action for question_text in text_history[1::2]), (
-        "All questions should be actions."
-    )
-    assert all(not answer_text.is_action for answer_text in text_history[0::2]), (
-        "All answers should not be actions."
-    )
-    # subtract 1 because of the starting text, then text_history contains pairs of questions and answers
-    conversation_len = (len(text_history) - 1) // 2
-    assert conversation_len <= max_conversation_len, (
-        f"Conversation is too long {conversation_len}. Max should be {max_conversation_len}."
-    )
-
-    reward: List[float] = []
-    for text in text_history:
-        if text.is_action:
-            reward.append(-1.0)
-        else:
-            reward.append(0.0)
-
-    if len(text_history) < 2:
-        done = False
-    else:
-        last_question = text_history[-2].text.strip()
-        last_answer = text_history[-1].text.strip()
-        word_guessed = last_answer == "Yes." and is_done(word_var, last_question)
-
-        done = word_guessed or conversation_len == max_conversation_len
-
-        if word_guessed:
-            reward[-2] = 0.0
-
-    return TextTrajectory(text_history, tuple(reward), done)
+GUESSER_PROMPT = "Welcome to the game of Twenty Questions! Your objective is to guess what the object is within twenty questions. At every turn, you will have the oppurnity to ask a yes/no question, and receive an answer from the oracle. You can ask tweny questions but must ask as few questions as possible. "
 
 
 class TwentyQuestionsPolicyEnvironment(TextEnv):
+    """
+    Environment for generating synthetic preference data for the 20 questions game.
+    On each step:
+    1. The generator generates a query about the answer.
+    2. The oracle answers the question.
+    """
+
     def __init__(
         self,
         generator: GenerationWrapper,
@@ -112,27 +79,20 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.count = 0
         self.curr_word: Optional[WordVariants] = None
 
-    async def step(self, text_history: TextHistory) -> Tuple[TextHistory, float, bool]:
-        assert text_history[-1].is_action
+    async def step(self, conversation: Conversation) -> tuple[float, bool]:
         assert self.curr_word is not None, "call env.reset() first."
         self.count += 1
-        question = text_history[-1].text.strip()
         query_conv: Conversation = [
             {"role": "system", "content": "Questions:"},
         ]
         answer = await self.generator.generate([query_conv])
         answer_text = Text(answer[0], is_action=False)
 
-        trajectory = create_trajectory_from_history(
-            self.curr_word, text_history + (answer_text,), self.max_conversation_length
-        )
         if self.count == self.max_conversation_length:
             print("The word was", self.curr_word[0])
-        return trajectory.text_history, trajectory.reward[-2], trajectory.done
+        return
 
-    def reset(
-        self, seed: Optional[int] = None, options: Optional[Dict] = None
-    ) -> TextHistory:
+    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         self.count = 0
         if self.curr_word is not None:
             print("The word was ", self.curr_word)
@@ -142,15 +102,8 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
 
         if options is None:
             options = {}
-        deterministic = options.get("deterministic", False)
-
-        if deterministic:
-            assert seed is not None, (
-                "In deterministic mode, the seed specifies which word to use."
-            )
+        if seed is not None:
             word_ind = seed % len(self.word_list)
             self.curr_word = self.word_list[word_ind]
         else:
             self.curr_word = self.random.choice(self.word_list)
-
-        return (Text(INITIAL_STR, is_action=False),)
