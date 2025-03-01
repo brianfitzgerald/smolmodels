@@ -45,7 +45,7 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 
 def main(
     task_name: str,
-    environment_name: str,
+    environment_name: Optional[str] = None,
     save_every_n_batches: int = 5,
     batch_size: int = 1,
     restart: bool = False,
@@ -73,12 +73,6 @@ def main(
 
     if task_name and environment_name:
         raise ValueError("Only one of task_name or environment should be passed")
-
-    if environment_name:
-        env = ALL_ENVIRONMENTS[environment_name]()
-        env.reset()
-        return
-
     # Load output dataset
 
     logger.info("Loading output dataset...")
@@ -165,48 +159,79 @@ def main(
 
     n_batches = len(input_dataset) // batch_size
 
-    # Generation loop
+    # Generation loop for generation tasks
 
-    for _ in range(n_epochs):
-        for batch_idx, batch in enumerate(
-            tqdm(input_dataset.iter(batch_size=batch_size), total=n_batches)
-        ):
-            batch = cast(Dict, batch)
-            conversations_batch = task.format_input_conversation(batch)
-            if len(conversations_batch) == 0:
-                logger.warning(f"Skipping empty batch {batch_idx}")
-                continue
+    if not environment_name:
+        for _ in range(n_epochs):
+            for batch_idx, batch in enumerate(
+                tqdm(input_dataset.iter(batch_size=batch_size), total=n_batches)
+            ):
+                batch = cast(Dict, batch)
+                conversations_batch = task.format_input_conversation(batch)
+                if len(conversations_batch) == 0:
+                    logger.warning(f"Skipping empty batch {batch_idx}")
+                    continue
 
-            if isinstance(generation_wrapper, MockGenerator):
-                generation_wrapper.set_mock_completions(
-                    [
-                        "def solution(problem_input):\n    return []"
-                        for _ in range(len(conversations_batch))
-                    ]
+                if isinstance(generation_wrapper, MockGenerator):
+                    generation_wrapper.set_mock_completions(
+                        [
+                            "def solution(problem_input):\n    return []"
+                            for _ in range(len(conversations_batch))
+                        ]
+                    )
+
+                logger.info(
+                    f"Generating batch of {len(conversations_batch)} completions..."
                 )
+                try:
+                    completions = asyncio.run(
+                        generation_wrapper.generate(conversations_batch)
+                    )
+                except TimeoutError:
+                    logger.error(f"Timeout error on batch {batch_idx}")
+                    continue
 
-            logger.info(
-                f"Generating batch of {len(conversations_batch)} completions..."
-            )
-            try:
-                completions = asyncio.run(
-                    generation_wrapper.generate(conversations_batch)
-                )
-            except TimeoutError:
-                logger.error(f"Timeout error on batch {batch_idx}")
-                continue
+                output_rows_batch = task.format_output_rows(completions)
+                print_result_dicts(output_rows_batch)
+                all_new_dataset_rows.extend(output_rows_batch)
+                if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
+                    save_output_dataset(
+                        output_dataset,
+                        task.output_dataset_name,
+                        all_new_dataset_rows,
+                        task.output_dataset_format,
+                        dataset_root_path,
+                    )
+    else:
+        envs = [
+            ALL_ENVIRONMENTS[environment_name](generation_wrapper)
+            for _ in range(batch_size)
+        ]
 
-            output_rows_batch = task.format_output_rows(completions)
-            print_result_dicts(output_rows_batch)
-            all_new_dataset_rows.extend(output_rows_batch)
-            if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
-                save_output_dataset(
-                    output_dataset,
-                    task.output_dataset_name,
-                    all_new_dataset_rows,
-                    task.output_dataset_format,
-                    dataset_root_path,
-                )
+        async def run_environments():
+            for _ in range(n_epochs):
+                batch = cast(Dict, input_dataset.select(range(batch_size)))
+                # Reset environments
+                for env in envs:
+                    env.reset()
+
+                # Create tasks for each environment's step
+                # Format the batch into conversations
+                conversations = task.format_input_conversation(batch)
+                tasks = [env.step(conv) for env, conv in zip(envs, conversations)]
+
+                # Run all steps concurrently
+                try:
+                    step_results = await asyncio.gather(*tasks)
+                    # Process results here as needed
+                    logger.info(
+                        f"Completed batch of {len(step_results)} environment steps"
+                    )
+                except Exception as e:
+                    logger.error(f"Error during environment steps: {e}")
+                    continue
+
+        asyncio.run(run_environments())
 
 
 if __name__ == "__main__":
