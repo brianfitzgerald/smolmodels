@@ -161,8 +161,9 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             if self.current_role == "guesser"
             else _conv_template_oracle(self.curr_word, self.conversation)
         )
-        logger.info(pprint(query_conv))
+        # logger.info(pprint(query_conv))
         response = await self.generator.generate([query_conv])
+        logger.info(f"Response: {response[0]}")
         if self.current_role == "oracle":
             output = parse_oracle_output(response[0])
             output = f"Oracle: {output}"
@@ -175,7 +176,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
                     reward = 0.0
                 return reward, True
             output = f"Guesser: {output}"
-        logger.info(pprint(output))
+        logger.info(f"Output: {output}")
         self.conversation.append({"role": "assistant", "content": output})
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
@@ -207,10 +208,9 @@ def parse_oracle_output(message: str) -> str:
 
     response = response_match.group(1).strip()
 
-    # Check for simple yes/no responses and standardize them
-    if re.match(r"^yes\.?$", response.lower()):
+    if response.lower() == "yes":
         return "Yes"
-    elif re.match(r"^no\.?$", response.lower()):
+    elif response.lower() == "no":
         return "No"
 
     return response
@@ -230,5 +230,10 @@ def parse_guesser_output(message: str) -> tuple[str, bool]:
     guess_match = re.search(r"Final Guess:\s*(.*?)(?:\n|$)", output_content, re.DOTALL)
     if guess_match:
         return guess_match.group(1).strip(), True
+
+    # Handle cases where only the question/guess is present without the tag
+    if "question:" in output_content.lower():
+        question = output_content.lower().split("question:")[1].strip()
+        return question, False
 
     return "", False
