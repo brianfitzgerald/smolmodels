@@ -88,7 +88,8 @@ Remember, your goal is to guess the correct answer in as few questions as possib
 """
 
 ORACLE_PROMPT = """
-You are the oracle in a game of 20 Questions. Your role is to think of a secret answer and respond to the player's guesses. The secret answer has already been chosen for you. Your task is to determine if the player has guessed correctly and respond appropriately.
+You are the oracle in a game of 20 Questions. Your role is to think of a secret answer and respond to the player's guesses. The secret answer has already been chosen for you.
+If the player asks a question, you should respond with a yes-or-no answer.
 
 The secret answer is:
 <secret_answer>
@@ -99,9 +100,7 @@ When the player makes a guess, you should compare it to the secret answer. If th
 
 Respond to the player's guess in the following format:
 1. If the guess is correct, respond with: "Congratulations! You've guessed correctly. The answer was indeed [secret answer]."
-2. If the guess is incorrect, respond with: "I'm sorry, that's not correct. Would you like to guess again?"
-
-Do not provide any additional hints or information about the secret answer. Your response should be concise and limited to the formats provided above.
+2. If the player asked a question, respond with: "Yes" or "No"
 
 Please provide your response to the player's guess inside <response> tags.
 """
@@ -164,8 +163,20 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         )
         logger.info(pprint(query_conv))
         response = await self.generator.generate([query_conv])
-        logger.info(pprint(response))
-        self.conversation.append({"role": "assistant", "content": response[0]})
+        if self.current_role == "oracle":
+            output = parse_oracle_output(response[0])
+            output = f"Oracle: {output}"
+        else:
+            output, is_final_guess = parse_guesser_output(response[0])
+            if is_final_guess:
+                if output == self.curr_word[0]:
+                    reward = 1.0
+                else:
+                    reward = 0.0
+                return reward, True
+            output = f"Guesser: {output}"
+        logger.info(pprint(output))
+        self.conversation.append({"role": "assistant", "content": output})
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
@@ -194,7 +205,15 @@ def parse_oracle_output(message: str) -> str:
     if not response_match:
         return ""
 
-    return response_match.group(1).strip()
+    response = response_match.group(1).strip()
+
+    # Check for simple yes/no responses and standardize them
+    if re.match(r"^yes\.?$", response.lower()):
+        return "Yes"
+    elif re.match(r"^no\.?$", response.lower()):
+        return "No"
+
+    return response
 
 
 def parse_guesser_output(message: str) -> tuple[str, bool]:
