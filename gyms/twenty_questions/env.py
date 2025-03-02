@@ -1,6 +1,5 @@
 from __future__ import annotations
-from pprint import pprint
-from typing import Dict, Optional
+from typing import Optional
 import random
 import nltk
 import re
@@ -168,9 +167,12 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             formatted_output = parse_oracle_output(response[0])
             formatted_output = f"Oracle: {formatted_output}"
             if len(formatted_output) == 0:
-                raise ValueError("No output could be extracted from the oracle's response")
-        else:
+                raise ValueError(
+                    "No output could be extracted from the oracle's response"
+                )
+        elif self.current_role == "guesser":
             formatted_output, is_final_guess = parse_guesser_output(response[0])
+            self.step_count += 1
             if is_final_guess:
                 if formatted_output == self.curr_word[0]:
                     reward = 1.0
@@ -178,10 +180,18 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
                     reward = 0.0
                 return reward, True
             if len(formatted_output) == 0:
-                raise ValueError("No output could be extracted from the guesser's response")
+                raise ValueError(
+                    "No output could be extracted from the guesser's response"
+                )
             formatted_output = f"Guesser: {formatted_output}"
+        else:
+            raise ValueError(f"Unknown role: {self.current_role}")
+
         logger.info(f"Formatted output: {formatted_output}")
-        self.conversation.append({"role": "assistant", "content": formatted_output})
+        self.conversation.append({"role": "assistant", "content": response[0]})
+
+        if is_done(self.curr_word, response[0]):
+            return 1.0, True
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
