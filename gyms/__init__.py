@@ -1,1 +1,3 @@
-from twenty_questions.env import TwentyQuestionsPolicyEnvironment  # noqa: F401
+from .twenty_questions.env import TwentyQuestionsPolicyEnvironment
+
+__all__ = ["TwentyQuestionsPolicyEnvironment"]

@@ -11,8 +11,15 @@ class TextEnv(ABC):
 
     @abstractmethod
     async def step(self) -> Tuple[float, bool]:
+        """
+        Perform a single step in the environment.
+        Returns a tuple of (reward, done).
+        """
         pass
 
     @abstractmethod
     def reset(self, seed: Optional[int] = None):
+        """
+        Reset the environment to the initial state.
+        """
         pass

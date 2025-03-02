@@ -14,7 +14,7 @@ from openai.types.chat.chat_completion_message_param import ChatCompletionMessag
 from pydantic.dataclasses import dataclass
 from tabulate import tabulate
 
-Conversation = Sequence[ChatCompletionMessageParam]
+Conversation = List[ChatCompletionMessageParam]
 ShareGPTConversation = List[Dict[str, str]]
 
 JSONSchemaKey = Union[str, int, float, bool, List[Any], Dict[str, Any], None]

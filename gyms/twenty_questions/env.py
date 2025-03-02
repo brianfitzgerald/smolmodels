@@ -1,8 +1,11 @@
 from __future__ import annotations
+from pprint import pprint
 from typing import Dict, Optional
 import random
 import nltk
+import re
 from typing import Literal
+from loguru import logger
 
 from gyms.twenty_questions.data import WordVariants, get_default_word_list
 from gyms.utils import TextEnv
@@ -58,8 +61,6 @@ def is_done(word_var: WordVariants, question: str):
 GUESSER_PROMPT = """
 You are an AI agent playing the role of the guesser in a game of Twenty Questions. Your goal is to guess the secret object, person, or concept that the other player (the answerer) is thinking of by asking up to 20 yes-or-no questions.
 
-Here are the previous questions you've asked and the answers you've received:
-
 You have {remaining_questions} questions left to ask.
 
 Based on the information you've gathered so far, think carefully about what question would be most helpful in narrowing down the possible answers. Your question should be specific and designed to eliminate as many possibilities as possible.
@@ -106,9 +107,12 @@ Please provide your response to the player's guess inside <response> tags.
 """
 
 
-def _conv_template_guesser(word_var: WordVariants, conversation: Conversation):
+def _conv_template_guesser(conversation: Conversation, remaining_questions: int):
     return [
-        {"role": "system", "content": GUESSER_PROMPT},
+        {
+            "role": "system",
+            "content": GUESSER_PROMPT.format(remaining_questions=remaining_questions),
+        },
         *conversation,
     ]
 
@@ -140,34 +144,72 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.word_list = get_default_word_list()
         self.max_conversation_length = max_conversation_length
         self.current_role: TwentyQuestionsRole = "guesser"
+        nltk.download("punkt_tab")
+        nltk.download("averaged_perceptron_tagger_eng")
 
         self.random = random.Random(None)
-        self.count = 0
+        self.step_count = 0
         self.curr_word: Optional[WordVariants] = None
+        self.conversation: Conversation = []
 
     async def step(self):
         assert self.curr_word is not None, "call env.reset() first."
-        self.count += 1
-        query_conv: Conversation = [
-            {"role": "system", "content": "Questions:"},
-        ]
-        answer = await self.generator.generate([query_conv])
+        self.step_count += 1
+        query_conv: Conversation = (
+            _conv_template_guesser(
+                self.conversation, self.max_conversation_length - self.step_count
+            )
+            if self.current_role == "guesser"
+            else _conv_template_oracle(self.curr_word, self.conversation)
+        )
+        logger.info(pprint(query_conv))
+        response = await self.generator.generate([query_conv])
+        logger.info(pprint(response))
+        self.conversation.append({"role": "assistant", "content": response[0]})
 
-        if self.count == self.max_conversation_length:
-            print("The word was", self.curr_word[0])
+        self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
-        self.count = 0
-        if self.curr_word is not None:
-            print("The word was ", self.curr_word)
-            print("Next word...")
+        if self.step_count == self.max_conversation_length:
+            logger.info("The word was {}", self.curr_word[0])
+
+        # Return a reward of 0.0 and done flag based on conversation length
+        done = self.step_count >= self.max_conversation_length
+        return 0.0, done
+
+    def reset(self, seed: Optional[int] = None):
+        self.step_count = 0
+        self.conversation = []
         if seed is not None:
             self.random = random.Random(seed)
 
-        if options is None:
-            options = {}
         if seed is not None:
             word_ind = seed % len(self.word_list)
             self.curr_word = self.word_list[word_ind]
         else:
             self.curr_word = self.random.choice(self.word_list)
+
+
+def parse_oracle_output(message: str) -> str:
+    response_match = re.search(r"<response>(.*?)</response>", message, re.DOTALL)
+    if not response_match:
+        return ""
+
+    return response_match.group(1).strip()
+
+
+def parse_guesser_output(message: str) -> tuple[str, bool]:
+    output_match = re.search(r"<output>(.*?)</output>", message, re.DOTALL)
+    if not output_match:
+        return "", False
+
+    output_content = output_match.group(1).strip()
+
+    question_match = re.search(r"Question:\s*(.*?)(?:\n|$)", output_content, re.DOTALL)
+    if question_match:
+        return question_match.group(1).strip(), False
+
+    guess_match = re.search(r"Final Guess:\s*(.*?)(?:\n|$)", output_content, re.DOTALL)
+    if guess_match:
+        return guess_match.group(1).strip(), True
+
+    return "", False

@@ -210,20 +210,13 @@ def main(
 
         async def run_environments():
             for _ in range(n_epochs):
-                batch = cast(Dict, input_dataset.select(range(batch_size)))
-                # Reset environments
                 for env in envs:
                     env.reset()
 
-                # Create tasks for each environment's step
-                # Format the batch into conversations
-                conversations = task.format_input_conversation(batch)
-                tasks = [env.step(conv) for env, conv in zip(envs, conversations)]
+                tasks = [env.step() for env in envs]
 
-                # Run all steps concurrently
                 try:
                     step_results = await asyncio.gather(*tasks)
-                    # Process results here as needed
                     logger.info(
                         f"Completed batch of {len(step_results)} environment steps"
                     )
