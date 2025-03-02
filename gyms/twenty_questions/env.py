@@ -139,12 +139,12 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         generator: GenerationWrapper,
         max_conversation_length: int = 20,
     ):
+        nltk.download("punkt_tab")
+        nltk.download("averaged_perceptron_tagger_eng")
         self.generator = generator
         self.word_list = get_default_word_list()
         self.max_conversation_length = max_conversation_length
         self.current_role: TwentyQuestionsRole = "guesser"
-        nltk.download("punkt_tab")
-        nltk.download("averaged_perceptron_tagger_eng")
 
         self.random = random.Random(None)
         self.step_count = 0
@@ -163,21 +163,25 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         )
         # logger.info(pprint(query_conv))
         response = await self.generator.generate([query_conv])
-        logger.info(f"Response: {response[0]}")
+        logger.info(f"Raw response: {response[0]}")
         if self.current_role == "oracle":
-            output = parse_oracle_output(response[0])
-            output = f"Oracle: {output}"
+            formatted_output = parse_oracle_output(response[0])
+            formatted_output = f"Oracle: {formatted_output}"
+            if len(formatted_output) == 0:
+                raise ValueError("No output could be extracted from the oracle's response")
         else:
-            output, is_final_guess = parse_guesser_output(response[0])
+            formatted_output, is_final_guess = parse_guesser_output(response[0])
             if is_final_guess:
-                if output == self.curr_word[0]:
+                if formatted_output == self.curr_word[0]:
                     reward = 1.0
                 else:
                     reward = 0.0
                 return reward, True
-            output = f"Guesser: {output}"
-        logger.info(f"Output: {output}")
-        self.conversation.append({"role": "assistant", "content": output})
+            if len(formatted_output) == 0:
+                raise ValueError("No output could be extracted from the guesser's response")
+            formatted_output = f"Guesser: {formatted_output}"
+        logger.info(f"Formatted output: {formatted_output}")
+        self.conversation.append({"role": "assistant", "content": formatted_output})
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
@@ -217,23 +221,38 @@ def parse_oracle_output(message: str) -> str:
 
 
 def parse_guesser_output(message: str) -> tuple[str, bool]:
-    output_match = re.search(r"<output>(.*?)</output>", message, re.DOTALL)
-    if not output_match:
-        return "", False
+    def extract_from_pattern(text: str, pattern: str) -> str | None:
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1).strip() if match else None
 
-    output_content = output_match.group(1).strip()
+    content = message.replace("Guesser:", "").strip()
 
-    question_match = re.search(r"Question:\s*(.*?)(?:\n|$)", output_content, re.DOTALL)
-    if question_match:
-        return question_match.group(1).strip(), False
+    # First, try to extract content within <output> tags
+    output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
+    if output_match:
+        content = output_match.group(1).strip()
 
-    guess_match = re.search(r"Final Guess:\s*(.*?)(?:\n|$)", output_content, re.DOTALL)
-    if guess_match:
-        return guess_match.group(1).strip(), True
+    # Define patterns for question and final guess
+    question_pattern = r"Question:\s*(.*?)(?:\n|$)"
+    guess_pattern = r"Final Guess:\s*(.*?)(?:\n|$)"
+    is_question_pattern = r"(is it .*?)\?$"
 
-    # Handle cases where only the question/guess is present without the tag
-    if "question:" in output_content.lower():
-        question = output_content.lower().split("question:")[1].strip()
+    # Check for question and final guess patterns
+    question = extract_from_pattern(content, question_pattern)
+    if question:
         return question, False
 
-    return "", False
+    guess = extract_from_pattern(content, guess_pattern)
+    if guess:
+        return guess, True
+
+    is_question = re.search(is_question_pattern, content, re.DOTALL)
+    if is_question:
+        return content, False
+
+    # If no explicit tags, check for "question:" prefix
+    if "question:" in content.lower():
+        question = content.lower().split("question:")[1].strip()
+        return question, False
+
+    return content, False

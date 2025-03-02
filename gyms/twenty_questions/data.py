@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import nltk
 
-
 @dataclass
 class WordVariants:
     words: List[str]

@@ -360,7 +360,7 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     ),
     RemoteModel.GPT_4O_MINI: RemoteModelChoice(
         OpenAIGenerationWrapper,
-        GenWrapperArgs(model_id="gpt-4o-mini", max_rps=5000 / 60),
+        GenWrapperArgs(model_id="gpt-4o-mini", max_rps=int(5000 / 60)),
     ),
     RemoteModel.GPT_4O: RemoteModelChoice(
         OpenAIGenerationWrapper,
