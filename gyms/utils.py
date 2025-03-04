@@ -3,9 +3,12 @@ from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
 from synthetic_data.generation import GenerationWrapper
+from synthetic_data.tasks import BaseTask
 
 
 class TextEnv(ABC):
+    task: BaseTask
+
     def __init__(self, generation_wrapper: GenerationWrapper):
         self.generation_wrapper = generation_wrapper
 

@@ -77,6 +77,7 @@ class DatasetFormat(Enum):
     SYNTHETIC = "synthetic"
     PARQUET = "parquet"
     CUSTOM = "custom"
+    NONE = "none"
 
 
 def clean_message(message: JSONSchemaKey, truncate_length: int | None = None):

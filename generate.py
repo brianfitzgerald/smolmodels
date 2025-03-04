@@ -1,4 +1,5 @@
 import asyncio
+from copy import copy
 from typing import Dict, List, Optional, cast
 
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ import os
 
 from gyms.twenty_questions.env import TextEnv
 from synthetic_data.generation import (
+    GenWrapperArgs,
     get_generation_wrapper,
     MockGenerator,
     RemoteModel,
@@ -43,6 +45,21 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 }
 
 
+async def run_environments(envs: List[TextEnv], n_epochs: int):
+    for _ in range(n_epochs):
+        for env in envs:
+            env.reset()
+
+        tasks = [env.step() for env in envs]
+
+        try:
+            step_results = await asyncio.gather(*tasks)
+            logger.info(f"Completed batch of {len(step_results)} environment steps")
+        except Exception as e:
+            logger.error(f"Error during environment steps: {e}")
+            continue
+
+
 def main(
     task_name: str,
     environment_name: Optional[str] = None,
@@ -61,15 +78,25 @@ def main(
     or generated from a synthetic source, such as a list of subjects.
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
-    assert task_name is not None, "Task name must be passed"
+    assert not (task_name and environment_name), (
+        "Only one of task_name or environment_name should be passed"
+    )
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-
-    task = ALL_TASKS[task_name]()
-    split = task.seed_data_split
-
     load_dotenv(".env")
-    generation_wrapper = get_generation_wrapper(model, task.gen_wrapper_args_override)
+    args_override: GenWrapperArgs | None = None
+    generation_wrapper = get_generation_wrapper(model, args_override)
+    environment: Optional[TextEnv] = None
+
+    if task_name:
+        task = ALL_TASKS[task_name]()
+    else:
+        assert environment_name, "Environment name must be passed"
+        environment = ALL_ENVIRONMENTS[environment_name](generation_wrapper)
+        task = environment.task
+        args_override = task.gen_wrapper_args_override
+
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
+    split = task.seed_data_split
 
     if task_name and environment_name:
         raise ValueError("Only one of task_name or environment should be passed")
@@ -126,6 +153,8 @@ def main(
     )
     if task.seed_data_format == DatasetFormat.CUSTOM:
         input_dataset = task.load_custom()
+    elif task.seed_data_format == DatasetFormat.NONE:
+        input_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
     else:
         assert input_dataset_location, (
             f"Input dataset location must be provided, but is {input_dataset_location}"
@@ -203,28 +232,9 @@ def main(
                         dataset_root_path,
                     )
     else:
-        envs = [
-            ALL_ENVIRONMENTS[environment_name](generation_wrapper)
-            for _ in range(batch_size)
-        ]
-
-        async def run_environments():
-            for _ in range(n_epochs):
-                for env in envs:
-                    env.reset()
-
-                tasks = [env.step() for env in envs]
-
-                try:
-                    step_results = await asyncio.gather(*tasks)
-                    logger.info(
-                        f"Completed batch of {len(step_results)} environment steps"
-                    )
-                except Exception as e:
-                    logger.error(f"Error during environment steps: {e}")
-                    continue
-
-        asyncio.run(run_environments())
+        assert environment, "Environment must be passed"
+        envs = [copy(environment) for _ in range(batch_size)]
+        asyncio.run(run_environments(envs, n_epochs))
 
 
 if __name__ == "__main__":

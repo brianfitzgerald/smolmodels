@@ -1,4 +1,5 @@
 from __future__ import annotations
+from synthetic_data.tasks import BaseTask
 from typing import Optional
 import random
 import nltk
@@ -9,7 +10,7 @@ from loguru import logger
 from gyms.twenty_questions.data import WordVariants, get_default_word_list
 from gyms.utils import TextEnv
 from synthetic_data.generation import GenerationWrapper
-from synthetic_data.utils import Conversation
+from synthetic_data.utils import Conversation, DatasetFormat
 
 
 def is_done(word_var: WordVariants, question: str):
@@ -125,6 +126,68 @@ def _conv_template_oracle(word_var: WordVariants, conversation: Conversation):
 TwentyQuestionsRole = Literal["guesser", "oracle"]
 
 
+def parse_oracle_output(message: str) -> str:
+    response_match = re.search(r"<response>(.*?)</response>", message, re.DOTALL)
+    if not response_match:
+        return ""
+
+    response = response_match.group(1).strip()
+
+    if response.lower() == "yes":
+        return "Yes"
+    elif response.lower() == "no":
+        return "No"
+
+    return response
+
+
+def parse_guesser_output(message: str) -> tuple[str, bool]:
+    def extract_from_pattern(text: str, pattern: str) -> str | None:
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1).strip() if match else None
+
+    content = message.replace("Guesser:", "").strip()
+
+    # First, try to extract content within <output> tags
+    output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
+    if output_match:
+        content = output_match.group(1).strip()
+
+    # Define patterns for question and final guess
+    question_pattern = r"Question:\s*(.*?)(?:\n|$)"
+    guess_pattern = r"Final Guess:\s*(.*?)(?:\n|$)"
+    is_question_pattern = r"(is it .*?)\?$"
+
+    # Check for question and final guess patterns
+    question = extract_from_pattern(content, question_pattern)
+    if question:
+        return question, False
+
+    guess = extract_from_pattern(content, guess_pattern)
+    if guess:
+        return guess, True
+
+    is_question = re.search(is_question_pattern, content, re.DOTALL)
+    if is_question:
+        return content, False
+
+    # If no explicit tags, check for "question:" prefix
+    if "question:" in content.lower():
+        question = content.lower().split("question:")[1].strip()
+        return question, False
+
+    return content, False
+
+
+class TwentyQuestionsTask(BaseTask):
+    seed_data_format = DatasetFormat.NONE
+    output_dataset_name = "twenty_questions"
+    output_dataset_org = "roborovski"
+    output_dataset_format = DatasetFormat.PARQUET
+
+    dataset_columns = ["conversation"]
+
+
 class TwentyQuestionsPolicyEnvironment(TextEnv):
     """
     Environment for generating synthetic preference data for the 20 questions game.
@@ -149,6 +212,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.step_count = 0
         self.curr_word: Optional[WordVariants] = None
         self.conversation: Conversation = []
+        self.task = TwentyQuestionsTask()
 
     async def step(self):
         assert self.curr_word is not None, "call env.reset() first."
@@ -213,56 +277,3 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             self.curr_word = self.word_list[word_ind]
         else:
             self.curr_word = self.random.choice(self.word_list)
-
-
-def parse_oracle_output(message: str) -> str:
-    response_match = re.search(r"<response>(.*?)</response>", message, re.DOTALL)
-    if not response_match:
-        return ""
-
-    response = response_match.group(1).strip()
-
-    if response.lower() == "yes":
-        return "Yes"
-    elif response.lower() == "no":
-        return "No"
-
-    return response
-
-
-def parse_guesser_output(message: str) -> tuple[str, bool]:
-    def extract_from_pattern(text: str, pattern: str) -> str | None:
-        match = re.search(pattern, text, re.DOTALL)
-        return match.group(1).strip() if match else None
-
-    content = message.replace("Guesser:", "").strip()
-
-    # First, try to extract content within <output> tags
-    output_match = re.search(r"<output>(.*?)</output>", content, re.DOTALL)
-    if output_match:
-        content = output_match.group(1).strip()
-
-    # Define patterns for question and final guess
-    question_pattern = r"Question:\s*(.*?)(?:\n|$)"
-    guess_pattern = r"Final Guess:\s*(.*?)(?:\n|$)"
-    is_question_pattern = r"(is it .*?)\?$"
-
-    # Check for question and final guess patterns
-    question = extract_from_pattern(content, question_pattern)
-    if question:
-        return question, False
-
-    guess = extract_from_pattern(content, guess_pattern)
-    if guess:
-        return guess, True
-
-    is_question = re.search(is_question_pattern, content, re.DOTALL)
-    if is_question:
-        return content, False
-
-    # If no explicit tags, check for "question:" prefix
-    if "question:" in content.lower():
-        question = content.lower().split("question:")[1].strip()
-        return question, False
-
-    return content, False
