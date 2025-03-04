@@ -51,13 +51,23 @@ async def run_environments(envs: List[TextEnv], n_epochs: int):
             env.reset()
 
         tasks = [env.step() for env in envs]
+        out_convs = [[] for _ in envs]
+        out_rews = [[] for _ in envs]
 
-        try:
-            step_results = await asyncio.gather(*tasks)
-            logger.info(f"Completed batch of {len(step_results)} environment steps")
-        except Exception as e:
-            logger.error(f"Error during environment steps: {e}")
-            continue
+        while len(envs) > 0:
+            try:
+                step_results = await asyncio.gather(*tasks)
+                for i, (reward, done) in enumerate(step_results):
+                    if done:
+                        out_convs[i].append(envs[i].conversation)
+                        envs.pop(i)
+                    else:
+                        out_rews[i].append(reward)
+
+                logger.info(f"Completed batch of {len(step_results)} environment steps")
+            except Exception as e:
+                logger.error(f"Error during environment steps: {e}")
+                continue
 
 
 def main(
