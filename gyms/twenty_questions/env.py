@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import nltk.downloader
 from synthetic_data.tasks import BaseTask
 from typing import Optional
 import random
@@ -11,51 +13,6 @@ from gyms.twenty_questions.data import WordVariants, get_default_word_list
 from gyms.utils import TextEnv
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.utils import Conversation, DatasetFormat
-
-
-def is_done(word_var: WordVariants, question: str):
-    # cut out punctuations at the end
-    while len(question) > 0 and not question[-1].isalpha():
-        question = question[:-1]
-
-    if len(question) == 0:
-        return False
-
-    question_pos = nltk.pos_tag(nltk.word_tokenize(question.lower()))
-
-    # ignore these nouns when checking for extra words
-    ignores = {"object", "something", "type", "kind"}
-    for pos_list in word_var.pos_tags:
-        for w, _ in pos_list:
-            ignores.add(w)
-
-    # check for extra words
-    for q_i in range(len(question_pos)):
-        q_i_word, q_i_pos = question_pos[q_i]
-        # check if the current word is a noun that shouldn't be ignored
-        if q_i_pos[:2] == "NN" and q_i_word not in ignores:
-            # if it's a counter word that comes before "of", also ignore it
-            if q_i + 1 < len(question_pos) and question_pos[q_i + 1][0] == "of":
-                continue
-            # extra word found
-            return False
-
-    # check for the actual word at the end of the question
-    for word_pos in word_var.pos_tags:
-        if len(word_pos) > len(question_pos):
-            continue
-
-        all_same = True
-        for (var_i_word, _), (q_i_word, _) in zip(
-            word_pos, question_pos[-len(word_pos) :]
-        ):
-            if var_i_word != q_i_word:
-                all_same = False
-                break
-        if all_same:
-            return True
-
-    return False
 
 
 GUESSER_PROMPT = """
@@ -141,11 +98,12 @@ def parse_oracle_output(message: str) -> str:
     return response
 
 
-def parse_guesser_output(message: str) -> tuple[str, bool]:
-    def extract_from_pattern(text: str, pattern: str) -> str | None:
-        match = re.search(pattern, text, re.DOTALL)
-        return match.group(1).strip() if match else None
+def extract_from_pattern(text: str, pattern: str) -> str | None:
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else None
 
+
+def parse_guesser_output(message: str) -> tuple[str, bool]:
     content = message.replace("Guesser:", "").strip()
 
     # First, try to extract content within <output> tags
@@ -179,6 +137,13 @@ def parse_guesser_output(message: str) -> tuple[str, bool]:
     return content, False
 
 
+def did_win(word_var: WordVariants, question: str):
+    for word in word_var.words:
+        if word.lower() in question.lower():
+            return True
+    return False
+
+
 class TwentyQuestionsTask(BaseTask):
     seed_data_format = DatasetFormat.NONE
     output_dataset_name = "twenty_questions"
@@ -199,13 +164,13 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
     def __init__(
         self,
         generator: GenerationWrapper,
-        max_conversation_length: int = 20,
+        n_steps: int = 20,
     ):
         nltk.download("punkt_tab")
         nltk.download("averaged_perceptron_tagger_eng")
         self.generator = generator
         self.word_list = get_default_word_list()
-        self.max_conversation_length = max_conversation_length
+        self.n_steps = n_steps
         self.current_role: TwentyQuestionsRole = "guesser"
 
         self.random = random.Random(None)
@@ -216,33 +181,31 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
 
     async def step(self):
         assert self.curr_word is not None, "call env.reset() first."
-        self.step_count += 1
         query_conv: Conversation = (
-            _conv_template_guesser(
-                self.conversation, self.max_conversation_length - self.step_count
-            )
+            _conv_template_guesser(self.conversation, self.n_steps - self.step_count)
             if self.current_role == "guesser"
             else _conv_template_oracle(self.curr_word, self.conversation)
         )
-        # logger.info(pprint(query_conv))
         response = await self.generator.generate([query_conv])
-        logger.info(f"Raw response: {response[0]}")
+        response_to_add = response[0]
         if self.current_role == "oracle":
-            formatted_output = parse_oracle_output(response[0])
+            formatted_output = parse_oracle_output(response_to_add)
             formatted_output = f"Oracle: {formatted_output}"
             if len(formatted_output) == 0:
                 raise ValueError(
                     "No output could be extracted from the oracle's response"
                 )
         elif self.current_role == "guesser":
-            formatted_output, is_final_guess = parse_guesser_output(response[0])
-            self.step_count += 1
+            logger.info(f"Raw response: {response_to_add}")
+            formatted_output, is_final_guess = parse_guesser_output(response_to_add)
             if is_final_guess:
-                if formatted_output == self.curr_word[0]:
+                if did_win(self.curr_word, response_to_add):
                     reward = 1.0
                 else:
                     reward = 0.0
                 return reward, True
+            else:
+                self.step_count += 1
             if len(formatted_output) == 0:
                 raise ValueError(
                     "No output could be extracted from the guesser's response"
@@ -251,19 +214,20 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         else:
             raise ValueError(f"Unknown role: {self.current_role}")
 
-        logger.info(f"Formatted output: {formatted_output}")
-        self.conversation.append({"role": "assistant", "content": response[0]})
+        logger.info(f"Added output: {formatted_output}")
+        self.conversation.append({"role": "assistant", "content": response_to_add})
 
-        if is_done(self.curr_word, response[0]):
+        if did_win(self.curr_word, response_to_add):
             return 1.0, True
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
-        if self.step_count == self.max_conversation_length:
+        print(self.step_count, self.n_steps)
+        if self.step_count == self.n_steps:
             logger.info("The word was {}", self.curr_word[0])
 
         # Return a reward of 0.0 and done flag based on conversation length
-        done = self.step_count >= self.max_conversation_length
+        done = self.step_count >= self.n_steps
         return 0.0, done
 
     def reset(self, seed: Optional[int] = None):
@@ -277,3 +241,5 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             self.curr_word = self.word_list[word_ind]
         else:
             self.curr_word = self.random.choice(self.word_list)
+
+        logger.info(f"Word to guess: {self.curr_word[0]}")

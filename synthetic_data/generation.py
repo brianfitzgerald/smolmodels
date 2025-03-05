@@ -72,6 +72,7 @@ class GenWrapperArgs:
     temperature: float = 0.4
     response_format: type[BaseModel] | NotGiven = NOT_GIVEN
     n_retries: int = MAX_RETRIES
+    providers: List[str] = field(default_factory=lambda: [])
 
 
 class GenerationWrapper(ABC):
@@ -148,6 +149,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.model_name = args.model_id or "gpt-4o-mini"
         self.args = args
         self.rps_limiter = RPSLimiter(args.max_rps)
+        self.extra_body = {}
 
     @timeout(30)
     async def generate(self, conversations: List[Conversation]) -> List[str]:
@@ -158,12 +160,14 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 await self.rps_limiter.acquire()
 
                 if self.args.response_format:
+                    # have to use the beta provider
                     request = self.oai_client.beta.chat.completions.parse(
                         model=self.model_name,
                         messages=conversation,
                         temperature=self.args.temperature,
                         max_completion_tokens=self.args.max_tokens,
                         response_format=self.args.response_format,  # type: ignore
+                        extra_body=self.extra_body,
                     )
                 else:
                     request = self.oai_client.chat.completions.create(
@@ -171,12 +175,10 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         messages=conversation,
                         temperature=self.args.temperature,
                         max_completion_tokens=self.args.max_tokens,
+                        extra_body=self.extra_body,
                     )
                 completion_requests.append(request)
             try:
-                logger.info(
-                    f"Generating {len(completion_requests)} requests with {self.model_name}, max RPS: {self.args.max_rps}"
-                )
                 results: List[ChatCompletion] = await asyncio.gather(
                     *completion_requests
                 )
@@ -243,6 +245,9 @@ class VLLMWrapper(OpenAIGenerationWrapper):
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
     def __init__(self, args: GenWrapperArgs) -> None:
         super().__init__(args, "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1")
+        if args.providers:
+            logger.info(f"Using providers: {args.providers}")
+            self.extra_body["provider"] = {"order": args.providers}
 
 
 class AnthropicGenerationWrapper(GenerationWrapper):
@@ -333,6 +338,7 @@ class RemoteModel(str, Enum):
     CLAUDE_3_5 = "claude-3-5"
     QWEN_QWQ = "qwen-qwq"
     DEEPSEEK_V3 = "deepseek-v3"
+    DEEPSEEK_R1 = "deepseek-r1"
     GPT_4O_MINI = "gpt-4o-mini"
     GPT_4O = "gpt-4o"
     MOCK = "mock"
@@ -353,6 +359,12 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     RemoteModel.DEEPSEEK_V3: RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(model_id="deepseek/deepseek-chat", max_rps=500),
+    ),
+    RemoteModel.DEEPSEEK_R1: RemoteModelChoice(
+        OpenRouterGenerationWrapper,
+        GenWrapperArgs(
+            model_id="deepseek/deepseek-r1", max_rps=500, providers=["fireworks"]
+        ),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(
         AnthropicGenerationWrapper,
