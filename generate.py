@@ -1,5 +1,6 @@
 import asyncio
 from copy import copy
+import traceback
 from typing import Dict, List, Optional, cast
 
 from dotenv import load_dotenv
@@ -47,9 +48,8 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 
 async def run_environments(
     envs: List[TextEnv], n_epochs: int
-) -> tuple[List[Conversation], List[float], List[dict]]:
+) -> tuple[List[Conversation], List[dict]]:
     out_convs = []
-    out_rews = []
     out_metadata = []
 
     for _ in range(n_epochs):
@@ -60,19 +60,18 @@ async def run_environments(
             try:
                 tasks = [env.step() for env in envs]
                 step_results = await asyncio.gather(*tasks)
-                for i, (reward, done) in enumerate(step_results):
+                for i, done in enumerate(step_results):
                     if done:
                         out_convs.append(envs[i].conversation)
-                        out_rews.append(reward)
                         out_metadata.append(envs[i].run_metadata)
                         envs.pop(i)
 
-                logger.info(f"Completed batch of {len(step_results)} environment steps")
             except Exception as e:
+                traceback.print_exc()
                 logger.error(f"Error during environment steps: {e}")
                 continue
 
-    return out_convs, out_rews, out_metadata
+    return out_convs, out_metadata
 
 
 def main(
@@ -249,14 +248,11 @@ def main(
     else:
         assert environment, "Environment must be passed"
         envs = [copy(environment) for _ in range(batch_size)]
-        out_convs, out_rews, out_metadata = asyncio.run(
-            run_environments(envs, n_epochs)
-        )
+        out_convs, out_metadata = asyncio.run(run_environments(envs, n_epochs))
 
         output_dataset = Dataset.from_dict(
             {
                 "conversation": out_convs,
-                "reward": out_rews,
                 "metadata": out_metadata,
             }
         )

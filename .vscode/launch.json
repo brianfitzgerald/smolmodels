@@ -36,7 +36,11 @@
             "program": "generate.py",
             "args": [
                 "--environment_name",
-                "twenty_questions"
+                "twenty_questions",
+                "--n_epochs",
+                "10",
+                "--batch_size",
+                "16"
             ],
         },
         {

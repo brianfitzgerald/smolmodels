@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Optional
 
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.tasks import BaseTask
@@ -16,10 +16,10 @@ class TextEnv(ABC):
         self.generation_wrapper = generation_wrapper
 
     @abstractmethod
-    async def step(self) -> Tuple[float, bool]:
+    async def step(self) -> bool:
         """
         Perform a single step in the environment.
-        Returns a tuple of (reward, done).
+        Returns a boolean indicating if the episode is done.
         """
         pass
 

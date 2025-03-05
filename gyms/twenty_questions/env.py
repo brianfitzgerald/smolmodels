@@ -180,7 +180,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.task = TwentyQuestionsTask()
         self.run_metadata: dict = {}
 
-    async def step(self):
+    async def step(self) -> bool:
         assert self.curr_word is not None, "call env.reset() first."
         query_conv: Conversation = (
             _conv_template_guesser(self.conversation, self.n_steps - self.step_count)
@@ -201,10 +201,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             formatted_output, is_final_guess = parse_guesser_output(response_to_add)
             if is_final_guess:
                 if did_win(self.curr_word, response_to_add):
-                    reward = 1.0
-                else:
-                    reward = 0.0
-                return reward, True
+                    return True
             else:
                 self.step_count += 1
             if len(formatted_output) == 0:
@@ -221,7 +218,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.conversation.append({"role": "assistant", "content": response_to_add})
 
         if did_win(self.curr_word, response_to_add):
-            return 1.0, True
+            return True
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
@@ -229,8 +226,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             logger.info("The word was {}", self.curr_word[0])
 
         # Return a reward of 0.0 and done flag based on conversation length
-        done = self.step_count >= self.n_steps
-        return 0.0, done
+        return self.step_count >= self.n_steps
 
     def reset(self, seed: Optional[int] = None):
         self.step_count = 0
