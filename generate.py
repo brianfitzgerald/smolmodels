@@ -28,7 +28,7 @@ from synthetic_data.tasks.writing import (
     ScreenplaySummarize,
     WritingRewardAnnotate,
 )
-from synthetic_data.utils import DatasetFormat, print_result_dicts
+from synthetic_data.utils import Conversation, DatasetFormat, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
 
 
@@ -45,39 +45,44 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 }
 
 
-async def run_environments(envs: List[TextEnv], n_epochs: int):
+async def run_environments(
+    envs: List[TextEnv], n_epochs: int
+) -> tuple[List[Conversation], List[float], List[dict]]:
+    out_convs = []
+    out_rews = []
+    out_metadata = []
+
     for _ in range(n_epochs):
         for env in envs:
             env.reset()
 
-        tasks = [env.step() for env in envs]
-        out_convs = [[] for _ in envs]
-        out_rews = [[] for _ in envs]
-
         while len(envs) > 0:
             try:
+                tasks = [env.step() for env in envs]
                 step_results = await asyncio.gather(*tasks)
                 for i, (reward, done) in enumerate(step_results):
                     if done:
-                        out_convs[i].append(envs[i].conversation)
+                        out_convs.append(envs[i].conversation)
+                        out_rews.append(reward)
+                        out_metadata.append(envs[i].run_metadata)
                         envs.pop(i)
-                    else:
-                        out_rews[i].append(reward)
 
                 logger.info(f"Completed batch of {len(step_results)} environment steps")
             except Exception as e:
                 logger.error(f"Error during environment steps: {e}")
                 continue
 
+    return out_convs, out_rews, out_metadata
+
 
 def main(
-    task_name: str,
-    environment_name: Optional[str] = None,
+    task_name: str | None = None,
+    environment_name: str | None = None,
     save_every_n_batches: int = 5,
-    batch_size: int = 1,
+    batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.DEEPSEEK_V3.value,
+    model: str = RemoteModel.GPT_4O_MINI.value,
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,
@@ -244,7 +249,19 @@ def main(
     else:
         assert environment, "Environment must be passed"
         envs = [copy(environment) for _ in range(batch_size)]
-        asyncio.run(run_environments(envs, n_epochs))
+        out_convs, out_rews, out_metadata = asyncio.run(
+            run_environments(envs, n_epochs)
+        )
+
+        output_dataset = Dataset.from_dict(
+            {
+                "conversation": out_convs,
+                "reward": out_rews,
+                "metadata": out_metadata,
+            }
+        )
+
+        output_dataset.push_to_hub(task.output_dataset_name)
 
 
 if __name__ == "__main__":

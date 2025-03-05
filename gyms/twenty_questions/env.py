@@ -178,6 +178,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.curr_word: Optional[WordVariants] = None
         self.conversation: Conversation = []
         self.task = TwentyQuestionsTask()
+        self.run_metadata: dict = {}
 
     async def step(self):
         assert self.curr_word is not None, "call env.reset() first."
@@ -214,7 +215,9 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         else:
             raise ValueError(f"Unknown role: {self.current_role}")
 
-        logger.info(f"Added output: {formatted_output}")
+        logger.info(
+            f"Added output for step {self.step_count} / {self.n_steps}, role {self.current_role}: {formatted_output}"
+        )
         self.conversation.append({"role": "assistant", "content": response_to_add})
 
         if did_win(self.curr_word, response_to_add):
@@ -222,7 +225,6 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
 
-        print(self.step_count, self.n_steps)
         if self.step_count == self.n_steps:
             logger.info("The word was {}", self.curr_word[0])
 
@@ -243,3 +245,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             self.curr_word = self.random.choice(self.word_list)
 
         logger.info(f"Word to guess: {self.curr_word[0]}")
+
+        self.run_metadata["word"] = self.curr_word.json()
+        self.run_metadata["n_steps"] = self.n_steps
+        self.run_metadata["seed"] = seed

@@ -30,6 +30,16 @@
             ],
         },
         {
+            "name": "Generate - 20 Qs",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "generate.py",
+            "args": [
+                "--environment_name",
+                "twenty_questions"
+            ],
+        },
+        {
             "name": "vLLM Server",
             "type": "debugpy",
             "request": "launch",
