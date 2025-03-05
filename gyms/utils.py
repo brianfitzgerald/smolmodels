@@ -10,6 +10,7 @@ from synthetic_data.utils import Conversation
 class TextEnv(ABC):
     task: BaseTask
     conversation: Conversation
+    run_metadata: dict
 
     def __init__(self, generation_wrapper: GenerationWrapper):
         self.generation_wrapper = generation_wrapper
