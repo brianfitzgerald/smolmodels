@@ -201,6 +201,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             formatted_output, is_final_guess = parse_guesser_output(response_to_add)
             if is_final_guess:
                 if did_win(self.curr_word, response_to_add):
+                    self.run_metadata["win"] = True
                     return True
             else:
                 self.step_count += 1
@@ -218,6 +219,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.conversation.append({"role": "assistant", "content": response_to_add})
 
         if did_win(self.curr_word, response_to_add):
+            self.run_metadata["win"] = True
             return True
 
         self.current_role = "oracle" if self.current_role == "guesser" else "guesser"
@@ -245,3 +247,4 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.run_metadata["word"] = self.curr_word.json()
         self.run_metadata["n_steps"] = self.n_steps
         self.run_metadata["seed"] = seed
+        self.run_metadata["win"] = False

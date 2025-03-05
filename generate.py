@@ -60,10 +60,10 @@ async def run_environments(
             try:
                 tasks = [env.step() for env in envs]
                 step_results = await asyncio.gather(*tasks)
-                for i, done in enumerate(step_results):
+                for i, (env, done) in enumerate(zip(envs, step_results)):
                     if done:
-                        out_convs.append(envs[i].conversation)
-                        out_metadata.append(envs[i].run_metadata)
+                        out_convs.append(env.conversation)
+                        out_metadata.append(env.run_metadata)
                         envs.pop(i)
 
             except Exception as e:
