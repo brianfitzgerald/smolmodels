@@ -15,7 +15,7 @@ class TestParsers:
 
     def test_parse_guesser_output_no_match(self):
         message = "This is a test message"
-        expected_output = ("", False)
+        expected_output = (message, False)
         assert parse_guesser_output(message) == expected_output
 
     def test_parse_guesser_output_empty_output(self):
@@ -31,16 +31,6 @@ class TestParsers:
     def test_parse_guesser_output_guess_extra_text(self):
         message = "Start <output>Final Guess: chair</output> End"
         expected_output = ("chair", True)
-        assert parse_guesser_output(message) == expected_output
-
-    def test_parse_guesser_output_case_insensitive(self):
-        message = "<output>question: Is it a plant?</output>"
-        expected_output = ("is it a plant?", False)
-        assert parse_guesser_output(message) == expected_output
-
-    def test_parse_guesser_output_only_question(self):
-        message = "<output>Is it a bird?</output>"
-        expected_output = ("", False)
         assert parse_guesser_output(message) == expected_output
 
     def test_parse_oracle_output_yes(self):

@@ -42,7 +42,7 @@ def save_output_dataset(
     dataset_name: str,
     new_dataset_rows: List[Dict],
     format: DatasetFormat,
-    dataset_output_dir: str,
+    dataset_output_dir: str | None = None,
 ):
     dataset_new_rows = Dataset.from_list(new_dataset_rows)
     concatted_dataset = concatenate_datasets([output_dataset, dataset_new_rows])
@@ -54,6 +54,10 @@ def save_output_dataset(
         concatted_dataset.push_to_hub(dataset_name)
     elif format == DatasetFormat.PARQUET:
         filename = f"{dataset_name}.parquet"
+        if dataset_output_dir is None:
+            raise ValueError(
+                f"dataset_output_dir is required for {DatasetFormat.PARQUET} format"
+            )
         concatted_dataset.to_parquet(os.path.join(dataset_output_dir, filename))
     else:
         raise ValueError(f"Unsupported output format: {format}")
@@ -72,7 +76,9 @@ class GenWrapperArgs:
     temperature: float = 0.4
     response_format: type[BaseModel] | NotGiven = NOT_GIVEN
     n_retries: int = MAX_RETRIES
-    providers: List[str] = field(default_factory=lambda: [])
+    providers: List[str] | None = None
+    stop: List[str] | None = None
+    is_reasoning_model: bool = False
 
 
 class GenerationWrapper(ABC):
@@ -159,12 +165,16 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             for conversation in conversations:
                 await self.rps_limiter.acquire()
 
+                temperature = self.args.temperature
+                if self.args.is_reasoning_model:
+                    temperature = NOT_GIVEN
+
                 if self.args.response_format:
                     # have to use the beta provider
                     request = self.oai_client.beta.chat.completions.parse(
                         model=self.model_name,
                         messages=conversation,
-                        temperature=self.args.temperature,
+                        temperature=temperature,
                         max_completion_tokens=self.args.max_tokens,
                         response_format=self.args.response_format,  # type: ignore
                         extra_body=self.extra_body,
@@ -173,7 +183,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     request = self.oai_client.chat.completions.create(
                         model=self.model_name,
                         messages=conversation,
-                        temperature=self.args.temperature,
+                        temperature=temperature,
                         max_completion_tokens=self.args.max_tokens,
                         extra_body=self.extra_body,
                     )
@@ -341,6 +351,7 @@ class RemoteModel(str, Enum):
     DEEPSEEK_R1 = "deepseek-r1"
     GPT_4O_MINI = "gpt-4o-mini"
     GPT_4O = "gpt-4o"
+    GPT_O3_MINI = "o3-mini"
     MOCK = "mock"
     VLLM = "vllm"
 
@@ -363,7 +374,7 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     RemoteModel.DEEPSEEK_R1: RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
-            model_id="deepseek/deepseek-r1", max_rps=500, providers=["fireworks"]
+            model_id="deepseek/deepseek-r1", max_rps=500, providers=["Fireworks"]
         ),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(
@@ -382,6 +393,10 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     RemoteModel.VLLM: RemoteModelChoice(
         VLLMWrapper,
         GenWrapperArgs(max_rps=8.0),
+    ),
+    RemoteModel.GPT_O3_MINI: RemoteModelChoice(
+        OpenAIGenerationWrapper,
+        GenWrapperArgs(model_id="o3-mini", max_rps=5000 / 60, is_reasoning_model=True),
     ),
 }
 

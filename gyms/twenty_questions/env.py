@@ -11,7 +11,11 @@ from loguru import logger
 
 from gyms.twenty_questions.data import WordVariants, get_default_word_list
 from gyms.utils import TextEnv
-from synthetic_data.generation import GenerationWrapper
+from synthetic_data.generation import (
+    GenWrapperArgs,
+    GenerationWrapper,
+    get_generation_wrapper,
+)
 from synthetic_data.utils import Conversation, DatasetFormat
 
 
@@ -83,6 +87,12 @@ def _conv_template_oracle(word_var: WordVariants, conversation: Conversation):
 TwentyQuestionsRole = Literal["guesser", "oracle"]
 
 
+class OutputParseError(Exception):
+    """Custom exception for when parsing fails."""
+
+    pass
+
+
 def parse_oracle_output(message: str) -> str:
     response_match = re.search(r"<response>(.*?)</response>", message, re.DOTALL)
     if not response_match:
@@ -114,7 +124,8 @@ def parse_guesser_output(message: str) -> tuple[str, bool]:
     # Define patterns for question and final guess
     question_pattern = r"Question:\s*(.*?)(?:\n|$)"
     guess_pattern = r"Final Guess:\s*(.*?)(?:\n|$)"
-    is_question_pattern = r"(is it .*?)\?$"
+    final_answer_pattern = r"Final Answer:\s*(.*?)(?:\n|$)"
+    is_question_pattern = r"^is it .*?\?$"
 
     # Check for question and final guess patterns
     question = extract_from_pattern(content, question_pattern)
@@ -125,14 +136,20 @@ def parse_guesser_output(message: str) -> tuple[str, bool]:
     if guess:
         return guess, True
 
-    is_question = re.search(is_question_pattern, content, re.DOTALL)
-    if is_question:
+    final_answer = extract_from_pattern(content, final_answer_pattern)
+    if final_answer:
+        return final_answer.strip(), True
+
+    # Check for "is it" questions
+    if re.search(is_question_pattern, content.lower()):
+        # Preserve the original case for the question
         return content, False
 
     # If no explicit tags, check for "question:" prefix
     if "question:" in content.lower():
-        question = content.lower().split("question:")[1].strip()
-        return question, False
+        # Preserve the original case for the question
+        question_part = content.split(":", 1)[1].strip() if ":" in content else content
+        return question_part, False
 
     return content, False
 
@@ -168,10 +185,13 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
     ):
         nltk.download("punkt_tab")
         nltk.download("averaged_perceptron_tagger_eng")
-        self.generator = generator
+        self.guesser_model = generator
         self.word_list = get_default_word_list()
         self.n_steps = n_steps
         self.current_role: TwentyQuestionsRole = "guesser"
+        self.oracle_model = get_generation_wrapper(
+            "gpt-4o-mini", args_override=GenWrapperArgs(stop=["</output>"])
+        )
 
         self.random = random.Random(None)
         self.step_count = 0
@@ -187,17 +207,20 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             if self.current_role == "guesser"
             else _conv_template_oracle(self.curr_word, self.conversation)
         )
-        response = await self.generator.generate([query_conv])
+        if self.current_role == "oracle":
+            response = await self.oracle_model.generate([query_conv])
+        else:
+            response = await self.guesser_model.generate([query_conv])
         response_to_add = response[0]
+        logger.info(f"Raw response: {response_to_add}")
         if self.current_role == "oracle":
             formatted_output = parse_oracle_output(response_to_add)
             formatted_output = f"Oracle: {formatted_output}"
             if len(formatted_output) == 0:
-                raise ValueError(
+                raise OutputParseError(
                     "No output could be extracted from the oracle's response"
                 )
         elif self.current_role == "guesser":
-            logger.info(f"Raw response: {response_to_add}")
             formatted_output, is_final_guess = parse_guesser_output(response_to_add)
             if is_final_guess:
                 if did_win(self.curr_word, response_to_add):
@@ -206,7 +229,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             else:
                 self.step_count += 1
             if len(formatted_output) == 0:
-                raise ValueError(
+                raise OutputParseError(
                     "No output could be extracted from the guesser's response"
                 )
             formatted_output = f"Guesser: {formatted_output}"
@@ -214,7 +237,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             raise ValueError(f"Unknown role: {self.current_role}")
 
         logger.info(
-            f"Added output for step {self.step_count} / {self.n_steps}, role {self.current_role}: {formatted_output}"
+            f"{self.current_role} output for {self.step_count}/{self.n_steps}: {formatted_output}"
         )
         self.conversation.append({"role": "assistant", "content": response_to_add})
 

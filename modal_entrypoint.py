@@ -41,7 +41,17 @@ def training(config: str = "playwright"):
     timeout=format_timeout(hours=12),
 )
 def generation(task_name: str):
+    dataset_root_path = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
+    # generate_main(
+    #     task_name=task_name,
+    #     dataset_root_path=dataset_root_path,
+    # )
+
     generate_main(
-        task_name=task_name,
-        dataset_root_path=os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files"),
+        environment_name="twenty_questions",
+        dataset_root_path=dataset_root_path,
+        model="deepseek-r1",
+        n_epochs=20,
+        batch_size=4,
+        save_every_n_batches=1,
     )

@@ -47,12 +47,12 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 
 
 async def run_environments(
-    envs: List[TextEnv], n_epochs: int
+    envs: List[TextEnv], n_epochs: int, save_every_n_batches: int
 ) -> tuple[List[Conversation], List[dict]]:
     out_convs = []
     out_metadata = []
 
-    for _ in range(n_epochs):
+    for i in range(n_epochs):
         for env in envs:
             env.reset()
 
@@ -65,11 +65,26 @@ async def run_environments(
                         out_convs.append(env.conversation)
                         out_metadata.append(env.run_metadata)
                         envs.pop(i)
+                logger.info(f"Environments running: {len(envs)}")
 
             except Exception as e:
                 traceback.print_exc()
                 logger.error(f"Error during environment steps: {e}")
                 continue
+
+        if i % save_every_n_batches == 0:
+            output_dataset = Dataset.from_dict(
+                {
+                    "conversation": out_convs,
+                    "metadata": out_metadata,
+                }
+            )
+            save_output_dataset(
+                output_dataset,
+                envs[0].task.output_dataset_name,
+                out_convs,
+                envs[0].task.output_dataset_format,
+            )
 
     return out_convs, out_metadata
 
@@ -81,7 +96,7 @@ def main(
     batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.GPT_4O_MINI.value,
+    model: str = RemoteModel.DEEPSEEK_R1.value,
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,
@@ -248,16 +263,7 @@ def main(
     else:
         assert environment, "Environment must be passed"
         envs = [copy(environment) for _ in range(batch_size)]
-        out_convs, out_metadata = asyncio.run(run_environments(envs, n_epochs))
-
-        output_dataset = Dataset.from_dict(
-            {
-                "conversation": out_convs,
-                "metadata": out_metadata,
-            }
-        )
-
-        output_dataset.push_to_hub(task.output_dataset_name)
+        asyncio.run(run_environments(envs, n_epochs, save_every_n_batches))
 
 
 if __name__ == "__main__":
