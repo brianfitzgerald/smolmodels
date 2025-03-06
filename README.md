@@ -47,7 +47,7 @@ pyright --createstub transformers
 # Training
 modal run -d modal_entrypoint.py::training --config gutenberg
 # Generation
-modal run -d modal_entrypoint.py::generation --task-name gutenberg_backtranslation
+modal run -d modal_entrypoint.py::generation
 # Inference
 modal serve modal_vllm.py
 ```

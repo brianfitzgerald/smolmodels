@@ -213,28 +213,33 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
             response = await self.guesser_model.generate([query_conv])
         response_to_add = response[0]
         logger.info(f"Raw response: {response_to_add}")
-        if self.current_role == "oracle":
-            formatted_output = parse_oracle_output(response_to_add)
-            formatted_output = f"Oracle: {formatted_output}"
-            if len(formatted_output) == 0:
-                raise OutputParseError(
-                    "No output could be extracted from the oracle's response"
-                )
-        elif self.current_role == "guesser":
-            formatted_output, is_final_guess = parse_guesser_output(response_to_add)
-            if is_final_guess:
-                if did_win(self.curr_word, response_to_add):
-                    self.run_metadata["win"] = True
+        try:
+            if self.current_role == "oracle":
+                formatted_output = parse_oracle_output(response_to_add)
+                formatted_output = f"Oracle: {formatted_output}"
+                if len(formatted_output) == 0:
+                    raise OutputParseError(
+                        "No output could be extracted from the oracle's response"
+                    )
+            elif self.current_role == "guesser":
+                formatted_output, is_final_guess = parse_guesser_output(response_to_add)
+                if is_final_guess:
+                    if did_win(self.curr_word, response_to_add):
+                        self.run_metadata["win"] = True
                     return True
+                else:
+                    self.step_count += 1
+                if len(formatted_output) == 0:
+                    raise OutputParseError(
+                        "No output could be extracted from the guesser's response"
+                    )
+                formatted_output = f"Guesser: {formatted_output}"
             else:
-                self.step_count += 1
-            if len(formatted_output) == 0:
-                raise OutputParseError(
-                    "No output could be extracted from the guesser's response"
-                )
-            formatted_output = f"Guesser: {formatted_output}"
-        else:
-            raise ValueError(f"Unknown role: {self.current_role}")
+                raise ValueError(f"Unknown role: {self.current_role}")
+        except OutputParseError as e:
+            logger.error(f"Error parsing output: {e}")
+            self.run_metadata["succeeded"] = False
+            return True
 
         logger.info(
             f"{self.current_role} output for {self.step_count}/{self.n_steps}: {formatted_output}"
@@ -271,3 +276,4 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.run_metadata["n_steps"] = self.n_steps
         self.run_metadata["seed"] = seed
         self.run_metadata["win"] = False
+        self.run_metadata["succeeded"] = True

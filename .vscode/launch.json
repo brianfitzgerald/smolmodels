@@ -38,9 +38,11 @@
                 "--environment_name",
                 "twenty_questions",
                 "--n_epochs",
-                "20",
+                "10",
                 "--batch_size",
-                "4"
+                "1",
+                "--save_every_n_batches",
+                "1"
             ],
         },
         {

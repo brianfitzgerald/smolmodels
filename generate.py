@@ -29,7 +29,7 @@ from synthetic_data.tasks.writing import (
     ScreenplaySummarize,
     WritingRewardAnnotate,
 )
-from synthetic_data.utils import Conversation, DatasetFormat, print_result_dicts
+from synthetic_data.utils import Conversation, DatasetFormat, dictl, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
 
 
@@ -47,10 +47,24 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 
 
 async def run_environments(
-    envs: List[TextEnv], n_epochs: int, save_every_n_batches: int
-) -> tuple[List[Conversation], List[dict]]:
+    envs: List[TextEnv],
+    n_epochs: int,
+    save_every_n_batches: int,
+    dataset_root_path: str,
+):
     out_convs = []
     out_metadata = []
+
+    output_dataset_name, output_dataset_format = (
+        envs[0].task.output_dataset_name,
+        envs[0].task.output_dataset_format,
+    )
+    output_dataset = Dataset.from_dict(
+        {
+            "conversation": [],
+            "metadata": [],
+        }
+    )
 
     for i in range(n_epochs):
         for env in envs:
@@ -73,20 +87,18 @@ async def run_environments(
                 continue
 
         if i % save_every_n_batches == 0:
-            output_dataset = Dataset.from_dict(
-                {
-                    "conversation": out_convs,
-                    "metadata": out_metadata,
-                }
-            )
+            out_rows = {
+                "conversation": out_convs,
+                "metadata": out_metadata,
+            }
+            out_rows = dictl(out_rows)
             save_output_dataset(
                 output_dataset,
-                envs[0].task.output_dataset_name,
-                out_convs,
-                envs[0].task.output_dataset_format,
+                output_dataset_name,
+                out_rows,
+                output_dataset_format,
+                dataset_root_path,
             )
-
-    return out_convs, out_metadata
 
 
 def main(
@@ -263,7 +275,14 @@ def main(
     else:
         assert environment, "Environment must be passed"
         envs = [copy(environment) for _ in range(batch_size)]
-        asyncio.run(run_environments(envs, n_epochs, save_every_n_batches))
+        asyncio.run(
+            run_environments(
+                envs,
+                n_epochs,
+                save_every_n_batches,
+                dataset_root_path=dataset_root_path,
+            )
+        )
 
 
 if __name__ == "__main__":
