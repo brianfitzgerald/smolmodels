@@ -181,6 +181,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
     def __init__(
         self,
         generator: GenerationWrapper,
+        seed: int,
         n_steps: int = 20,
     ):
         nltk.download("punkt_tab")
@@ -189,7 +190,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.word_list = get_default_word_list()
         self.n_steps = n_steps
         self.current_role: TwentyQuestionsRole = "guesser"
-        self.seed = random.randint(0, 2**32 - 1)
+        self.seed = seed
         self.oracle_model = get_generation_wrapper(
             "gpt-4o-mini",
             args_override=GenWrapperArgs(stop=["</output>"], seed=self.seed),
@@ -263,6 +264,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
     def reset(self):
         self.step_count = 0
         self.conversation = []
+        self.run_metadata: dict = {}
 
         word_ind = self.seed % len(self.word_list)
         self.curr_word = self.word_list[word_ind]

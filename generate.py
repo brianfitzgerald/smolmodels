@@ -97,7 +97,7 @@ async def run_environments(
                 logger.error(f"Error during environment steps: {e}")
                 continue
 
-        if i % save_every_n_batches == 0 and i > 0:
+        if i % save_every_n_batches == 0:
             out_rows = {
                 "conversation": out_convs,
                 "metadata": out_metadata,
@@ -133,7 +133,7 @@ def main(
     batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.DEEPSEEK_R1.value,
+    model: str = RemoteModel.GPT_4O_MINI.value,
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,
