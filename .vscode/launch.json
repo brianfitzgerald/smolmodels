@@ -40,7 +40,7 @@
                 "--n_epochs",
                 "10",
                 "--batch_size",
-                "1",
+                "2",
                 "--save_every_n_batches",
                 "1"
             ],

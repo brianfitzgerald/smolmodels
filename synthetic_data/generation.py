@@ -1,8 +1,7 @@
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from enum import Enum
-from pathlib import Path
 import traceback
 from typing import Dict, List, Optional, cast
 from datetime import datetime, timedelta
@@ -15,7 +14,6 @@ from anthropic import AnthropicError, AsyncAnthropic
 from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
-from dotenv import dotenv_values
 from huggingface_hub import login
 from loguru import logger
 from openai import NOT_GIVEN, LengthFinishReasonError, NotGiven, AsyncOpenAI, OpenAI
@@ -79,6 +77,7 @@ class GenWrapperArgs:
     providers: List[str] | None = None
     stop: List[str] | None = None
     is_reasoning_model: bool = False
+    seed: Optional[int] = None
 
 
 class GenerationWrapper(ABC):
@@ -178,6 +177,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         max_completion_tokens=self.args.max_tokens,
                         response_format=self.args.response_format,  # type: ignore
                         extra_body=self.extra_body,
+                        seed=self.args.seed,
                     )
                 else:
                     request = self.oai_client.chat.completions.create(
@@ -186,6 +186,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         temperature=temperature,
                         max_completion_tokens=self.args.max_tokens,
                         extra_body=self.extra_body,
+                        seed=self.args.seed,
                     )
                 completion_requests.append(request)
             try:

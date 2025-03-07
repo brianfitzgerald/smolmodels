@@ -165,7 +165,7 @@ class TwentyQuestionsTask(BaseTask):
     seed_data_format = DatasetFormat.NONE
     output_dataset_name = "twenty_questions"
     output_dataset_org = "roborovski"
-    output_dataset_format = DatasetFormat.PARQUET
+    output_dataset_format = DatasetFormat.HF_DATASET
 
     dataset_columns = ["conversation"]
 
@@ -189,11 +189,13 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.word_list = get_default_word_list()
         self.n_steps = n_steps
         self.current_role: TwentyQuestionsRole = "guesser"
+        self.seed = random.randint(0, 2**32 - 1)
         self.oracle_model = get_generation_wrapper(
-            "gpt-4o-mini", args_override=GenWrapperArgs(stop=["</output>"])
+            "gpt-4o-mini",
+            args_override=GenWrapperArgs(stop=["</output>"], seed=self.seed),
         )
 
-        self.random = random.Random(None)
+        self.random = random.Random(self.seed)
         self.step_count = 0
         self.curr_word: Optional[WordVariants] = None
         self.conversation: Conversation = []
@@ -258,22 +260,17 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         # Return a reward of 0.0 and done flag based on conversation length
         return self.step_count >= self.n_steps
 
-    def reset(self, seed: Optional[int] = None):
+    def reset(self):
         self.step_count = 0
         self.conversation = []
-        if seed is not None:
-            self.random = random.Random(seed)
 
-        if seed is not None:
-            word_ind = seed % len(self.word_list)
-            self.curr_word = self.word_list[word_ind]
-        else:
-            self.curr_word = self.random.choice(self.word_list)
+        word_ind = self.seed % len(self.word_list)
+        self.curr_word = self.word_list[word_ind]
 
-        logger.info(f"Word to guess: {self.curr_word[0]}")
+        logger.info(f"Word to guess: {self.curr_word[0]} seed: {self.seed}")
 
         self.run_metadata["word"] = self.curr_word.json()
         self.run_metadata["n_steps"] = self.n_steps
-        self.run_metadata["seed"] = seed
+        self.run_metadata["seed"] = self.seed
         self.run_metadata["win"] = False
         self.run_metadata["succeeded"] = True

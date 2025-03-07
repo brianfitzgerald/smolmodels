@@ -50,7 +50,7 @@ def generation():
     generate_main(
         environment_name="twenty_questions",
         dataset_root_path=dataset_root_path,
-        model="deepseek-r1",
+        model="o3-mini",
         n_epochs=20,
         batch_size=4,
         save_every_n_batches=1,
