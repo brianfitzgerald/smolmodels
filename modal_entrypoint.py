@@ -51,7 +51,7 @@ def generation():
         environment_name="twenty_questions",
         dataset_root_path=dataset_root_path,
         model="o3-mini",
-        n_epochs=20,
-        batch_size=4,
+        n_epochs=100,
+        batch_size=32,
         save_every_n_batches=1,
     )
