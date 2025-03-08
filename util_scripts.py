@@ -1,8 +1,11 @@
 import fire
 import os
 import shutil
+import modal
 
 from loguru import logger
+
+from scripts.modal_definitons import MODEL_WEIGHTS_VOLUME
 
 
 def clean_runs_folder(parent_folder="runs"):
@@ -28,6 +31,14 @@ def clean_runs_folder(parent_folder="runs"):
             logger.info(f"Deleting folder: {folder}")
             shutil.rmtree(folder)
 
+def download_dataset(dataset_name: str):
+    volume = MODEL_WEIGHTS_VOLUME
+    path = f"dataset_files/{dataset_name}.parquet"
+    logger.info(f"Downloading dataset to {path}")
+    local_path = f"dataset_files/{dataset_name}.parquet"
+    with open(local_path, "wb") as f:
+        volume.read_file_into_fileobj(path, f)
+    pass
 
 if __name__ == "__main__":
     fire.Fire()
