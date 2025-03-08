@@ -42,16 +42,16 @@ def training(config: str = "playwright"):
 )
 def generation():
     dataset_root_path = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
-    # generate_main(
-    #     task_name=task_name,
-    #     dataset_root_path=dataset_root_path,
-    # )
-
     generate_main(
-        environment_name="twenty_questions",
+        task_name="gutenberg_backtranslation",
         dataset_root_path=dataset_root_path,
-        model="o3-mini",
-        n_epochs=100,
-        batch_size=32,
-        save_every_n_batches=1,
     )
+
+    # generate_main(
+    #     environment_name="twenty_questions",
+    #     dataset_root_path=dataset_root_path,
+    #     model="o3-mini",
+    #     n_epochs=100,
+    #     batch_size=32,
+    #     save_every_n_batches=1,
+    # )

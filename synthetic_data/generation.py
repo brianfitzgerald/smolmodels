@@ -350,6 +350,7 @@ class RemoteModel(str, Enum):
     QWEN_QWQ = "qwen-qwq"
     DEEPSEEK_V3 = "deepseek-v3"
     DEEPSEEK_R1 = "deepseek-r1"
+    MISTRAL_SMALL_3 = "mistral-small-3"
     GPT_4O_MINI = "gpt-4o-mini"
     GPT_4O = "gpt-4o"
     GPT_O3_MINI = "o3-mini"
@@ -376,6 +377,12 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
             model_id="deepseek/deepseek-r1", max_rps=500, providers=["Fireworks"]
+        ),
+    ),
+    RemoteModel.MISTRAL_SMALL_3: RemoteModelChoice(
+        OpenRouterGenerationWrapper,
+        GenWrapperArgs(
+            model_id="mistralai/mistral-small-3", max_rps=500, providers=["Mistral"]
         ),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(

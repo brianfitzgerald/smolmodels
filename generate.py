@@ -133,7 +133,7 @@ def main(
     batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.GPT_4O_MINI.value,
+    model: str = RemoteModel.MISTRAL_SMALL_3.value,
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,

@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import functools
 import json
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
 import re
 from typing import Sequence, TypedDict
@@ -356,7 +356,7 @@ class GutenbergBacktranslation(BaseTask):
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
-        all_chunks = [
+        all_chunks: List[Tuple[List[str], Dict]] = [
             (
                 _get_chunks_gutenberg(sample, self.tiktoken_encoder),
                 {
@@ -367,18 +367,26 @@ class GutenbergBacktranslation(BaseTask):
             )
             for sample in samples_in
         ]
-        all_chunks = flatten_list(all_chunks)
-        self.metadata = [chunk_metadata for _, chunk_metadata in all_chunks]
-        return [
-            format_gutenberg_backtranslation_prompt(chunk) for chunk, _ in all_chunks
-        ]
+        paragraphs: List[Tuple[str, Dict]] = []
+        for chunks, metadata in all_chunks:
+            if len(chunks) == 0:
+                logger.warning(f"No chunks found for {metadata['title']}")
+                continue
+            for chunk in chunks:
+                paragraphs.append(("\n\n".join(chunk), metadata))
+        self.metadata = [chunk_metadata for _, chunk_metadata in paragraphs]
+        self.paragraphs = [chunk for chunk, _ in paragraphs]
+        return [format_gutenberg_backtranslation_prompt(p) for p, _ in paragraphs]
 
     def format_output_rows(self, completions: List[str]) -> List:
         out_rows = []
-        for completion, metadata in zip(completions, self.metadata):
+        for completion, metadata, paragraph in zip(
+            completions, self.metadata, self.paragraphs
+        ):
             out_rows.append(
                 {
                     "instruction": completion,
+                    "paragraph": paragraph,
                     **metadata,
                 }
             )
