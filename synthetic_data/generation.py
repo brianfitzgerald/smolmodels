@@ -61,7 +61,7 @@ def save_output_dataset(
         raise ValueError(f"Unsupported output format: {format}")
 
 
-MAX_RETRIES = 3
+MAX_RETRIES = 10
 
 
 @dataclass
@@ -213,6 +213,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     f"Error while generating: {e}, retries left: {self.n_retries}"
                 )
                 traceback.print_exc()
+                await asyncio.sleep(1)
                 self.n_retries -= 1
                 if self.n_retries <= 0:
                     raise e
@@ -383,8 +384,8 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
             model_id="mistralai/mistral-small-24b-instruct-2501",
-            max_rps=500,
-            providers=["Mistral"],
+            max_rps=64,
+            max_concurrent=8,
         ),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(
