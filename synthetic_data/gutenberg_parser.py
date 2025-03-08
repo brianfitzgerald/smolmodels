@@ -3,6 +3,7 @@ from builtins import str
 import os
 import re
 import tiktoken
+import unicodedata
 
 TEXT_START_MARKERS = frozenset(
     (
@@ -73,7 +74,7 @@ TEXT_END_MARKERS = frozenset(
         "by Project Gutenberg",
         "End of Project Gutenberg",
         "End of this Project Gutenberg",
-        "Ende dieses Projekt Gutenberg",
+        "Ende dieses Project Gutenberg",
         "        ***END OF THE PROJECT GUTENBERG",
         "*** END OF THE COPYRIGHTED",
         "End of this is COPYRIGHTED",
@@ -209,20 +210,23 @@ def _is_email_init(text: str) -> bool:
     return bool(re.search(email_regex, text))
 
 
+def _starts_with_formatting(text: str) -> bool:
+    return bool(re.match(r"^\s*[\*_>\-=\+]+", text))
+
+
 def super_cleaner(book: str, min_token: int = 5, max_token: int = 600) -> list[str]:
     headless_book = _strip_headers(book)
     paragraphs = headless_book.split("\n\n")
     paragraphs_after_cleaning = []
     for par in paragraphs:
-        if (
+        if not (
             _is_image(par)
             or _is_footnote(par)
             or _is_email_init(par)
             or _is_books_copy(par)
             or _is_table(par)
             or _is_title_or_etc(par, min_token, max_token)
+            or _starts_with_formatting(par)
         ):
-            paragraphs_after_cleaning.append("[deleted]")
-        else:
             paragraphs_after_cleaning.append(par)
     return paragraphs_after_cleaning

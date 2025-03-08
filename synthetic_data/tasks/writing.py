@@ -161,7 +161,7 @@ def _process_gutenberg_extraction_row(
     }
 
 
-def _format_gutenberg_conv(sample: dict) -> Sequence[ChatCompletionMessageParam]:
+def _format_gutenberg_conv(sample: dict) -> Conversation:
     return [
         {
             "role": "system",
@@ -277,31 +277,43 @@ def _count_sentences(text):
     return len(re.findall(r"[.!?]", text))
 
 
-def _get_chunks_gutenberg(row: dict):
+def find_valid_chunks(lst: list[str], encoder: tiktoken.Encoding):
+    chunks, current_chunk = [], []
+
+    for item in lst:
+        if (
+            item != "[deleted]"
+            and _contains_dialogue(item)
+            and _count_sentences(item) >= 3
+        ):
+            current_chunk.append(item)
+        else:
+            if len(current_chunk) >= 2:
+                chunks.append(current_chunk)
+            current_chunk = []
+
+    if len(current_chunk) >= 3:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+def _get_chunks_gutenberg(row: dict, encoder: tiktoken.Encoding):
     text = row["text"]
 
-    def find_valid_chunks(lst: list[str]):
-        chunks, current_chunk = [], []
-
-        for item in lst:
-            if (
-                item != "[deleted]"
-                and _contains_dialogue(item)
-                and _count_sentences(item) >= 3
-            ):
-                current_chunk.append(item)
-            else:
-                if len(current_chunk) >= 2:
-                    chunks.append(current_chunk)
-                current_chunk = []
-
-        if len(current_chunk) >= 3:
-            chunks.append(current_chunk)
-
-        return chunks
-
+    # clean and extract paragraphs
     paragraphs = super_cleaner(text)
-    return find_valid_chunks(paragraphs)
+
+    # find chunks of consecutive paragraphs with dialogue and at least 3 sentences
+    valid_chunks = find_valid_chunks(paragraphs, encoder)
+
+    # filter out chunks that are too long or too short
+    out = []
+    for chunk in valid_chunks:
+        tokens = encoder.encode(" ".join(chunk))
+        if len(tokens) > 500 and len(tokens) < 2000:
+            out.append(chunk)
+    return out
 
 
 def _get_gutenberg_subset(n_shards: int = 1) -> pl.DataFrame:
@@ -326,12 +338,11 @@ class GutenbergBacktranslation(BaseTask):
     """
 
     output_dataset_name = "gutenberg_backtranslate"
-    dataset_columns = ["text", "title", "author", "category", "type", "story_id"]
+    dataset_columns = ["text", "title", "author", "category", "type", "id"]
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
     def __init__(self) -> None:
-        self.in_rows_batch = []
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
     def load_custom(self) -> Dataset:
@@ -345,14 +356,30 @@ class GutenbergBacktranslation(BaseTask):
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
-        self.in_rows_batch = samples_in
-        all_chunks = [_get_chunks_gutenberg(sample) for sample in samples_in]
+        all_chunks = [
+            (
+                _get_chunks_gutenberg(sample, self.tiktoken_encoder),
+                {
+                    "title": sample["title"],
+                    "author": sample["author"],
+                    "id": sample["id"],
+                },
+            )
+            for sample in samples_in
+        ]
         all_chunks = flatten_list(all_chunks)
-        return [format_gutenberg_backtranslation_prompt(chunk) for chunk in all_chunks]
+        self.metadata = [chunk_metadata for _, chunk_metadata in all_chunks]
+        return [
+            format_gutenberg_backtranslation_prompt(chunk) for chunk, _ in all_chunks
+        ]
 
     def format_output_rows(self, completions: List[str]) -> List:
         out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
-            out_rows.append({**row, "instruction": completion})
-        self.in_rows_batch = []
+        for completion, metadata in zip(completions, self.metadata):
+            out_rows.append(
+                {
+                    "instruction": completion,
+                    **metadata,
+                }
+            )
         return out_rows
