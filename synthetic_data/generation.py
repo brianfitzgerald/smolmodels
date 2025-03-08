@@ -382,7 +382,9 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
     RemoteModel.MISTRAL_SMALL_3: RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
-            model_id="mistralai/mistral-small-3", max_rps=500, providers=["Mistral"]
+            model_id="mistralai/mistral-small-24b-instruct-2501",
+            max_rps=500,
+            providers=["Mistral"],
         ),
     ),
     RemoteModel.CLAUDE_3_5: RemoteModelChoice(
