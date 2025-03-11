@@ -26,6 +26,7 @@ from synthetic_data.tasks import BaseTask
 from synthetic_data.tasks.writing import (
     GutenbergExtraction,
     GutenbergBacktranslation,
+    GutenbergFollowUp,
     ScreenplaySummarize,
     WritingRewardAnnotate,
 )
@@ -37,6 +38,7 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
+    "gutenberg_followup": GutenbergFollowUp,
     "writing_reward": WritingRewardAnnotate,
 }
 

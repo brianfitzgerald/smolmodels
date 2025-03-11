@@ -1,34 +1,31 @@
-from concurrent.futures import ThreadPoolExecutor
 import functools
 import json
-from enum import Enum
-from typing import Dict, List, Tuple
-from dataclasses import dataclass
+import os
 import re
-from typing import Sequence, TypedDict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Sequence, Tuple, TypedDict
+
+import polars as pl
+import tiktoken
+from datasets import Dataset
+from huggingface_hub import snapshot_download
 from loguru import logger
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
-from huggingface_hub import snapshot_download
-from datasets import load_dataset
-import polars as pl
-
-import tiktoken
-
-from datasets import Dataset
 from pydantic import BaseModel
-
-# import kagglehub
-import os
-
 from tqdm import tqdm
 
 from synthetic_data.generation import GenWrapperArgs
 from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
 from synthetic_data.judgemark import TASK_PROMPT
-from synthetic_data.prompts import format_gutenberg_backtranslation_prompt
+from synthetic_data.prompts import (
+    format_gutenberg_backtranslation_prompt,
+    format_gutenberg_followup_prompt,
+)
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
-from synthetic_data.utils import Conversation, DatasetFormat, dictl, flatten_list
+from synthetic_data.utils import Conversation, DatasetFormat, dictl
 
 
 @dataclass
@@ -390,4 +387,25 @@ class GutenbergBacktranslation(BaseTask):
                     **metadata,
                 }
             )
+        return out_rows
+
+
+class GutenbergFollowUp(BaseTask):
+    output_dataset_name = "gutenberg_followup"
+    dataset_columns = ["text", "title", "author", "category", "type", "id"]
+    seed_data_format = DatasetFormat.CUSTOM
+    output_dataset_format = DatasetFormat.PARQUET
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        samples_in = dictl(batch)
+        self.samples_in = samples_in
+        return [
+            format_gutenberg_followup_prompt(sample["paragraph"], sample["instruction"])
+            for sample in samples_in
+        ]
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        out_rows = []
+        for completion, sample in zip(completions, self.samples_in):
+            out_rows.append({**sample, "output": completion})
         return out_rows
