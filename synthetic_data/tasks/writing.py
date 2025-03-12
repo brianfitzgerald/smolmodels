@@ -390,6 +390,22 @@ class GutenbergBacktranslation(BaseTask):
         return out_rows
 
 
+class WritingScoreAnnotate(BaseTask):
+    output_dataset_name = "gutenberg_followup_annotated"
+    dataset_columns = ["text", "title", "author", "category", "type", "id"]
+    seed_data_format = DatasetFormat.PARQUET
+    seed_data_location = "gutenberg_followup"
+    output_dataset_format = DatasetFormat.PARQUET
+
+    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+        samples_in = dictl(batch)
+        self.samples_in = samples_in
+        return [
+            format_gutenberg_followup_prompt(sample["paragraph"], sample["instruction"])
+            for sample in samples_in
+        ]
+
+
 class GutenbergFollowUp(BaseTask):
     output_dataset_name = "gutenberg_followup"
     dataset_columns = ["text", "title", "author", "category", "type", "id"]
