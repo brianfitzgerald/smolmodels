@@ -26,6 +26,7 @@ from synthetic_data.prompts import (
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat, dictl
+from synthetic_data.writing_judge import format_gutenberg_judge_prompt
 
 
 @dataclass
@@ -391,7 +392,7 @@ class GutenbergBacktranslation(BaseTask):
 
 
 class WritingScoreAnnotate(BaseTask):
-    output_dataset_name = "gutenberg_followup_annotated"
+    output_dataset_name = "gutenberg_backtranslate"
     dataset_columns = ["text", "title", "author", "category", "type", "id"]
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "gutenberg_followup"
@@ -401,7 +402,7 @@ class WritingScoreAnnotate(BaseTask):
         samples_in = dictl(batch)
         self.samples_in = samples_in
         return [
-            format_gutenberg_followup_prompt(sample["paragraph"], sample["instruction"])
+            format_gutenberg_judge_prompt(sample["instruction"], sample["paragraph"])
             for sample in samples_in
         ]
 
