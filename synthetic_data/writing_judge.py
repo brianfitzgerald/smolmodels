@@ -1,4 +1,21 @@
 from synthetic_data.generation import Conversation
+import re
+
+
+def parse_scores(judge_model_response):
+    scores = {}
+
+    # Parse scores using regex
+    score_pattern = r"(.*?):\s*(?:Score\s+)?(-?\d+(?:\.\d+)?)"
+    matches = re.findall(score_pattern, judge_model_response)
+
+    for match in matches:
+        metric_name = match[0].strip()
+        score = float(match[1])
+        scores[metric_name] = score
+
+    return scores
+
 
 JUDGING_CRITERIA = [
     {
