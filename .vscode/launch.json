@@ -26,9 +26,9 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "gutenberg_backtranslation",
+                "writing_score",
                 "--batch_size",
-                "16"
+                "4"
             ],
         },
         {

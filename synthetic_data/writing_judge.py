@@ -63,7 +63,9 @@ JUDGING_CRITERIA = [
 ]
 
 
-def create_judging_prompt(criteria_set, writing_prompt, test_model_response):
+def create_judging_prompt(
+    criteria_set: dict[str, str], writing_prompt: str, test_model_response: str
+):
     criteria = [x for x in criteria_set["criteria"]]
     prefix_text = criteria_set["prefix_text"]
     criteria_str = "\n".join(criteria)
@@ -155,12 +157,12 @@ Metric 2 name: ...
     return judging_prompt
 
 
-def format_gutenberg_judge_prompt(instruction: str, completion: str) -> Conversation:
+def format_gutenberg_judge_prompt(
+    instruction: str, completion: str, criteria: dict[str, str]
+) -> Conversation:
     return [
         {
             "role": "user",
-            "content": create_judging_prompt(
-                JUDGING_CRITERIA[0], instruction, completion
-            ),
+            "content": create_judging_prompt(criteria, instruction, completion),
         },
     ]

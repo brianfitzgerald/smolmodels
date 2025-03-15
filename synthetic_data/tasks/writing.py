@@ -26,7 +26,11 @@ from synthetic_data.prompts import (
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat, dictl
-from synthetic_data.writing_judge import format_gutenberg_judge_prompt
+from synthetic_data.writing_judge import (
+    JUDGING_CRITERIA,
+    format_gutenberg_judge_prompt,
+    parse_scores,
+)
 
 
 @dataclass
@@ -392,19 +396,35 @@ class GutenbergBacktranslation(BaseTask):
 
 
 class WritingScoreAnnotate(BaseTask):
-    output_dataset_name = "gutenberg_backtranslate"
+    output_dataset_name = "gutenberg_score_annotated"
     dataset_columns = ["text", "title", "author", "category", "type", "id"]
     seed_data_format = DatasetFormat.PARQUET
-    seed_data_location = "gutenberg_followup"
+    seed_data_location = "dataset_files/gutenberg_backtranslate.parquet"
     output_dataset_format = DatasetFormat.PARQUET
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:
         samples_in = dictl(batch)
         self.samples_in = samples_in
-        return [
-            format_gutenberg_judge_prompt(sample["instruction"], sample["paragraph"])
-            for sample in samples_in
-        ]
+        self.sample_idxs = []
+        formatted_convs = []
+        for i, sample in enumerate(samples_in):
+            for j in range(len(JUDGING_CRITERIA)):
+                formatted_convs.append(
+                    format_gutenberg_judge_prompt(
+                        sample["instruction"], sample["paragraph"], JUDGING_CRITERIA[j]
+                    )
+                )
+            self.sample_idxs.extend([i] * len(formatted_convs))
+
+        return formatted_convs
+
+    def format_output_rows(self, completions: List[str]) -> List:
+        out_rows = []
+        for completion, sample_idx in zip(completions, self.sample_idxs):
+            sample = self.samples_in[sample_idx]
+            scores = parse_scores(completion)
+            out_rows.append({**sample, "scores": scores})
+        return out_rows
 
 
 class GutenbergFollowUp(BaseTask):

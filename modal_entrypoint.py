@@ -43,7 +43,7 @@ def training(config: str = "playwright"):
 def generation():
     dataset_root_path = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
     generate_main(
-        task_name="gutenberg_backtranslation",
+        task_name="writing_score",
         dataset_root_path=dataset_root_path,
     )
 

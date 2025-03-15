@@ -29,6 +29,7 @@ from synthetic_data.tasks.writing import (
     GutenbergFollowUp,
     ScreenplaySummarize,
     WritingRewardAnnotate,
+    WritingScoreAnnotate,
 )
 from synthetic_data.utils import DatasetFormat, dictl, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
@@ -40,6 +41,7 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "gutenberg_backtranslation": GutenbergBacktranslation,
     "gutenberg_followup": GutenbergFollowUp,
     "writing_reward": WritingRewardAnnotate,
+    "writing_score": WritingScoreAnnotate,
 }
 
 
