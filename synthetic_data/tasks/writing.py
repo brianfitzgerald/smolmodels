@@ -399,7 +399,7 @@ class WritingScoreAnnotate(BaseTask):
     output_dataset_name = "gutenberg_score_annotated"
     dataset_columns = ["text", "title", "author", "category", "type", "id"]
     seed_data_format = DatasetFormat.PARQUET
-    seed_data_location = "dataset_files/gutenberg_backtranslate.parquet"
+    seed_data_location = "gutenberg_backtranslate"
     output_dataset_format = DatasetFormat.PARQUET
 
     def format_input_conversation(self, batch: Dict) -> List[Conversation]:

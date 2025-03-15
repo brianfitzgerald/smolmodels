@@ -234,10 +234,15 @@ def main(
                 Dataset, load_dataset(input_dataset_location, split=split)
             )
         elif task.seed_data_format == DatasetFormat.TSV:
-            seed_data = pd.read_csv(input_dataset_location, on_bad_lines="skip")
+            seed_data = pd.read_csv(
+                os.path.join(dataset_root_path, f"{input_dataset_location}.tsv"),
+                on_bad_lines="skip",
+            )
             input_dataset = Dataset.from_pandas(seed_data)
         elif task.seed_data_format == DatasetFormat.PARQUET:
-            input_dataset = Dataset.from_parquet(input_dataset_location)  # type: ignore
+            input_dataset = Dataset.from_parquet(
+                os.path.join(dataset_root_path, f"{input_dataset_location}.parquet")
+            )  # type: ignore
         else:
             raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
 
