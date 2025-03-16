@@ -1,4 +1,5 @@
 import functools
+import glob
 import json
 import os
 import re
@@ -279,7 +280,10 @@ def _count_sentences(text):
     return len(re.findall(r"[.!?]", text))
 
 
-def find_valid_chunks(lst: list[str], encoder: tiktoken.Encoding):
+def find_valid_paragraph_chunks(lst: list[str]):
+    """
+    Find chunks of consecutive paragraphs with dialogue and at least 3 sentences.
+    """
     chunks, current_chunk = [], []
 
     for item in lst:
@@ -290,7 +294,7 @@ def find_valid_chunks(lst: list[str], encoder: tiktoken.Encoding):
         ):
             current_chunk.append(item)
         else:
-            if len(current_chunk) >= 2:
+            if len(current_chunk) >= 5:
                 chunks.append(current_chunk)
             current_chunk = []
 
@@ -307,13 +311,13 @@ def _get_chunks_gutenberg(row: dict, encoder: tiktoken.Encoding):
     paragraphs = super_cleaner(text)
 
     # find chunks of consecutive paragraphs with dialogue and at least 3 sentences
-    valid_chunks = find_valid_chunks(paragraphs, encoder)
+    valid_chunks = find_valid_paragraph_chunks(paragraphs)
 
     # filter out chunks that are too long or too short
     out = []
     for chunk in valid_chunks:
         tokens = encoder.encode(" ".join(chunk))
-        if len(tokens) > 500 and len(tokens) < 2000:
+        if len(tokens) > 1000 and len(tokens) < 10000:
             out.append(chunk)
     return out
 
@@ -393,6 +397,23 @@ class GutenbergBacktranslation(BaseTask):
                 }
             )
         return out_rows
+
+
+class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
+    def load_custom(self) -> Dataset:
+        txt_dir = os.path.expanduser("~/Documents/txt")
+        txt_files = list(glob.glob(os.path.join(txt_dir, "*.txt")))
+        txt_file_contents = [
+            {
+                "title": os.path.basename(txt_file),
+                "text": open(txt_file).read(),
+                "id": "",
+                "author": "",
+                "category": "",
+            }
+            for txt_file in txt_files
+        ]
+        return Dataset.from_list(txt_file_contents)
 
 
 class WritingScoreAnnotate(BaseTask):
