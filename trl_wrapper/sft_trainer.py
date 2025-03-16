@@ -105,8 +105,8 @@ class CustomSFTTrainer(SFTTrainer):
                 skip_special_tokens=self.eval_skip_special_tokens,
             )
             labels_decodeable = labels.clone()
-            labels_decodeable[labels_decodeable == -100] = (
-                self.processing_class.pad_token_id
+            labels_decodeable[labels_decodeable == -100] = (  # type: ignore
+                self.processing_class.pad_token_id  # type: ignore
             )
             labels_decoded = self.processing_class.batch_decode(  # type: ignore
                 labels_decodeable,

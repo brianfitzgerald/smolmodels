@@ -6,7 +6,7 @@ import shutil
 import traceback
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Sequence, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import pandas as pd
 from loguru import logger

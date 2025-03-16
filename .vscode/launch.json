@@ -74,5 +74,16 @@
             "program": "gradio_ui.py",
             "justMyCode": false,
         },
+        {
+            "name": "Convert EPUBs to TXT",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "util_scripts.py",
+            "args": [
+                "convert_epubs_to_txt",
+                "--root_dir",
+                "~/Documents/epubs"
+            ]
+        }
     ]
 }
