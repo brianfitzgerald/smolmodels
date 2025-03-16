@@ -2,8 +2,6 @@ import string
 from builtins import str
 import os
 import re
-import tiktoken
-import unicodedata
 
 TEXT_START_MARKERS = frozenset(
     (
@@ -140,15 +138,11 @@ starts_with_regex = re.compile("^[%_<>*]")
 image_formats_regex = re.compile("\.png|\.jpg|\.jpeg|\.gif|picture:")
 
 
-def _is_title_or_etc(text: str, min_token: int = 5, max_token: int = 600) -> bool:
+def _is_title_or_etc(text: str, min_token: int = 5) -> bool:
     txt = text.strip()
-    tokenizer = tiktoken.get_encoding("o200k_base")
-    num_token = len(tokenizer.encode(txt)) if min_token >= 0 else -1
-    if num_token > max_token:
-        return True
     if (
         len(txt) == 0
-        or num_token < min_token
+        or len(txt) < min_token
         and not (txt.count('"') == 2 or txt.count("'") == 2 or txt[-1] == ":")
     ):
         return True
@@ -225,7 +219,7 @@ def super_cleaner(book: str, min_token: int = 5, max_token: int = 600) -> list[s
             or _is_email_init(par)
             or _is_books_copy(par)
             or _is_table(par)
-            or _is_title_or_etc(par, min_token, max_token)
+            or _is_title_or_etc(par, min_token)
             or _starts_with_formatting(par)
         ):
             paragraphs_after_cleaning.append(par)

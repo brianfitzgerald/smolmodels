@@ -24,6 +24,7 @@ from synthetic_data.generation import (
 )
 from synthetic_data.tasks import BaseTask
 from synthetic_data.tasks.writing import (
+    GutenbergBacktranslationFromTxt,
     GutenbergExtraction,
     GutenbergBacktranslation,
     GutenbergFollowUp,
@@ -39,6 +40,7 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
+    "gutenberg_backtranslation_from_txt": GutenbergBacktranslationFromTxt,
     "gutenberg_followup": GutenbergFollowUp,
     "writing_reward": WritingRewardAnnotate,
     "writing_score": WritingScoreAnnotate,
@@ -137,7 +139,7 @@ def main(
     batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: str = RemoteModel.MISTRAL_SMALL_3.value,
+    model: RemoteModel = "mistral-small-3",
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,

@@ -280,44 +280,54 @@ def _count_sentences(text):
     return len(re.findall(r"[.!?]", text))
 
 
-def find_valid_paragraph_chunks(lst: list[str]):
+def find_valid_paragraph_chunks(
+    lst: list[str],
+    encoder: tiktoken.Encoding,
+    min_chunk_size_tokens: int = 600,
+) -> list[list[str]]:
     """
-    Find chunks of consecutive paragraphs with dialogue and at least 3 sentences.
+    Find chunks of consecutive paragraphs with dialogue and at least 2 sentences,
+    and at least min_chunk_size_tokens tokens.
     """
     chunks, current_chunk = [], []
-
+    current_chunk_tokens = 0
     for item in lst:
         if (
             item != "[deleted]"
             and _contains_dialogue(item)
-            and _count_sentences(item) >= 3
+            and _count_sentences(item) >= 2
         ):
+            item_tokens = len(encoder.encode(item))
             current_chunk.append(item)
+            current_chunk_tokens += item_tokens
         else:
-            if len(current_chunk) >= 5:
+            if current_chunk_tokens >= min_chunk_size_tokens:
                 chunks.append(current_chunk)
             current_chunk = []
+            current_chunk_tokens = 0
 
-    if len(current_chunk) >= 3:
+    # handle the last chunk
+    if current_chunk_tokens >= min_chunk_size_tokens:
         chunks.append(current_chunk)
 
     return chunks
 
 
-def _get_chunks_gutenberg(row: dict, encoder: tiktoken.Encoding):
+def _get_paragraph_chunks(row: dict, encoder: tiktoken.Encoding):
     text = row["text"]
 
     # clean and extract paragraphs
     paragraphs = super_cleaner(text)
 
     # find chunks of consecutive paragraphs with dialogue and at least 3 sentences
-    valid_chunks = find_valid_paragraph_chunks(paragraphs)
+    valid_chunks = find_valid_paragraph_chunks(paragraphs, encoder)
 
     # filter out chunks that are too long or too short
     out = []
     for chunk in valid_chunks:
         tokens = encoder.encode(" ".join(chunk))
-        if len(tokens) > 1000 and len(tokens) < 10000:
+        logger.info(f"Chunk length: {len(tokens)}")
+        if len(tokens) < 1000:
             out.append(chunk)
     return out
 
@@ -364,7 +374,7 @@ class GutenbergBacktranslation(BaseTask):
         samples_in = dictl(batch)
         all_chunks: List[Tuple[List[str], Dict]] = [
             (
-                _get_chunks_gutenberg(sample, self.tiktoken_encoder),
+                _get_paragraph_chunks(sample, self.tiktoken_encoder),
                 {
                     "title": sample["title"],
                     "author": sample["author"],
@@ -400,6 +410,8 @@ class GutenbergBacktranslation(BaseTask):
 
 
 class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
+    output_dataset_name = "gutenberg_backtranslate_from_txt"
+
     def load_custom(self) -> Dataset:
         txt_dir = os.path.expanduser("~/Documents/txt")
         txt_files = list(glob.glob(os.path.join(txt_dir, "*.txt")))

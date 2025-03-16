@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 from enum import Enum
 import traceback
-from typing import Dict, List, Optional, cast
+from typing import Dict, List, Optional, cast, Literal
 from datetime import datetime, timedelta
 import asyncio
 from collections import deque
@@ -319,6 +319,7 @@ def _openai_conversation_to_gemini(conversation: Conversation):
 class GeminiWrapper(GenerationWrapper):
     def __init__(self, args: GenWrapperArgs) -> None:
         api_key = os.environ.get("GOOGLE_API_KEY")
+        self.model_id = args.model_id or "gemini-2.0-flash"
         if api_key is None:
             raise ValueError("GOOGLE_API_KEY is required for GeminiWrapper")
         self.client = genai.Client(api_key=api_key)
@@ -329,7 +330,7 @@ class GeminiWrapper(GenerationWrapper):
         for conv in [_openai_conversation_to_gemini(c) for c in conversations]:
             reqs.append(
                 self.client.aio.models.generate_content(
-                    model="gemini-1.5-flash-8b",
+                    model=self.model_id,
                     contents=conv,  # type: ignore
                 )
             )
@@ -346,17 +347,19 @@ class GeminiWrapper(GenerationWrapper):
         return [result.text for result in results]
 
 
-class RemoteModel(str, Enum):
-    CLAUDE_3_5 = "claude-3-5"
-    QWEN_QWQ = "qwen-qwq"
-    DEEPSEEK_V3 = "deepseek-v3"
-    DEEPSEEK_R1 = "deepseek-r1"
-    MISTRAL_SMALL_3 = "mistral-small-3"
-    GPT_4O_MINI = "gpt-4o-mini"
-    GPT_4O = "gpt-4o"
-    GPT_O3_MINI = "o3-mini"
-    MOCK = "mock"
-    VLLM = "vllm"
+RemoteModel = Literal[
+    "claude-3-5",
+    "qwen-qwq",
+    "deepseek-v3",
+    "deepseek-r1",
+    "mistral-small-3",
+    "gpt-4o-mini",
+    "gpt-4o",
+    "o3-mini",
+    "mock",
+    "vllm",
+    "gemini-2.0-flash",
+]
 
 
 @dataclass
@@ -365,22 +368,22 @@ class RemoteModelChoice:
     args: Optional[GenWrapperArgs] = None
 
 
-MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
-    RemoteModel.QWEN_QWQ: RemoteModelChoice(
+MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
+    "qwen-qwq": RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(model_id="qwen/qwq-32b-preview", max_rps=500),
     ),
-    RemoteModel.DEEPSEEK_V3: RemoteModelChoice(
+    "deepseek-v3": RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(model_id="deepseek/deepseek-chat", max_rps=500),
     ),
-    RemoteModel.DEEPSEEK_R1: RemoteModelChoice(
+    "deepseek-r1": RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
             model_id="deepseek/deepseek-r1", max_rps=500, providers=["Fireworks"]
         ),
     ),
-    RemoteModel.MISTRAL_SMALL_3: RemoteModelChoice(
+    "mistral-small-3": RemoteModelChoice(
         OpenRouterGenerationWrapper,
         GenWrapperArgs(
             model_id="mistralai/mistral-small-24b-instruct-2501",
@@ -388,39 +391,42 @@ MODEL_CONFIGS: dict[str, RemoteModelChoice] = {
             max_concurrent=8,
         ),
     ),
-    RemoteModel.CLAUDE_3_5: RemoteModelChoice(
+    "claude-3-5": RemoteModelChoice(
         AnthropicGenerationWrapper,
         GenWrapperArgs(max_rps=50 / 60),
     ),
-    RemoteModel.GPT_4O_MINI: RemoteModelChoice(
+    "gpt-4o-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4o-mini", max_rps=int(5000 / 60)),
     ),
-    RemoteModel.GPT_4O: RemoteModelChoice(
+    "gpt-4o": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4o", max_rps=5000 / 60),
     ),
-    RemoteModel.MOCK: RemoteModelChoice(MockGenerator),
-    RemoteModel.VLLM: RemoteModelChoice(
+    "mock": RemoteModelChoice(MockGenerator),
+    "vllm": RemoteModelChoice(
         VLLMWrapper,
         GenWrapperArgs(max_rps=8.0),
     ),
-    RemoteModel.GPT_O3_MINI: RemoteModelChoice(
+    "o3-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="o3-mini", max_rps=5000 / 60, is_reasoning_model=True),
+    ),
+    "gemini-2.0-flash": RemoteModelChoice(
+        GeminiWrapper,
+        GenWrapperArgs(model_id="gemini-2.0-flash", max_rps=5000 / 60),
     ),
 }
 
 
 def get_generation_wrapper(
-    model_name: str, args_override: GenWrapperArgs | None = None
+    model_name: RemoteModel, args_override: GenWrapperArgs | None = None
 ) -> GenerationWrapper:
-    model_name_enum = RemoteModel(model_name)
-    if "HF_TOKEN" not in os.environ:
+    if "HF_TOKEN" in os.environ:
         hf_token = os.environ["HF_TOKEN"]
         logger.info("Logging in to Hugging Face Hub")
         login(token=hf_token, add_to_git_credential=True)
-    config = MODEL_CONFIGS[model_name_enum]
+    config = MODEL_CONFIGS[model_name]
     if args_override:
         for field in fields(args_override):
             if (
