@@ -6,7 +6,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Sequence, Tuple, TypedDict
+from typing import Coroutine, Dict, List, Sequence, Tuple, TypedDict
 
 import polars as pl
 import tiktoken
@@ -50,49 +50,24 @@ class ScreenplaySummarize(BaseTask):
         self.in_rows_batch = []
         self.max_samples = 50000
 
-    def load_custom(self):
-        return Dataset.from_dict({})
-        # scripts_corpus_path = kagglehub.dataset_download(
-        #     "veeralakrishna/imsdb-movie-scripts"
-        # )
-        # scripts_pqt_path = os.path.join(scripts_corpus_path, "movie_scripts.parquet")
-        # dataset: Dataset = Dataset.from_parquet(scripts_pqt_path)  # type: ignore
-        # return dataset
-
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        def process_row(row):
-            new_rows = []
-            movie_title = row["Movie"]
-            parser = ScreenplayParser(row["Script"])
-            parser.parse()
-            if len(parser.scenes) < 20 or len(parser.character_line_counts) < 20:
-                return new_rows
-            for scene in parser.scenes:
-                new_rows.append(
-                    {
-                        "name": movie_title,
-                        "scene": ScreenplayParser.format_conversation(scene),
-                    }
-                )
+    async def preprocess_row(self, row: dict) -> list[dict]:
+        new_rows = []
+        movie_title = row["Movie"]
+        parser = ScreenplayParser(row["Script"])
+        parser.parse()
+        if len(parser.scenes) < 20 or len(parser.character_line_counts) < 20:
             return new_rows
+        for scene in parser.scenes:
+            new_rows.append(
+                {
+                    "name": movie_title,
+                    "scene": ScreenplayParser.format_conversation(scene),
+                }
+            )
+        return new_rows
 
-        all_new_rows = []
-        with ThreadPoolExecutor() as executor:
-            for result in tqdm(
-                executor.map(process_row, dataset),
-                desc="Splitting scenes",
-                total=len(dataset),
-            ):
-                all_new_rows.extend(result)
-
-        dataset = Dataset.from_list(all_new_rows)
-        dataset = dataset.filter(lambda x: x["scene"] != "")
-        dataset = dataset.shuffle(seed=42)
-        # dataset = dataset.select(range(self.max_samples))
-        return dataset
-
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        samples_in = batch
         conv_out = []
         for sample in samples_in:
             scene = sample["scene"]
@@ -107,9 +82,11 @@ class ScreenplaySummarize(BaseTask):
             self.in_rows_batch.append(sample)
         return conv_out
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
+        for completion, row in zip(completions, input_rows):
             row["summary"] = completion
             out_rows.append(row)
         self.in_rows_batch = []
@@ -210,22 +187,19 @@ class GutenbergExtraction(BaseTask):
         self.in_rows_batch = []
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        map_fn = functools.partial(
-            _process_gutenberg_extraction_row, encoder=self.tiktoken_encoder
-        )
-        dataset = dataset.map(map_fn)
-        return dataset
+    async def preprocess_row(self, row: dict) -> list[dict]:
+        return [_process_gutenberg_extraction_row(row, self.tiktoken_encoder)]  # type: ignore
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        samples_in = batch
         self.in_rows_batch = samples_in
-        # TODO length splitting
         return [_format_gutenberg_conv(sample) for sample in samples_in]
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
+        for completion, row in zip(completions, input_rows):
             json_str = Output.model_validate(json.loads(completion)).model_dump_json()
             out_rows.append({**row, "output": json_str})
         self.in_rows_batch = []
@@ -251,8 +225,8 @@ class WritingRewardAnnotate(BaseTask):
         "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
     )
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        samples_in = batch
         in_batch = []
         samples_out = []
         for sample in samples_in:
@@ -264,9 +238,11 @@ class WritingRewardAnnotate(BaseTask):
         self.in_rows_batch = in_batch
         return samples_out
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
-        for completion, row in zip(completions, self.in_rows_batch):
+        for completion, row in zip(completions, input_rows):
             out_rows.append({**row, "output": completion})
         self.in_rows_batch = []
         return out_rows
@@ -283,31 +259,24 @@ def _count_sentences(text):
 def find_valid_paragraph_chunks(
     lst: list[str],
     encoder: tiktoken.Encoding,
-    min_chunk_size_tokens: int = 600,
+    min_chunk_size_tokens: int = 1500,
 ) -> list[list[str]]:
-    """
-    Find chunks of consecutive paragraphs with dialogue and at least 2 sentences,
-    and at least min_chunk_size_tokens tokens.
-    """
     chunks, current_chunk = [], []
     current_chunk_tokens = 0
-    for item in lst:
-        if (
-            item != "[deleted]"
-            and _contains_dialogue(item)
-            and _count_sentences(item) >= 2
-        ):
-            item_tokens = len(encoder.encode(item))
-            current_chunk.append(item)
-            current_chunk_tokens += item_tokens
-        else:
-            if current_chunk_tokens >= min_chunk_size_tokens:
-                chunks.append(current_chunk)
-            current_chunk = []
-            current_chunk_tokens = 0
 
-    # handle the last chunk
-    if current_chunk_tokens >= min_chunk_size_tokens:
+    for item in lst:
+        if item != "[deleted]":
+            item_tokens = len(encoder.encode(item))
+
+            if current_chunk and current_chunk_tokens >= min_chunk_size_tokens:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_chunk_tokens = 0
+            else:
+                current_chunk.append(item)
+                current_chunk_tokens += item_tokens
+
+    if current_chunk and current_chunk_tokens >= min_chunk_size_tokens:
         chunks.append(current_chunk)
 
     return chunks
@@ -326,8 +295,7 @@ def _get_paragraph_chunks(row: dict, encoder: tiktoken.Encoding):
     out = []
     for chunk in valid_chunks:
         tokens = encoder.encode(" ".join(chunk))
-        logger.info(f"Chunk length: {len(tokens)}")
-        if len(tokens) < 1000:
+        if len(tokens) < 10000:
             out.append(chunk)
     return out
 
@@ -366,22 +334,16 @@ class GutenbergBacktranslation(BaseTask):
         logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
         return Dataset.from_polars(shards_pl)
 
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        dataset = dataset.shuffle(seed=64)
-        return dataset
-
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    async def preprocess_row(self, row: Dict) -> list[dict]:
         all_chunks: List[Tuple[List[str], Dict]] = [
             (
-                _get_paragraph_chunks(sample, self.tiktoken_encoder),
+                _get_paragraph_chunks(row, self.tiktoken_encoder),
                 {
-                    "title": sample["title"],
-                    "author": sample["author"],
-                    "id": sample["id"],
+                    "title": row["title"],
+                    "author": row["author"],
+                    "id": row["id"],
                 },
             )
-            for sample in samples_in
         ]
         paragraphs: List[Tuple[str, Dict]] = []
         for chunks, metadata in all_chunks:
@@ -390,20 +352,29 @@ class GutenbergBacktranslation(BaseTask):
                 continue
             for chunk in chunks:
                 paragraphs.append(("\n\n".join(chunk), metadata))
-        self.metadata = [chunk_metadata for _, chunk_metadata in paragraphs]
-        self.paragraphs = [chunk for chunk, _ in paragraphs]
-        return [format_gutenberg_backtranslation_prompt(p) for p, _ in paragraphs]
+        rows_out = []
+        for chunk, metadata in paragraphs:
+            rows_out.append(
+                {
+                    "text": chunk,
+                    **metadata,
+                }
+            )
+        return rows_out
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        return [format_gutenberg_backtranslation_prompt(p["text"]) for p in batch]
+
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
-        for completion, metadata, paragraph in zip(
-            completions, self.metadata, self.paragraphs
-        ):
+        for completion, row in zip(completions, input_rows):
             out_rows.append(
                 {
                     "instruction": completion,
-                    "paragraph": paragraph,
-                    **metadata,
+                    "paragraph": row["text"],
+                    **row,
                 }
             )
         return out_rows
@@ -435,8 +406,8 @@ class WritingScoreAnnotate(BaseTask):
     seed_data_location = "gutenberg_backtranslate"
     output_dataset_format = DatasetFormat.PARQUET
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        samples_in = batch
         self.samples_in = samples_in
         self.sample_idxs = []
         formatted_convs = []
@@ -451,7 +422,9 @@ class WritingScoreAnnotate(BaseTask):
 
         return formatted_convs
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
         for completion, sample_idx in zip(completions, self.sample_idxs):
             sample = self.samples_in[sample_idx]
@@ -466,16 +439,18 @@ class GutenbergFollowUp(BaseTask):
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        samples_in = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        samples_in = batch
         self.samples_in = samples_in
         return [
             format_gutenberg_followup_prompt(sample["paragraph"], sample["instruction"])
             for sample in samples_in
         ]
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
         out_rows = []
-        for completion, sample in zip(completions, self.samples_in):
+        for completion, sample in zip(completions, input_rows):
             out_rows.append({**sample, "output": completion})
         return out_rows

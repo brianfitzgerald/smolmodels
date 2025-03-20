@@ -1,10 +1,8 @@
 import json
 import random
 import sys
-import traceback
 from enum import Enum
 from typing import Dict, List, Optional
-from datasets import Dataset
 from loguru import logger
 from pydantic import ValidationError
 from rich.console import Console
@@ -22,8 +20,6 @@ from evaluation.code_execution import (
     get_fn_name_from_assert,
     print_code_snippet,
 )
-from synthetic_data.conversion import chatml_to_conversation
-from synthetic_data.generation import SHAREGPT_TO_OPENAI_ROLE
 from synthetic_data.prompts import (
     format_codecontests_cot_generation_prompt,
     format_codecontests_generation_prompt,
@@ -31,26 +27,19 @@ from synthetic_data.prompts import (
     format_entity_extraction_conversation_template,
     format_goody_prompt_template,
     format_humaneval_generation_prompt,
-    get_tool_usage_prompt,
     get_toolformer_dpo_negative_completion_prompt,
 )
 from synthetic_data.tools import (
-    DROPOUT_TYPES_JSON,
     DROPOUT_TYPES_TOOLFORMER,
-    get_tool_description_json,
     get_tool_descriptions,
 )
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
     ExtractiveQARow,
-    SyntheticToolCallDPORow,
-    SyntheticToolCallRow,
     ToolFormerDPORow,
     ToolFormerRow,
     chunk_list,
-    clean_message,
-    dictl,
     extract_code_block,
     flatten_list,
     get_matches,
@@ -70,8 +59,8 @@ class PromptUpsample(BaseTask):
 
     dataset_columns = ["Prompt", "Category", "Upsampled"]
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        prompts = batch["Prompt"]
+    def format_input_conversation(self, batch: List[Dict]) -> List[Conversation]:
+        prompts = [item["Prompt"] for item in batch]
         return [format_dalle_prompt_template(prompt) for prompt in prompts]
 
 
@@ -106,8 +95,8 @@ class Toolformer(DPOTask):
         ]
 
     # TODO re add the original row to the input conv
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        conversations = batch["conversations"]
+    def format_input_conversation(self, batch: List[Dict]) -> List[Conversation]:
+        conversations = [item["conversations"] for item in batch]
 
         dropout_types_batch = random.choices(
             DROPOUT_TYPES_TOOLFORMER, k=len(conversations)
@@ -175,149 +164,6 @@ class Toolformer(DPOTask):
         return new_rows_batch
 
 
-class SyntheticToolCalls(DPOTask):
-    seed_data_format = DatasetFormat.TSV
-    seed_data_location = "data/domain_specific_tasks.csv"
-
-    dataset_org = "roborovski"
-
-    output_dataset_name = "synthetic-tool-calls-v2-dpo-pairs"
-
-    dataset_columns = ["tool", "question", "tool_call", "call_result"]
-
-    original_rows_batch: List[SyntheticToolCallRow] = []
-
-    # TODO fix
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        conversations = []
-        for category, task in zip(batch["Category"], batch["Task"]):
-            conversations.append(get_tool_usage_prompt(category, task))
-
-        n_samples = len(batch["tool"])
-        dropout_types_batch = random.choices(DROPOUT_TYPES_JSON, k=n_samples)
-
-        conversations_batch: List[Conversation] = []
-        original_rows_batch: List[SyntheticToolCallRow] = []
-        for i in range(n_samples):
-            for _ in range(self.n_dpo_completions):
-                try:
-                    question = batch["question"][i]
-                    tool = batch["tool"][i]
-                    original_row = SyntheticToolCallRow(
-                        tool=tool,
-                        question=question,
-                        tool_call=batch["tool_call"][i],
-                        call_result=batch["call_result"][i],
-                        agent_output=batch["agent_output"][i],
-                    )
-                    tool_descriptions = get_tool_description_json(
-                        tool, dropout_types_batch[i]
-                    )
-                    conversation = get_toolformer_dpo_negative_completion_prompt(
-                        question, tool_descriptions, True
-                    )
-                    conversations_batch.append(conversation)
-                    original_rows_batch.append(original_row)
-                except Exception as e:
-                    logger.error(f"Error in formatting DPO input: {e}")
-                    traceback.print_exc()
-                    continue
-        self.original_rows_batch = original_rows_batch
-        return conversations_batch
-
-    # TODO fix
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
-        # Get completions for each prompt, rank, and choos the 2 highest
-        new_rows_batch = []
-        for completion, original_row in zip(completions, self.original_rows_batch):
-            try:
-                tool_call, call_result, agent_output = get_matches(completion)
-
-                if (
-                    tool_call == original_row.tool_call
-                    and agent_output == original_row.agent_output
-                ):
-                    continue
-
-                dpo_row = SyntheticToolCallDPORow(
-                    original_row.tool,
-                    original_row.question,
-                    original_row.tool_call,
-                    original_row.call_result,
-                    original_row.agent_output,
-                    tool_call,
-                    call_result,
-                    agent_output,
-                )
-                row_dict = dpo_row.__dict__
-                new_rows_batch.append(row_dict)
-
-            except Exception as e:
-                traceback.print_exc()
-                logger.error(f"Error in parsing completion: {e}")
-                continue
-
-        return new_rows_batch
-
-
-class GlaiveDPO(DPOTask):
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        glaive_conversations = [
-            chatml_to_conversation(chat, system)
-            for chat, system in zip(batch["chat"], batch["system"])
-        ]
-        prompt_conversations: List[Conversation] = []
-        for conversation in glaive_conversations:
-            completion_conv = []
-            for msg in conversation:
-                if msg["from"] == "gpt":
-                    break
-                completion_conv.append(
-                    {
-                        "role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]],
-                        "content": msg["value"],
-                    }
-                )
-            prompt_conversations.append(completion_conv)
-        return prompt_conversations
-
-    def _clean_glaive_conversation(
-        self, completions: List[str], glaive_conversations: List[Dict]
-    ) -> List[Dict]:
-        new_rows_batch = []
-        for completion, glaive_conversation in zip(completions, glaive_conversations):
-            system_msg, user_msg, accepted_msg, rejected_msg = (
-                "",
-                "",
-                "",
-                "",
-            )
-            for msg in glaive_conversation:
-                role, content = msg["from"], msg["value"]
-                if role == "system":
-                    system_msg = clean_message(content)
-                if role == "human":
-                    user_msg = clean_message(content)
-                if role == "gpt":
-                    accepted_msg = clean_message(content)
-                    rejected_msg = completion
-                    break
-            new_rows_batch.append(
-                {
-                    "system": system_msg,
-                    "question": user_msg,
-                    "chosen": accepted_msg,
-                    "rejected": rejected_msg,
-                }
-            )
-
-        # TODO fix
-        return [
-            {"role": SHAREGPT_TO_OPENAI_ROLE[msg["from"]], "content": msg["value"]}
-            for msg in new_rows_batch
-        ]
-
-
 class SquadExtractiveQA(BaseTask):
     """
     Performs the following steps:
@@ -333,14 +179,16 @@ class SquadExtractiveQA(BaseTask):
 
     dataset_columns = ["id", "context", "json_schema", "fields"]
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        prompts = batch["context"]
-        self.contexts = batch["context"]
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        prompts = [item["context"] for item in batch]
+        self.contexts = [item["context"] for item in batch]
         return [
             format_entity_extraction_conversation_template(prompt) for prompt in prompts
         ]
 
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List[Dict]:
         parsed_rows: List[ExtractiveQARow] = []
         for i, completion in enumerate(completions):
             blocks = extract_code_block(completion)
@@ -377,36 +225,22 @@ class SquadExtractiveQA(BaseTask):
         return out_rows
 
 
-def _filter_dolly_row(row: Dict) -> bool:
-    ctx = row["context"]
-    return ctx is not None and ctx != ""
-
-
-class DollyEntityExtraction(SquadExtractiveQA):
-    seed_data_location = "databricks/databricks-dolly-15k"
-    output_dataset_name = "dolly-entity-extraction"
-
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        logger.info(f"Original dataset length: {len(dataset)}")
-        dataset = dataset.filter(_filter_dolly_row)
-        logger.info(f"Filtered dataset length: {len(dataset)}")
-        return dataset
-
-
 class Goody2(BaseTask):
     seed_data_format = DatasetFormat.HF_DATASET
     seed_data_location = "yahma/alpaca-cleaned"
     dataset_columns = ["instruction", "response"]
     output_dataset_name = "open-goody2"
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        self.instructions = batch["instruction"]
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        self.instructions = [item["instruction"] for item in batch]
         return [
             format_goody_prompt_template(instruction)
             for instruction in self.instructions
         ]
 
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List[Dict]:
         res = []
         for completion, instruction in zip(completions, self.instructions):
             res.append(
@@ -430,9 +264,12 @@ class HumanEval(DPOTask):
         self.console = Console()
         self.n_completions_per_sample = 4
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        fn_name, tests = batch["entry_point"], batch["test"]
-        self.input_batch = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        fn_name, tests = (
+            [item["entry_point"] for item in batch],
+            [item["test"] for item in batch],
+        )
+        self.input_batch = batch
         self.input_conversations = []
 
         for f, i in zip(fn_name, tests):
@@ -442,7 +279,9 @@ class HumanEval(DPOTask):
             )
         return self.input_conversations
 
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List[Dict]:
         res, err, j = [], None, 0
         for i, completions_for_sample in enumerate(
             chunk_list(completions, self.n_completions_per_sample)
@@ -552,8 +391,8 @@ class CodeContests(HumanEval):
             )
         return conv
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
-        input_batch = dictl(batch)
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        input_batch = batch
         self.problems = [CodeContestsProblem(**row) for row in input_batch]
         self.input_conversations = []
 
@@ -576,7 +415,9 @@ class CodeContests(HumanEval):
                 )
         return self.input_conversations
 
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List[Dict]:
         res = []
         for i, completions_for_sample in enumerate(
             chunk_list(completions, self.n_completions_per_sample)

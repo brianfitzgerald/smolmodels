@@ -1,7 +1,6 @@
 import asyncio
 from copy import copy
-import traceback
-from typing import Dict, List, Optional, cast
+from typing import Dict, Optional, cast
 
 from dotenv import load_dotenv
 import fire
@@ -11,14 +10,13 @@ from datasets.data_files import EmptyDatasetError
 from datasets.exceptions import DatasetNotFoundError
 from huggingface_hub import HfApi
 from loguru import logger
-from tqdm import tqdm
 import os
 
+from gyms.run import run_environments
 from gyms.twenty_questions.env import TextEnv
 from synthetic_data.generation import (
     GenWrapperArgs,
     get_generation_wrapper,
-    MockGenerator,
     RemoteModel,
     save_output_dataset,
 )
@@ -32,7 +30,7 @@ from synthetic_data.tasks.writing import (
     WritingRewardAnnotate,
     WritingScoreAnnotate,
 )
-from synthetic_data.utils import DatasetFormat, dictl, print_result_dicts
+from synthetic_data.utils import DatasetFormat, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
 
 
@@ -52,84 +50,104 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 }
 
 
-async def run_environments(
-    envs: List[TextEnv],
-    n_epochs: int,
+async def process_batch(
+    task: BaseTask, generation_wrapper, input_rows: list[dict]
+) -> list[dict]:
+    logger.info(f"Processing batch of {len(input_rows)} rows")
+    conversations_batch = task.format_input_conversation(input_rows)
+    if len(conversations_batch) == 0:
+        logger.warning("Skipping empty batch")
+        return []
+
+    logger.info(f"Generating batch of {len(conversations_batch)} completions...")
+    try:
+        completions = await generation_wrapper.generate(conversations_batch)
+        output_rows = task.format_output_rows(completions, input_rows)
+        logger.info(f"Generated {len(output_rows)} output rows")
+        return output_rows
+    except TimeoutError:
+        logger.error("Timeout error processing batch")
+        return []
+    except Exception as e:
+        logger.error(f"Error processing batch: {str(e)}")
+        return []
+
+
+async def collect_preprocessed_rows(
+    task: BaseTask, input_dataset: Dataset, batch_size: int, max_input_buffer: int = 10
+) -> list[dict]:
+    preprocessed_rows = []
+    input_buffer = []
+    current_position = 0
+
+    while current_position < len(input_dataset):
+        # Fill input buffer
+        while len(input_buffer) < max_input_buffer and current_position < len(
+            input_dataset
+        ):
+            input_buffer.append(input_dataset[current_position])
+            current_position += 1
+
+        if not input_buffer:
+            break
+
+        logger.info(f"Processing buffer of {len(input_buffer)} rows")
+        # Process current buffer
+        results = []
+        for row in input_buffer:
+            result = await task.preprocess_row(row)
+            if result:
+                results.extend(result)
+        input_buffer.clear()
+
+        # Extend preprocessed rows with results
+        preprocessed_rows.extend(results)
+
+        # If we have enough rows, return a batch
+        if len(preprocessed_rows) >= batch_size:
+            to_return = preprocessed_rows[:batch_size]
+            preprocessed_rows = preprocessed_rows[batch_size:]
+            return to_return
+
+    return preprocessed_rows if preprocessed_rows else []
+
+
+async def process_dataset(
+    task: BaseTask,
+    generation_wrapper,
+    input_dataset: Dataset,
+    batch_size: int,
     save_every_n_batches: int,
+    output_dataset: Dataset,
     dataset_root_path: str,
-):
-    out_convs = []
-    out_metadata = []
+) -> list[dict]:
+    all_new_dataset_rows = []
+    batch_count = 0
 
-    logger.info(f"Running {len(envs)} environments, {n_epochs} epochs")
+    while True:
+        preprocessed_batch = await collect_preprocessed_rows(
+            task, input_dataset, batch_size
+        )
+        if not preprocessed_batch:
+            break
 
-    output_dataset_name, output_dataset_format = (
-        envs[0].task.output_dataset_name,
-        envs[0].task.output_dataset_format,
-    )
-    output_dataset = Dataset.from_dict(
-        {
-            "conversation": [],
-            "metadata": [],
-        }
-    )
+        # Process whatever number of rows we got, even if less than batch_size
+        output_rows = await process_batch(task, generation_wrapper, preprocessed_batch)
+        if output_rows:
+            print_result_dicts(output_rows)
+            all_new_dataset_rows.extend(output_rows)
 
-    for i in range(n_epochs):
-        active_envs = copy(envs)
-        for j, env in enumerate(active_envs):
-            env.seed = j + i * len(envs)
-            env.reset()
-
-        while len(active_envs) > 0:
-            try:
-                tasks = [env.step() for env in active_envs]
-                step_results = await asyncio.gather(*tasks)
-
-                indices_to_remove = []
-
-                for k, (env, done) in enumerate(zip(active_envs, step_results)):
-                    if done:
-                        out_convs.append(env.conversation)
-                        out_metadata.append(env.run_metadata)
-                        indices_to_remove.append(k)
-
-                for k in sorted(indices_to_remove, reverse=True):
-                    active_envs.pop(k)
-
-                logger.info(f"Environments running: {len(active_envs)}")
-
-            except Exception as e:
-                traceback.print_exc()
-                logger.error(f"Error during environment steps: {e}")
-                continue
-
-        if i % save_every_n_batches == 0:
-            out_rows = {
-                "conversation": out_convs,
-                "metadata": out_metadata,
-            }
-            out_rows = dictl(out_rows)
+        batch_count += 1
+        if batch_count % save_every_n_batches == 0:
             save_output_dataset(
                 output_dataset,
-                output_dataset_name,
-                out_rows,
-                output_dataset_format,
+                task.output_dataset_name,
+                all_new_dataset_rows,
+                task.output_dataset_format,
                 dataset_root_path,
             )
 
-    if out_convs:
-        out_rows = {
-            "conversation": out_convs,
-            "metadata": out_metadata,
-        }
-        out_rows = dictl(out_rows)
-        save_output_dataset(
-            output_dataset,
-            output_dataset_name,
-            out_rows,
-            output_dataset_format,
-            dataset_root_path,
-        )
+    return all_new_dataset_rows
 
 
 def main(
@@ -139,7 +157,7 @@ def main(
     batch_size: int = 4,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: RemoteModel = "mistral-small-3",
+    model: RemoteModel = "gemini-2.0-flash",
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
     **kwargs,
@@ -255,59 +273,34 @@ def main(
         logger.info(f"Resuming from position {len(output_dataset)}")
         input_dataset = input_dataset.skip(len(output_dataset))
 
-    input_dataset = task.preprocess_dataset(input_dataset)
-
     logger.info(
         f"Input dataset length: {len(input_dataset)} Output dataset: {len(output_dataset)}"
     )
-    all_new_dataset_rows: List[Dict] = []
-    logger.info(f"Generating with model {model} for task {task_name}")
-
-    n_batches = len(input_dataset) // batch_size
 
     # Generation loop for generation tasks
-
     if not environment_name:
         for _ in range(n_epochs):
-            for batch_idx, batch in enumerate(
-                tqdm(input_dataset.iter(batch_size=batch_size), total=n_batches)
-            ):
-                batch = cast(Dict, batch)
-                conversations_batch = task.format_input_conversation(batch)
-                if len(conversations_batch) == 0:
-                    logger.warning(f"Skipping empty batch {batch_idx}")
-                    continue
-
-                if isinstance(generation_wrapper, MockGenerator):
-                    generation_wrapper.set_mock_completions(
-                        [
-                            "def solution(problem_input):\n    return []"
-                            for _ in range(len(conversations_batch))
-                        ]
-                    )
-
-                logger.info(
-                    f"Generating batch of {len(conversations_batch)} completions..."
+            all_new_dataset_rows = asyncio.run(
+                process_dataset(
+                    task,
+                    generation_wrapper,
+                    input_dataset,
+                    batch_size,
+                    save_every_n_batches,
+                    output_dataset,
+                    dataset_root_path,
                 )
-                try:
-                    completions = asyncio.run(
-                        generation_wrapper.generate(conversations_batch)
-                    )
-                except TimeoutError:
-                    logger.error(f"Timeout error on batch {batch_idx}")
-                    continue
+            )
 
-                output_rows_batch = task.format_output_rows(completions)
-                print_result_dicts(output_rows_batch)
-                all_new_dataset_rows.extend(output_rows_batch)
-                if batch_idx % save_every_n_batches == 0 and batch_idx > 0:
-                    save_output_dataset(
-                        output_dataset,
-                        task.output_dataset_name,
-                        all_new_dataset_rows,
-                        task.output_dataset_format,
-                        dataset_root_path,
-                    )
+            # Final save of any remaining rows
+            if all_new_dataset_rows:
+                save_output_dataset(
+                    output_dataset,
+                    task.output_dataset_name,
+                    all_new_dataset_rows,
+                    task.output_dataset_format,
+                    dataset_root_path,
+                )
     else:
         assert environment, "Environment must be passed"
         envs = [copy(environment) for _ in range(batch_size)]

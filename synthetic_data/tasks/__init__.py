@@ -33,19 +33,21 @@ class BaseTask(ABC):
         """
         raise NotImplementedError
 
-    def preprocess_dataset(self, dataset: Dataset) -> Dataset:
+    async def preprocess_row(self, row: dict) -> list[dict]:
         """
-        Any preprocessing that needs to be done on the dataset before it is used.
+        Preprocess a row of data from the dataset.
         """
-        return dataset
+        return [row]
 
-    def format_input_conversation(self, batch: Dict) -> List[Conversation]:
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
         """
         Prompt template to use for generating initial seed data.
         """
         raise NotImplementedError
 
-    def format_output_rows(self, completions: List[str]) -> List:
+    def format_output_rows(
+        self, completions: list[str], input_rows: list[dict]
+    ) -> list[dict]:
         """
         Take the completed conversation and format it into the final dataset format.
         """

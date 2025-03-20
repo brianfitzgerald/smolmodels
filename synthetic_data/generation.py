@@ -285,9 +285,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     max_tokens=4096,
                 )
                 completion_requests.append(request)
-            results: List[Message] = await gather_with_concurrency_limit(
-                4, *completion_requests
-            )
+            results: List[Message] = await asyncio.gather(*completion_requests)
             completions = [
                 result.content[0].text  # type: ignore
                 for result in results
@@ -337,7 +335,7 @@ class GeminiWrapper(GenerationWrapper):
         try:
             results: List[
                 google.genai.types.GenerateContentResponse
-            ] = await gather_with_concurrency_limit(4, *reqs)
+            ] = await asyncio.gather(*reqs)
         except Exception as e:
             logger.error(f"Error while generating: {e}")
             return []
