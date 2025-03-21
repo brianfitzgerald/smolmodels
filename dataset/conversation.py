@@ -7,11 +7,6 @@ from model.utils import (
 from synthetic_data.utils import Conversation
 
 COLS_TO_REMOVE = [
-    "prompt",
-    "category",
-    "author",
-    "title",
-    "output",
     "conversation",
 ]
 
