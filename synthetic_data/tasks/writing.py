@@ -1,12 +1,9 @@
-import functools
-import glob
 import json
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
-from typing import Coroutine, Dict, List, Sequence, Tuple, TypedDict
+from typing import Dict, List, Sequence, Tuple, TypedDict
 
 import polars as pl
 import tiktoken
@@ -15,7 +12,6 @@ from huggingface_hub import snapshot_download
 from loguru import logger
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from pydantic import BaseModel
-from tqdm import tqdm
 
 from synthetic_data.generation import GenWrapperArgs
 from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
@@ -26,7 +22,7 @@ from synthetic_data.prompts import (
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
-from synthetic_data.utils import Conversation, DatasetFormat, dictl
+from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.writing_judge import (
     JUDGING_CRITERIA,
     format_gutenberg_judge_prompt,
@@ -329,7 +325,7 @@ class GutenbergBacktranslation(BaseTask):
     def __init__(self) -> None:
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
-    def load_custom(self) -> Dataset:
+    def load_custom(self, dataset_root_path: str) -> Dataset:
         shards_pl = _get_gutenberg_subset(2)
         logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
         return Dataset.from_polars(shards_pl)
@@ -339,9 +335,9 @@ class GutenbergBacktranslation(BaseTask):
             (
                 _get_paragraph_chunks(row, self.tiktoken_encoder),
                 {
-                    "title": row["title"],
-                    "author": row["author"],
-                    "id": row["id"],
+                    "title": row.get("title", ""),
+                    "author": row.get("author", ""),
+                    "id": row.get("id", ""),
                 },
             )
         ]
@@ -382,21 +378,11 @@ class GutenbergBacktranslation(BaseTask):
 
 class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
     output_dataset_name = "gutenberg_backtranslate_from_txt"
+    seed_data_format = DatasetFormat.CUSTOM
+    seed_data_location = "epubs"
 
-    def load_custom(self) -> Dataset:
-        txt_dir = os.path.expanduser("~/Documents/txt")
-        txt_files = list(glob.glob(os.path.join(txt_dir, "*.txt")))
-        txt_file_contents = [
-            {
-                "title": os.path.basename(txt_file),
-                "text": open(txt_file).read(),
-                "id": "",
-                "author": "",
-                "category": "",
-            }
-            for txt_file in txt_files
-        ]
-        return Dataset.from_list(txt_file_contents)
+    def load_custom(self, dataset_root_path: str) -> Dataset:
+        return Dataset.from_parquet("/dataset_files/epubs.parquet")  # type: ignore
 
 
 class WritingScoreAnnotate(BaseTask):

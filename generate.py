@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncGenerator
 from copy import copy
 from typing import Dict, Optional, cast
 
@@ -75,11 +76,10 @@ async def process_batch(
 
 async def collect_preprocessed_rows(
     task: BaseTask, input_dataset: Dataset, batch_size: int, max_input_buffer: int = 10
-) -> list[dict]:
-    preprocessed_rows = []
+) -> AsyncGenerator[list[dict], None]:
     input_buffer = []
     current_position = 0
-
+    results = []
     while current_position < len(input_dataset):
         # Fill input buffer
         while len(input_buffer) < max_input_buffer and current_position < len(
@@ -100,16 +100,14 @@ async def collect_preprocessed_rows(
                 results.extend(result)
         input_buffer.clear()
 
-        # Extend preprocessed rows with results
-        preprocessed_rows.extend(results)
+        # Yield batches of preprocessed rows
+        while len(results) >= batch_size:
+            yield results[:batch_size]
+            results = results[batch_size:]
 
-        # If we have enough rows, return a batch
-        if len(preprocessed_rows) >= batch_size:
-            to_return = preprocessed_rows[:batch_size]
-            preprocessed_rows = preprocessed_rows[batch_size:]
-            return to_return
-
-    return preprocessed_rows if preprocessed_rows else []
+    # Yield any remaining rows
+    if results:
+        yield results
 
 
 async def process_dataset(
@@ -124,13 +122,8 @@ async def process_dataset(
     all_new_dataset_rows = []
     batch_count = 0
 
-    while True:
-        preprocessed_batch = await collect_preprocessed_rows(
-            task, input_dataset, batch_size
-        )
-        if not preprocessed_batch:
-            break
-
+    preprocessed_batches = collect_preprocessed_rows(task, input_dataset, batch_size)
+    async for preprocessed_batch in preprocessed_batches:
         # Process whatever number of rows we got, even if less than batch_size
         output_rows = await process_batch(task, generation_wrapper, preprocessed_batch)
         if output_rows:
@@ -154,7 +147,7 @@ def main(
     task_name: str | None = None,
     environment_name: str | None = None,
     save_every_n_batches: int = 5,
-    batch_size: int = 4,
+    batch_size: int = 8,
     restart: bool = False,
     resume_input_position: bool = True,
     model: RemoteModel = "gemini-2.0-flash",
@@ -242,7 +235,7 @@ def main(
         f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
     )
     if task.seed_data_format == DatasetFormat.CUSTOM:
-        input_dataset = task.load_custom()
+        input_dataset = task.load_custom(dataset_root_path=dataset_root_path)
     elif task.seed_data_format == DatasetFormat.NONE:
         input_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
     else:

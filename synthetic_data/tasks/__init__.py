@@ -27,7 +27,7 @@ class BaseTask(ABC):
 
     gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
-    def load_custom(self) -> Dataset:
+    def load_custom(self, dataset_root_path: str) -> Dataset:
         """
         Custom dataset loading logic. Only used if seed_data_format is DatasetFormat.CUSTOM.
         """
