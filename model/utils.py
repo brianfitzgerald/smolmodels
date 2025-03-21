@@ -294,9 +294,9 @@ def save_dataclass_to_json(dataclass_instance, file_path: str):
         json.dump(asdict(dataclass_instance), file, indent=4)
 
 
-def get_available_device():
-    return torch.device(
-        "cuda"
+def get_available_device() -> str:
+    return (
+        "cuda:0"
         if torch.cuda.is_available()
         else "mps"
         if torch.mps.is_available()

@@ -40,6 +40,7 @@ from model.utils import (
     DatasetConfig,
     TuningModeChoice,
     ensure_directory,
+    get_available_device,
     save_dataclass_to_json,
     short_hash,
 )
@@ -116,7 +117,6 @@ class WrapperConfig:
     logprob_precompute_batch_size: int = 16
 
     # Generation Parameters
-    use_vllm: bool = False
     num_generations: int = 1
 
 
@@ -224,6 +224,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     max_samples=25000,
 )
 
+# https://github.com/aburkov/theLMbook/blob/main/GRPO_Qwen_0_5_Instruct.ipynb
 GRPO_MATH_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
     wandb_project_name="qwen-math-grpo",
@@ -236,7 +237,6 @@ GRPO_MATH_CONFIG = WrapperConfig(
     learning_rate=5e-6,
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
-    use_vllm=False,
     num_generations=4,
 )
 
@@ -285,6 +285,9 @@ class TrainerWrapper:
             )  # type: ignore
 
     def init_model(self):
+        device = get_available_device()
+        logger.info(f"Using device: {device}")
+
         bnb_config = None
 
         if self.config.tuning_mode == "lora":
@@ -475,6 +478,9 @@ class TrainerWrapper:
             )
 
         elif self.config.tuning_mode == "grpo":
+            device = get_available_device()
+            use_vllm = "cuda" in device
+            logger.info(f"Using vllm: {use_vllm}")
             training_args = GRPOConfig(
                 output_dir=output_dir,
                 run_name=run_name,
@@ -495,9 +501,9 @@ class TrainerWrapper:
                 save_steps=self.config.save_steps,
                 max_grad_norm=self.config.max_grad_norm,
                 per_device_eval_batch_size=self.config.eval_batch_size,
-                use_vllm=self.config.use_vllm,
+                use_vllm=use_vllm,
                 vllm_gpu_memory_utilization=0.3,
-                vllm_device="cuda:0",
+                vllm_device=device,
                 report_to="wandb" if self.use_wandb else "none",
             )
             self.trainer = GRPOTrainer(

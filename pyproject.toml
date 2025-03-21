@@ -57,11 +57,10 @@ dependencies = [
 [dependency-groups]
 torch = [
     "transformers",
-    "torch==2.5.1",
-    "torchaudio==2.5.1",
-    "torchvision==0.20.1",
+    "torch==2.6.0",
+    "torchaudio==2.6.0",
     "peft>=0.13.2",
-    "trl>=0.15.0",
+    "trl==0.15.2",
     "lightning>=2.5.0.post0",
     "nltk",
 ]
@@ -74,7 +73,7 @@ training = [
     "flash-attn; sys_platform == 'linux'",
 ]
 
-inference = ["vllm==0.7.3"]
+inference = ["vllm==0.8.1"]
 
 [tool.uv]
 default-groups = ["torch"]

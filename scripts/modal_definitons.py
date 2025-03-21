@@ -39,12 +39,19 @@ SMOLMODELS_IMAGE = (
     .run_commands(
         [
             "uv sync --frozen",
-            "uv sync --group torch --group training --no-build-isolation",
+            "uv sync --group torch --group training --group inference --no-build-isolation",
         ]
     )
     .run_commands("uv pip install huggingface_hub[hf_transfer] hf_transfer --system")
     .add_local_python_source(
-        "dataset", "evaluation", "generate", "model", "synthetic_data", "trl_wrapper"
+        "dataset",
+        "evaluation",
+        "generate",
+        "model",
+        "synthetic_data",
+        "trl_wrapper",
+        "gyms",
+        "scripts",
     )
     .add_local_dir("dataset_files", "/dataset_files", copy=False)
     .add_local_dir("chat_templates", "/chat_templates", copy=False)
