@@ -382,7 +382,7 @@ class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
     seed_data_location = "epubs"
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
-        return Dataset.from_parquet("/dataset_files/epubs.parquet")  # type: ignore
+        return Dataset.from_parquet(os.path.join(dataset_root_path, "epubs.parquet"))  # type: ignore
 
 
 class WritingScoreAnnotate(BaseTask):

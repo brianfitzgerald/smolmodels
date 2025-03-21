@@ -468,7 +468,8 @@ Follow these steps:
 
 4. Your instruction should be detailed enough to capture the essence of the original paragraph but general enough to allow for creativity in the recreation process.
 
-Present your final instruction without any other formatting. Aim for an instruction between 100-200 words.
+Your instruction should be detailed, and can use bullet points, lists, and other formatting.
+
 """,
         },
     ]
