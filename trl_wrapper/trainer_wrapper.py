@@ -16,10 +16,11 @@ from transformers.utils.quantization_config import BitsAndBytesConfig
 from transformers.training_args import OptimizerNames
 from trl.trainer.dpo_config import DPOConfig
 from trl.trainer.sft_config import SFTConfig
-from trl.trainer.sft_trainer import SFTTrainer
 from trl.trainer.grpo_config import GRPOConfig
 from trl.trainer.grpo_trainer import GRPOTrainer
 from transformers.trainer_utils import SchedulerType
+from trl.trainer.reward_trainer import RewardTrainer
+from trl.trainer.reward_config import RewardConfig
 
 from dataset.code import (
     CodeContestsDataModule,
@@ -76,7 +77,7 @@ class WrapperConfig:
     special_tokens: Optional[List[str]] = None
 
     # Data & Evaluation Configuration
-    data_module_choice: DataModuleChoice = "ultra_feedback"
+    data_module_choice: DataModuleChoice = "conversation"
     dataset_path: Optional[str] = None
     custom_chat_template: Optional[str] = None
     eval_data_mode: EvalDataModeChoice = "random"
@@ -238,6 +239,16 @@ GRPO_MATH_CONFIG = WrapperConfig(
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
     num_generations=4,
+)
+
+REWARD_MODEL_CONFIG = WrapperConfig(
+    model_id_or_path=SMOL_LM_135M,
+    dataset_path="trl-lib/ultrafeedback_binarized",
+    data_module_choice="conversation",
+    train_batch_size=8,
+    gradient_checkpointing=True,
+    learning_rate=1e-5,
+    eval_steps=50,
 )
 
 CHAT_TEMPLATE_OVERRIDES = {
@@ -518,6 +529,15 @@ class TrainerWrapper:
                     int_reward_func,
                     correctness_reward_func,
                 ],  # type: ignore
+            )
+
+        elif self.config.tuning_mode == "reward":
+            config = RewardConfig(optim=self.config.optimizer)
+            self.trainer = RewardTrainer(
+                model=self.model,
+                args=config,
+                train_dataset=self.data_module.train_dataset,
+                eval_dataset=self.data_module.val_dataset,
             )
 
         else:

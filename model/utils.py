@@ -34,7 +34,7 @@ DataModuleChoice = Literal[
     "playwright_summary_to_script",
     "gsm8k_reasoning",
 ]
-TuningModeChoice = Literal["dpo", "sft", "grpo"]
+TuningModeChoice = Literal["dpo", "sft", "grpo", "reward"]
 
 
 class ModelChoice(Enum):
