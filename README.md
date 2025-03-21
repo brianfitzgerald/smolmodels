@@ -51,3 +51,9 @@ modal run -d modal_entrypoint.py::generation
 # Inference
 modal serve modal_vllm.py
 ```
+
+
+# Utils
+```bash
+python util_scripts.py download_dataset gutenberg_backtranslate_from_txt
+```

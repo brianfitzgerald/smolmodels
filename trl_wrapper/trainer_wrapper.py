@@ -170,6 +170,21 @@ GUTENBERG_CONFIG = WrapperConfig(
     run_suffix="gutenberg-conv",
 )
 
+
+TXT_BT_CONFIG = WrapperConfig(
+    model_id_or_path=LLAMA_3_2_3B,
+    wandb_project_name="gutenberg",
+    train_batch_size=8,
+    gradient_accumulation_steps=4,
+    data_module_choice="conversation",
+    tuning_mode="sft",
+    learning_rate=1e-5,
+    dataset_path="dataset_files/gutenberg_backtranslate_from_txt_conversations.parquet",
+    n_epochs=5,
+    eval_steps=50,
+    run_suffix="txt-bt",
+)
+
 GUTENBERG_DPO_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="gutenberg",
@@ -271,6 +286,7 @@ CONFIGS = {
     "gutenberg": GUTENBERG_CONFIG,
     "gutenberg_dpo": GUTENBERG_DPO_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
+    "txt_bt": TXT_BT_CONFIG,
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
