@@ -30,6 +30,8 @@ from dataset.conversation import ConversationDataModule, ConversationDPODataModu
 from dataset.playwright import PlaywrightSummaryToScript
 from dataset.reasoning import GSM8KReasoningDataModule
 from model.reasoning import (
+    correctness_reward,
+    format_reward,
     xmlcount_reward_func,
     soft_format_reward_func,
     strict_format_reward_func,
@@ -522,13 +524,7 @@ class TrainerWrapper:
                 args=training_args,
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
-                reward_funcs=[
-                    xmlcount_reward_func,
-                    soft_format_reward_func,
-                    strict_format_reward_func,
-                    int_reward_func,
-                    correctness_reward_func,
-                ],  # type: ignore
+                reward_funcs=[format_reward, correctness_reward],  # type: ignore
             )
 
         elif self.config.tuning_mode == "reward":
