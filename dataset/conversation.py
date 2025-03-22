@@ -2,10 +2,9 @@ import torch
 
 from model.utils import (
     IGNORE_TOKEN_INDEX,
-    SmDataset,
 )
+from trl_wrapper.wrapper_config import SmDataset
 from synthetic_data.utils import Conversation
-from datasets import Dataset
 
 COLS_TO_REMOVE = [
     "conversation",
@@ -18,8 +17,8 @@ class ConversationDataModule(SmDataset):
     """
 
     def post_setup(self):
-        self.train_dataset: Dataset = self.train_dataset.remove_columns(COLS_TO_REMOVE)
-        self.val_dataset: Dataset = self.val_dataset.remove_columns(COLS_TO_REMOVE)
+        self.train_dataset = self.train_dataset.remove_columns(COLS_TO_REMOVE)
+        self.val_dataset = self.val_dataset.remove_columns(COLS_TO_REMOVE)
 
     def process_samples_batch(self, examples: dict):
         out = self._tokenize_conversation(examples["conversation"])
@@ -50,16 +49,6 @@ class ConversationDataModule(SmDataset):
                 "assistant_mask": tokenized_out["assistant_masks"],
                 "labels": labels,
             }
-
-
-def extract_answer_from_dataset(text):
-    """
-    Extracts the answer from the dataset.
-    The dataset separates the answer using the '####' delimiter.
-    """
-    if "####" not in text:
-        return None
-    return text.split("####")[1].strip()
 
 
 class ConversationDPODataModule(ConversationDataModule):

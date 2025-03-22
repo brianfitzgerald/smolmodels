@@ -19,13 +19,17 @@ from transformers.trainer_utils import SchedulerType
 from trl.trainer.reward_trainer import RewardTrainer
 from trl.trainer.reward_config import RewardConfig
 
+from dataset.code import CodeContestsDataModule
+from dataset.conversation import ConversationDPODataModule, ConversationDataModule
 from model.reasoning import (
     ChatDataCollator,
     EvalCallback,
+    GSM8KDataModule,
     correctness_reward,
     format_reward,
 )
 from model.utils import (
+    DataModuleChoice,
     ensure_directory,
     get_available_device,
     save_dataclass_to_json,
@@ -35,7 +39,6 @@ from synthetic_data.utils import ldictl
 from trl_wrapper.dpo_trainer import CustomDPOTrainer
 from trl_wrapper.sft_trainer import CustomSFTTrainer
 from trl_wrapper.wrapper_config import (
-    DATA_MODULE_MAP,
     LLAMA_3_1_8B,
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
@@ -43,6 +46,7 @@ from trl_wrapper.wrapper_config import (
     QWEN_0_5_B,
     SMOL_LM_135M,
     DatasetConfig,
+    SmDataset,
     WrapperConfig,
     MISTRAL_7B,
 )
@@ -166,7 +170,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
     max_samples=25000,
 )
 
-# https://github.com/aburkov/theLMbook/blob/main/GRPO_Qwen_0_5_Instruct.ipynb
+
 GRPO_MATH_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_0_5_B,
     wandb_project_name="qwen-math-grpo",
@@ -230,6 +234,14 @@ CONFIGS = {
 
 LOCAL_RUNS_FOLDER = "./runs"
 MODELS_FOLDER = "/models"
+
+
+DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
+    "code_contests": CodeContestsDataModule,
+    "conversation": ConversationDataModule,
+    "gsm8k": GSM8KDataModule,
+    "conversation_dpo": ConversationDPODataModule,
+}
 
 
 class TrainerWrapper:

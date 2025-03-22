@@ -1,7 +1,5 @@
 import hashlib
 import json
-import os
-import re
 import shutil
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -10,15 +8,8 @@ from typing import List, Literal, Optional, Union
 
 import lightning.pytorch as pl
 import torch
-from datasets import Dataset, DatasetDict, load_dataset
-from loguru import logger
-from rich.text import Text
-from torch.utils.data import DataLoader
 from torchmetrics.text.bleu import BLEUScore
 from torchmetrics.text.rouge import ROUGEScore
-from transformers.tokenization_utils import PreTrainedTokenizer
-
-from trl_wrapper.wrapper_config import DatasetConfig
 
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
@@ -81,164 +72,6 @@ class LMHyperParams:
         if self.tokenizer_checkpoint:
             return self.tokenizer_checkpoint
         return self.base_model_checkpoint
-
-
-def class_name_to_underscore(cls):
-    class_name = cls.__name__  # Get the class name
-    underscore_case = re.sub(r"(?<!^)(?=[A-Z])", "_", class_name).lower()
-    return underscore_case
-
-
-class SmDataset(pl.LightningDataModule):
-    def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
-        super().__init__()
-
-        self.config = config
-
-        self.train_dataset = None
-        self.val_dataset = None
-        self.tokenizer = tokenizer
-        self.num_workers = 1 if config.notebook_mode else 4
-        current_dir = Path().resolve().name
-        self.prefix = "/"
-        if current_dir == "notebooks":
-            self.prefix = "../"
-        self.cache_dir = (
-            f"{self.prefix}dataset_caches/{class_name_to_underscore(self.__class__)}"
-        )
-        logger.info(f"Cache dir: {self.cache_dir}")
-        self.input_column, self.target_column = "context", "fields"
-        self.train_dataset = None
-        self.val_dataset = None
-        self.dataset_name = None
-
-    def init_reasoning_dataset(self):
-        """
-        Cannot call load_dataset as that will shadow the load_dataset function from datasets
-        """
-        # Load dataset and split
-        assert self.config.dataset_path is not None, "Input dataset name must be set"
-        local_dataset_location = f"{self.prefix}{self.config.dataset_path}"
-        if os.path.exists(local_dataset_location):
-            logger.info(f"Loading local dataset from {local_dataset_location}")
-            dataset = Dataset.from_parquet(local_dataset_location)
-        else:
-            logger.info(
-                f"Dataset not found at expected local location {local_dataset_location}, loading from remote: {self.config.dataset_path}"
-            )
-            dataset = load_dataset(self.config.dataset_path)
-            if isinstance(dataset, DatasetDict):
-                dataset = dataset["train"]
-        if self.config.max_samples:
-            logger.info(f"Selecting {self.config.max_samples} samples")
-            dataset = dataset.select(range(self.config.max_samples))  # type: ignore
-        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
-        self.train_dataset = dataset["train"]
-        self.val_dataset = dataset["test"]
-        self.custom_template = None
-        if self.config.dataset_path is not None:
-            chat_template_path = (
-                f"{self.prefix}chat_templates/{self.config.dataset_path}.jinja"
-            )
-            logger.info(f"Loading custom chat template: {chat_template_path}")
-            with open(chat_template_path) as f:
-                self.custom_template = f.read()
-
-    def setup(self, stage: Optional[str] = None):
-        logger.info(f"Loading dataset for stage {stage}")
-        ensure_directory(self.cache_dir, clear=False)
-        use_cache = not self.config.notebook_mode
-        logger.info(
-            f"Processing dataset for stage {stage}, workers: {self.num_workers}, cache dir {self.cache_dir}, using cache: {use_cache}"
-        )
-
-        self.init_reasoning_dataset()
-
-        assert self.train_dataset is not None
-        assert self.val_dataset is not None
-        train_steps_per_epoch = len(self.train_dataset) // self.config.train_batch_size
-        logger.info(
-            f"Train dataset samples: {len(self.train_dataset)} Val dataset samples: {len(self.val_dataset)} Train steps per epoch: {train_steps_per_epoch}"
-        )
-
-        self.train_dataset = self.train_dataset.map(
-            self.process_samples_batch,
-            batched=True,
-            load_from_cache_file=use_cache,
-            cache_file_name=f"{self.cache_dir}/training.parquet",
-            num_proc=self.num_workers,
-        )
-
-        self.val_dataset = self.val_dataset.map(
-            self.process_samples_batch,
-            batched=True,
-            load_from_cache_file=use_cache,
-            cache_file_name=f"{self.cache_dir}/validation.parquet",
-            num_proc=self.num_workers,
-        )
-        self.post_setup()
-
-    def post_setup(self):
-        pass
-
-    def process_samples_batch(self, examples: dict):
-        return self._tokenize(examples[self.input_column], examples[self.target_column])
-
-    def _tokenize(self, inputs: List[str], labels: List[str]) -> dict:
-        """
-        Basic tokenizing function. Inputs are samples from the dataset, and labels are the target values.
-        """
-        inputs_tokenized = self.tokenizer(
-            inputs,
-            max_length=self.config.max_sequence_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-
-        labels_tokenized = self.tokenizer(
-            labels,
-            max_length=self.config.max_sequence_length,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-
-        return {
-            "input_ids": inputs_tokenized["input_ids"],
-            "attention_mask": inputs_tokenized["attention_mask"],
-            "labels": labels_tokenized["input_ids"],
-        }
-
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,  # type: ignore
-            batch_size=self.config.train_batch_size,
-            num_workers=self.num_workers,
-        )  # type: ignore
-
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=8, num_workers=self.num_workers)  # type: ignore
-
-    def visualize_sample(self, input_dict: dict[str, torch.Tensor | list]) -> Text:
-        """Visualize a sample from the dataset."""
-        input_ids, labels = input_dict["input_ids"], input_dict["labels"]
-        if isinstance(input_ids, list):
-            input_ids = torch.tensor(input_ids)
-        if isinstance(labels, list):
-            labels = torch.tensor(labels)
-        input_ids = input_ids.squeeze().tolist()
-        labels = labels.squeeze().tolist()
-
-        rich_text = Text()
-
-        for token, label in zip(input_ids, labels):
-            decoded = self.tokenizer.decode(token)
-            if label == 0 or label == IGNORE_TOKEN_INDEX:
-                rich_text.append(decoded, style="bright_red")
-            else:
-                rich_text.append(decoded, style="bright_green")
-        return rich_text
 
 
 class SmModel(pl.LightningModule):

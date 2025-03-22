@@ -2,7 +2,7 @@ from typing import Optional
 
 from datasets.arrow_dataset import Dataset
 
-from model.utils import SmDataset, DatasetConfig
+from trl_wrapper.wrapper_config import SmDataset, DatasetConfig
 from synthetic_data.utils import dictl
 from transformers.tokenization_utils import PreTrainedTokenizer
 

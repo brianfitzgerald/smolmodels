@@ -13,10 +13,22 @@ import requests
 import tarfile
 from transformers.trainer_callback import TrainerCallback
 
-from dataset.conversation import extract_answer_from_dataset
-from model.utils import SmDataset
+from trl_wrapper.wrapper_config import SmDataset
 
-# https://github.com/aburkov/theLMbook/blob/main/GRPO_Qwen_0_5_Instruct.ipynb
+
+# Based on:
+# https://colab.research.google.com/drive/1bfhs1FMLW3FGa8ydvkOZyBNxLYOu0Hev?usp=sharing#scrollTo=ybtxR89X1YJq
+# https://gist.github.com/willccbb/4676755236bb08cab5f4e54a0475d6fb
+
+
+def extract_answer_from_dataset(text):
+    """
+    Extracts the answer from the dataset.
+    The dataset separates the answer using the '####' delimiter.
+    """
+    if "####" not in text:
+        return None
+    return text.split("####")[1].strip()
 
 
 def extract_xml_answer(text: str) -> str:
@@ -386,7 +398,7 @@ def prepare_sft_dataset(num_examples=500):
 
 
 class GSM8KDataModule(SmDataset):
-    def init_reasoning_dataset(self):
+    def init_dataset(self):
         data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
         formatted_data = []
 
@@ -406,4 +418,45 @@ class GSM8KDataModule(SmDataset):
         self.val_dataset = dataset["test"]
 
     def setup(self, stage: Optional[str] = None):
-        self.init_reasoning_dataset()
+        self.init_dataset()
+
+
+SYSTEM_PROMPT = """
+Respond in the following format:
+<reasoning>
+...
+</reasoning>
+<answer>
+...
+</answer>
+"""
+
+XML_COT_FORMAT = """\
+<reasoning>
+{reasoning}
+</reasoning>
+<answer>
+{answer}
+</answer>
+"""
+
+
+def extract_hash_answer(text: str) -> str | None:
+    if "####" not in text:
+        return None
+    return text.split("####")[1].strip()
+
+
+# uncomment middle messages for 1-shot prompting
+def get_gsm8k_questions(split="train") -> Dataset:
+    data = load_dataset("openai/gsm8k", "main")[split]  # type: ignore
+    data = data.map(  # type: ignore
+        lambda x: {  # type: ignore
+            "prompt": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": x["question"]},
+            ],
+            "answer": extract_hash_answer(x["answer"]),
+        }
+    )  # type: ignore
+    return data  # type: ignore
