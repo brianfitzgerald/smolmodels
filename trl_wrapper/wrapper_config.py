@@ -60,7 +60,6 @@ class WrapperConfig:
     max_eval_dataset_size: Optional[int] = None
     eval_steps: int = 500
     save_steps: int = 1000
-    data_collator_choice: DataCollatorChoice = "basic"
 
     # Prompt & Sequence Lengths
     max_sequence_length: int = 1512  # sequence length for trimming completions

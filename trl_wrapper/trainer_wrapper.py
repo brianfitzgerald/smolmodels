@@ -22,11 +22,13 @@ from trl.trainer.reward_config import RewardConfig
 from dataset.code import CodeContestsDataModule
 from dataset.conversation import ConversationDPODataModule, ConversationDataModule
 from model.reasoning import (
-    ChatDataCollator,
     EvalCallback,
     GSM8KDataModule,
-    correctness_reward,
-    format_reward,
+    correctness_reward_func,
+    int_reward_func,
+    soft_format_reward_func,
+    strict_format_reward_func,
+    xmlcount_reward_func,
 )
 from model.utils import (
     DataModuleChoice,
@@ -184,21 +186,6 @@ GRPO_MATH_CONFIG = WrapperConfig(
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
     num_generations=4,
-)
-
-SFT_MATH_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_0_5_B,
-    wandb_project_name="qwen-math-sft",
-    train_batch_size=2,
-    gradient_accumulation_steps=4,
-    dataset_path="openai/gsm8k",
-    data_module_choice="gsm8k",
-    max_prompt_length=1024,
-    max_grad_norm=0.1,
-    eval_batch_size=1,
-    learning_rate=5e-5,
-    tuning_mode="sft",
-    data_collator_choice="chat",
 )
 
 REWARD_MODEL_CONFIG = WrapperConfig(
@@ -431,14 +418,6 @@ class TrainerWrapper:
                     )
                 return padded
 
-            collator = (
-                basic_pad_collator
-                if self.config.data_collator_choice == "basic"
-                else ChatDataCollator(self.tokenizer)
-            )
-
-            logger.info(f"Using collator: {collator}")
-
             self.trainer = CustomSFTTrainer(
                 self.model,
                 peft_config=peft_config,
@@ -446,7 +425,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
-                data_collator=collator,
+                data_collator=basic_pad_collator,
             )
             self.trainer.set_custom_args(
                 self.config.max_eval_sample_length,
@@ -485,11 +464,33 @@ class TrainerWrapper:
                 vllm_device=device,
                 report_to="wandb" if self.use_wandb else "none",
             )
+            peft_config = LoraConfig(
+                r=16,
+                lora_alpha=64,
+                target_modules=[
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "o_proj",
+                    "up_proj",
+                    "down_proj",
+                    "gate_proj",
+                ],
+                task_type="CAUSAL_LM",
+                lora_dropout=0.05,
+            )
+
             self.trainer = GRPOTrainer(
                 model=self.model,
                 args=training_args,
                 train_dataset=self.data_module.train_dataset,  # type: ignore
-                reward_funcs=[format_reward, correctness_reward],  # type: ignore
+                reward_funcs=[
+                    xmlcount_reward_func,
+                    soft_format_reward_func,
+                    strict_format_reward_func,
+                    int_reward_func,
+                    correctness_reward_func,
+                ],  # type: ignore
                 processing_class=self.tokenizer,
             )
             self.trainer.add_callback(
