@@ -141,6 +141,7 @@ def correctness_reward(prompts, completions, answer, **kwargs):
     for r, a in zip(extracted, answer):
         if r == a:  # Exact match case
             rewards.append(2.0)
+            logger.info(f"Response: {r} Answer: {a} Reward: {rewards[-1]}")
         else:
             # Try numeric equivalence
             r_num = _extract_single_number(str(r))
@@ -150,9 +151,8 @@ def correctness_reward(prompts, completions, answer, **kwargs):
             else:
                 rewards.append(0.0)
 
-    # Log completion lengths
-    completion_lengths = [len(response.split()) for response in responses]
-    logger.info(f"Completion lengths: {completion_lengths}")
+            logger.info(f"Response: {r_num} Answer: {a_num} Reward: {rewards[-1]}")
+
     return rewards
 
 
@@ -179,24 +179,6 @@ def format_reward(completions, **kwargs):
         format_scores.append(score)
 
     return rewards
-
-
-def prepare_dataset(split="train"):
-    """Load and prepare the GSM8K dataset for training."""
-    data = load_dataset("openai/gsm8k", "main")[split]
-    formatted_data = []
-
-    for example in data:
-        formatted_example = {
-            "prompt": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": example["question"]},
-            ],
-            "answer": extract_answer_from_dataset(example["answer"]),
-        }
-        formatted_data.append(formatted_example)
-
-    return formatted_data
 
 
 def build_prompt(messages):

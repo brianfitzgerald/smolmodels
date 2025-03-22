@@ -26,7 +26,11 @@ from dataset.code import (
     CodeContestsDataModule,
     UltraFeedbackDataModule,
 )
-from dataset.conversation import ConversationDataModule, ConversationDPODataModule
+from dataset.conversation import (
+    ConversationDataModule,
+    ConversationDPODataModule,
+    ConversationGRPODataModule,
+)
 from dataset.playwright import PlaywrightSummaryToScript
 from dataset.reasoning import GSM8KReasoningDataModule
 from model.reasoning import (
@@ -244,7 +248,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
 
 # https://github.com/aburkov/theLMbook/blob/main/GRPO_Qwen_0_5_Instruct.ipynb
 GRPO_MATH_CONFIG = WrapperConfig(
-    model_id_or_path=SMOL_LM_135M,
+    model_id_or_path=QWEN_0_5_B,
     wandb_project_name="qwen-math-grpo",
     train_batch_size=4,
     gradient_accumulation_steps=4,
@@ -257,6 +261,20 @@ GRPO_MATH_CONFIG = WrapperConfig(
     tuning_mode="grpo",
     num_generations=4,
 )
+
+SFT_MATH_CONFIG = WrapperConfig(
+    model_id_or_path=QWEN_0_5_B,
+    wandb_project_name="qwen-math-sft",
+    train_batch_size=2,
+    gradient_accumulation_steps=4,
+    data_module_choice="gsm8k_reasoning",
+    max_prompt_length=1024,
+    max_grad_norm=0.1,
+    eval_batch_size=1,
+    learning_rate=5e-5,
+    tuning_mode="sft",
+)
+
 
 REWARD_MODEL_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
@@ -373,8 +391,10 @@ class TrainerWrapper:
             self.data_module = CodeContestsDataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "conversation":
             self.data_module = ConversationDataModule(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "ultra_feedback":
-            self.data_module = UltraFeedbackDataModule(self.tokenizer, dataset_config)
+        elif self.config.data_module_choice == "conversation_grpo":
+            self.data_module = ConversationGRPODataModule(
+                self.tokenizer, dataset_config
+            )
         elif self.config.data_module_choice == "conversation_dpo":
             self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)
         elif self.config.data_module_choice == "playwright_summary_to_script":
@@ -541,6 +561,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 reward_funcs=[format_reward, correctness_reward],  # type: ignore
+                processing_class=self.tokenizer,
             )
 
         elif self.config.tuning_mode == "reward":
