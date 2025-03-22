@@ -39,7 +39,6 @@ from model.reasoning import (
 )
 from model.utils import (
     DataModuleChoice,
-    DatasetConfig,
     TuningModeChoice,
     ensure_directory,
     get_available_device,
@@ -381,17 +380,6 @@ class TrainerWrapper:
                 logger.info(f"Using chat template override: {k}")
                 custom_chat_template = k
 
-        dataset_config = DatasetConfig(
-            input_dataset_name=dataset_path,
-            batch_size=self.config.train_batch_size,
-            max_sequence_length=self.config.max_sequence_length,
-            using_mistral=self.config.using_mistral,
-            notebook_mode=self.config.notebook_mode,
-            tuning_mode=self.config.tuning_mode,
-            max_samples=self.config.max_samples,
-            custom_chat_template=custom_chat_template,
-            train_on_inputs=self.config.train_on_inputs,
-        )
         data_module_class = DATA_MODULE_MAP.get(self.config.data_module_choice)
         if data_module_class is None:
             raise ValueError(
@@ -399,7 +387,7 @@ class TrainerWrapper:
                 f"Must be one of {list(DATA_MODULE_MAP.keys())}"
             )
 
-        self.data_module = data_module_class(self.tokenizer, dataset_config)
+        self.data_module = data_module_class(self.tokenizer, self.config)
         self.data_module.setup("fit")
 
     def init_trainer(self, config_name: str | None = None):
@@ -564,7 +552,6 @@ class TrainerWrapper:
                 model=self.model,
                 args=training_args,
                 train_dataset=self.data_module.train_dataset,  # type: ignore
-                eval_dataset=self.data_module.val_dataset,
                 reward_funcs=[format_reward, correctness_reward],  # type: ignore
                 processing_class=self.tokenizer,
             )

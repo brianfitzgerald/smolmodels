@@ -18,6 +18,8 @@ from torchmetrics.text.bleu import BLEUScore
 from torchmetrics.text.rouge import ROUGEScore
 from transformers.tokenization_utils import PreTrainedTokenizer
 
+from trl_wrapper.trainer_wrapper import WrapperConfig
+
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (
     "Rewrite the following prompt to remove any unsafe or copyrighted content: "
@@ -86,21 +88,8 @@ def class_name_to_underscore(cls):
     return underscore_case
 
 
-@dataclass
-class DatasetConfig:
-    batch_size: int
-    max_sequence_length: int
-    tuning_mode: TuningModeChoice
-    using_mistral: bool
-    notebook_mode: bool
-    input_dataset_name: Optional[str] = None
-    max_samples: Optional[int] = None
-    custom_chat_template: Optional[str] = None
-    train_on_inputs: bool = False
-
-
 class SmDataset(pl.LightningDataModule):
-    def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
+    def __init__(self, tokenizer: PreTrainedTokenizer, config: WrapperConfig):
         super().__init__()
 
         self.config = config
@@ -122,23 +111,21 @@ class SmDataset(pl.LightningDataModule):
         self.val_dataset = None
         self.dataset_name = None
 
-    def init_dataset(self):
+    def init_reasoning_dataset(self):
         """
         Cannot call load_dataset as that will shadow the load_dataset function from datasets
         """
         # Load dataset and split
-        assert self.config.input_dataset_name is not None, (
-            "Input dataset name must be set"
-        )
-        local_dataset_location = f"{self.prefix}{self.config.input_dataset_name}"
+        assert self.config.dataset_path is not None, "Input dataset name must be set"
+        local_dataset_location = f"{self.prefix}{self.config.dataset_path}"
         if os.path.exists(local_dataset_location):
             logger.info(f"Loading local dataset from {local_dataset_location}")
             dataset = Dataset.from_parquet(local_dataset_location)
         else:
             logger.info(
-                f"Dataset not found at expected local location {local_dataset_location}, loading from remote: {self.config.input_dataset_name}"
+                f"Dataset not found at expected local location {local_dataset_location}, loading from remote: {self.config.dataset_path}"
             )
-            dataset = load_dataset(self.config.input_dataset_name)
+            dataset = load_dataset(self.config.dataset_path)
             if isinstance(dataset, DatasetDict):
                 dataset = dataset["train"]
         if self.config.max_samples:
@@ -148,9 +135,9 @@ class SmDataset(pl.LightningDataModule):
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
         self.custom_template = None
-        if self.config.custom_chat_template is not None:
+        if self.config.dataset_path is not None:
             chat_template_path = (
-                f"{self.prefix}chat_templates/{self.config.custom_chat_template}.jinja"
+                f"{self.prefix}chat_templates/{self.config.dataset_path}.jinja"
             )
             logger.info(f"Loading custom chat template: {chat_template_path}")
             with open(chat_template_path) as f:
@@ -164,11 +151,11 @@ class SmDataset(pl.LightningDataModule):
             f"Processing dataset for stage {stage}, workers: {self.num_workers}, cache dir {self.cache_dir}, using cache: {use_cache}"
         )
 
-        self.init_dataset()
+        self.init_reasoning_dataset()
 
         assert self.train_dataset is not None
         assert self.val_dataset is not None
-        train_steps_per_epoch = len(self.train_dataset) // self.config.batch_size
+        train_steps_per_epoch = len(self.train_dataset) // self.config.train_batch_size
         logger.info(
             f"Train dataset samples: {len(self.train_dataset)} Val dataset samples: {len(self.val_dataset)} Train steps per epoch: {train_steps_per_epoch}"
         )
@@ -225,7 +212,7 @@ class SmDataset(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,  # type: ignore
-            batch_size=self.config.batch_size,
+            batch_size=self.config.train_batch_size,
             num_workers=self.num_workers,
         )  # type: ignore
 

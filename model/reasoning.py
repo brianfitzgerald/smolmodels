@@ -264,77 +264,6 @@ Respond in the following format:
 """
 
 
-class GSM8KDataModule(SmDataset):
-    def init_dataset(self):
-        data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
-        formatted_data = []
-
-        for example in data:
-            formatted_example = {
-                "prompt": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": example["question"]},  # type: ignore
-                ],
-                "answer": extract_answer_from_dataset(example["answer"]),  # type: ignore
-            }
-            formatted_data.append(formatted_example)
-
-        self.train_dataset = formatted_data
-
-    def setup(self, stage: Optional[str] = None):
-        self.init_dataset()
-
-
-def prepare_sft_dataset(num_examples=500):
-    """
-    Prepare SFT examples in the chat format required by your custom collator.
-    Each example will be a dict with a "messages" key.
-    """
-    SYSTEM_PROMPT = """
-    Respond in the following format:
-    <reasoning>
-    ...
-    </reasoning>
-    <answer>
-    ...
-    </answer>
-    """
-    cot_url = "https://github.com/aburkov/theLMbook/releases/download/v1.0.0/cot.tar.gz"
-    extract_dir = download_and_extract_cot_archive(cot_url, extract_path="cot_archive")
-    data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
-
-    sft_examples = []
-    for example in data:
-        question = example["question"].strip()  # type: ignore
-        # Compute the filename based on the SHA-256 hash of the question.
-        filename = hashlib.sha256(question.encode()).hexdigest() + ".txt"
-        file_path = os.path.join(extract_dir, filename)
-
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                cot_output = f.read().strip()
-
-            # Build the chat-format example.
-            formatted_example = {
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
-                    {"role": "assistant", "content": cot_output},
-                ]
-            }
-            sft_examples.append(formatted_example)
-
-        if len(sft_examples) >= num_examples:
-            break
-
-    if len(sft_examples) < num_examples:
-        print(f"Warning: Only found {len(sft_examples)} SFT examples.")
-    else:
-        print(f"Prepared {len(sft_examples)} SFT examples.")
-
-    return sft_examples
-
-
 def evaluate_model(model, tokenizer, eval_examples, device):
     """Evaluates the model on a set of examples and prints detailed results."""
     model.eval()
@@ -413,3 +342,65 @@ class EvalCallback(TrainerCallback):
             print(f"\nEvaluating at step {state.global_step}:")
             evaluate_model(self.model, self.tokenizer, self.eval_examples, self.device)
         return control
+
+
+def prepare_sft_dataset(num_examples=500):
+    """
+    Prepare SFT examples in the chat format required by your custom collator.
+    Each example will be a dict with a "messages" key.
+    """
+    cot_url = "https://github.com/aburkov/theLMbook/releases/download/v1.0.0/cot.tar.gz"
+    extract_dir = download_and_extract_cot_archive(cot_url, extract_path="cot_archive")
+    data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
+
+    sft_examples = []
+    for example in data:
+        question = example["question"].strip()  # type: ignore
+        # Compute the filename based on the SHA-256 hash of the question.
+        filename = hashlib.sha256(question.encode()).hexdigest() + ".txt"
+        file_path = os.path.join(extract_dir, filename)
+
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                cot_output = f.read().strip()
+
+            # Build the chat-format example.
+            formatted_example = {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": cot_output},
+                ]
+            }
+            sft_examples.append(formatted_example)
+
+        if len(sft_examples) >= num_examples:
+            break
+
+    if len(sft_examples) < num_examples:
+        print(f"Warning: Only found {len(sft_examples)} SFT examples.")
+    else:
+        print(f"Prepared {len(sft_examples)} SFT examples.")
+
+    return sft_examples
+
+
+class GSM8KDataModule(SmDataset):
+    def init_reasoning_dataset(self):
+        data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
+        formatted_data = []
+
+        for example in data:
+            formatted_example = {
+                "prompt": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": example["question"]},  # type: ignore
+                ],
+                "answer": extract_answer_from_dataset(example["answer"]),  # type: ignore
+            }
+            formatted_data.append(formatted_example)
+
+        self.train_dataset = formatted_data
+
+    def setup(self, stage: Optional[str] = None):
+        self.init_reasoning_dataset()
