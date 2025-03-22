@@ -1,3 +1,4 @@
+from typing import Optional
 from torch.nn.utils.rnn import pad_sequence
 import re
 from loguru import logger
@@ -5,7 +6,15 @@ import torch
 from transformers import (
     PreTrainedTokenizerBase,
 )
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
+import os
+import hashlib
+import requests
+import tarfile
+from transformers.trainer_callback import TrainerCallback
+
+from dataset.conversation import extract_answer_from_dataset
+from model.utils import SmDataset
 
 # https://github.com/aburkov/theLMbook/blob/main/GRPO_Qwen_0_5_Instruct.ipynb
 
@@ -220,3 +229,187 @@ class ChatDataCollator:
         )
         labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100)
         return {"input_ids": inputs_padded, "labels": labels_padded}
+
+
+def download_and_extract_cot_archive(url, extract_path):
+    """Download and extract the CoT archive if not already done."""
+    archive_path = os.path.join(extract_path, "cot.tar.gz")
+    if not os.path.exists(extract_path):
+        os.makedirs(extract_path, exist_ok=True)
+    if not os.path.exists(archive_path):
+        print("Downloading CoT archive...")
+        r = requests.get(url, stream=True)
+        with open(archive_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+    # Extract the archive if not already extracted.
+    extract_dir = os.path.join(extract_path, "cot_files")
+    if not os.path.exists(extract_dir):
+        print("Extracting CoT archive...")
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(path=extract_dir)
+    return extract_dir
+
+
+SYSTEM_PROMPT = """
+Respond in the following format:
+
+<reasoning>
+...
+</reasoning>
+<answer>
+...
+</answer>
+"""
+
+
+class GSM8KDataModule(SmDataset):
+    def init_dataset(self):
+        data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
+        formatted_data = []
+
+        for example in data:
+            formatted_example = {
+                "prompt": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": example["question"]},  # type: ignore
+                ],
+                "answer": extract_answer_from_dataset(example["answer"]),  # type: ignore
+            }
+            formatted_data.append(formatted_example)
+
+        self.train_dataset = formatted_data
+
+    def setup(self, stage: Optional[str] = None):
+        self.init_dataset()
+
+
+def prepare_sft_dataset(num_examples=500):
+    """
+    Prepare SFT examples in the chat format required by your custom collator.
+    Each example will be a dict with a "messages" key.
+    """
+    SYSTEM_PROMPT = """
+    Respond in the following format:
+    <reasoning>
+    ...
+    </reasoning>
+    <answer>
+    ...
+    </answer>
+    """
+    cot_url = "https://github.com/aburkov/theLMbook/releases/download/v1.0.0/cot.tar.gz"
+    extract_dir = download_and_extract_cot_archive(cot_url, extract_path="cot_archive")
+    data: Dataset = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
+
+    sft_examples = []
+    for example in data:
+        question = example["question"].strip()  # type: ignore
+        # Compute the filename based on the SHA-256 hash of the question.
+        filename = hashlib.sha256(question.encode()).hexdigest() + ".txt"
+        file_path = os.path.join(extract_dir, filename)
+
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
+                cot_output = f.read().strip()
+
+            # Build the chat-format example.
+            formatted_example = {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": cot_output},
+                ]
+            }
+            sft_examples.append(formatted_example)
+
+        if len(sft_examples) >= num_examples:
+            break
+
+    if len(sft_examples) < num_examples:
+        print(f"Warning: Only found {len(sft_examples)} SFT examples.")
+    else:
+        print(f"Prepared {len(sft_examples)} SFT examples.")
+
+    return sft_examples
+
+
+def evaluate_model(model, tokenizer, eval_examples, device):
+    """Evaluates the model on a set of examples and prints detailed results."""
+    model.eval()
+    correct = 0
+    total = len(eval_examples)
+    print("\n" + "=" * 50)
+    print("EVALUATION ON", total, "EXAMPLES")
+    print("=" * 50)
+    for example in eval_examples:
+        # Build the full prompt using the same method as training.
+        full_prompt = build_prompt(example["prompt"])
+        expected = example["answer"]
+        # Tokenize the full prompt and generate a response from the model.
+        inputs = tokenizer.encode(full_prompt, return_tensors="pt").to(device)
+        outputs = model.generate(
+            inputs, max_length=512, temperature=0.7, num_return_sequences=1
+        )
+        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Extract the predicted answer from the model output.
+        try:
+            predicted = extract_answer_from_model_output(response)
+            # Check correctness in multiple ways
+            if predicted == expected:  # First try exact match
+                is_correct = True
+            else:
+                # Try single number
+                pred_num = _extract_single_number(str(predicted))
+                exp_num = _extract_single_number(str(expected))
+                if pred_num is not None and exp_num is not None and pred_num == exp_num:
+                    is_correct = True
+                else:
+                    # Try last number
+                    pred_num = _extract_last_number(str(predicted))
+                    exp_num = _extract_last_number(str(expected))
+                    is_correct = (
+                        pred_num is not None
+                        and exp_num is not None
+                        and pred_num == exp_num
+                    )
+
+            if is_correct:
+                correct += 1
+            # Print details of the evaluation.
+            print("\nPrompt:")
+            print(full_prompt)
+            print("\nExpected Answer:")
+            print(expected)
+            print("\nExtracted Answer:")
+            print(predicted)
+            print("\nFull Generated Response:")
+            print(response)
+            print("\nCorrect:", "✓" if is_correct else "✗")
+            print("-" * 50)
+        except Exception as e:
+            print("\nFailed to parse model output for prompt:")
+            print(full_prompt)
+            print("Error:", e)
+            print("-" * 50)
+    accuracy = (correct / total) * 100
+    print(f"\nAccuracy: {accuracy:.2f}% ({correct}/{total})")
+    print("=" * 50)
+    model.train()
+    return accuracy
+
+
+# Define a custom callback class for evaluation.
+class EvalCallback(TrainerCallback):
+    def __init__(self, model, tokenizer, eval_examples, device):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.eval_examples = eval_examples
+        self.device = device
+
+    def on_step_end(self, args, state, control, **kwargs):  # type: ignore
+        if state.global_step % args.eval_steps == 0:  # type: ignore
+            print(f"\nEvaluating at step {state.global_step}:")
+            evaluate_model(self.model, self.tokenizer, self.eval_examples, self.device)
+        return control

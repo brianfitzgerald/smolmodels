@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import torch
 import torch.nn.utils.rnn
@@ -24,23 +24,18 @@ from trl.trainer.reward_config import RewardConfig
 
 from dataset.code import (
     CodeContestsDataModule,
-    UltraFeedbackDataModule,
 )
 from dataset.conversation import (
     ConversationDataModule,
     ConversationDPODataModule,
-    ConversationGRPODataModule,
 )
 from dataset.playwright import PlaywrightSummaryToScript
-from dataset.reasoning import GSM8KReasoningDataModule
 from model.reasoning import (
+    ChatDataCollator,
+    EvalCallback,
+    GSM8KDataModule,
     correctness_reward,
     format_reward,
-    xmlcount_reward_func,
-    soft_format_reward_func,
-    strict_format_reward_func,
-    int_reward_func,
-    correctness_reward_func,
 )
 from model.utils import (
     DataModuleChoice,
@@ -68,6 +63,16 @@ MINISTRAL_8B = "mistralai/Ministral-8B-Instruct-2410"
 
 QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 
+DataCollatorChoice = Literal["basic", "chat"]
+
+DATA_MODULE_MAP = {
+    "code_contests": CodeContestsDataModule,
+    "conversation": ConversationDataModule,
+    "gsm8k": GSM8KDataModule,
+    "conversation_dpo": ConversationDPODataModule,
+    "playwright_summary_to_script": PlaywrightSummaryToScript,
+}
+
 
 @dataclass
 class WrapperConfig:
@@ -85,13 +90,13 @@ class WrapperConfig:
     # Data & Evaluation Configuration
     data_module_choice: DataModuleChoice = "conversation"
     dataset_path: Optional[str] = None
-    custom_chat_template: Optional[str] = None
     eval_data_mode: EvalDataModeChoice = "random"
     # Max samples to use for training
     max_samples: Optional[int] = None
     max_eval_dataset_size: Optional[int] = None
     eval_steps: int = 500
     save_steps: int = 1000
+    data_collator_choice: DataCollatorChoice = "basic"
 
     # Prompt & Sequence Lengths
     max_sequence_length: int = 1512  # sequence length for trimming completions
@@ -252,7 +257,7 @@ GRPO_MATH_CONFIG = WrapperConfig(
     wandb_project_name="qwen-math-grpo",
     train_batch_size=4,
     gradient_accumulation_steps=4,
-    data_module_choice="gsm8k_reasoning",
+    data_module_choice="gsm8k",
     max_prompt_length=256,
     max_grad_norm=0.1,
     eval_batch_size=1,
@@ -267,14 +272,14 @@ SFT_MATH_CONFIG = WrapperConfig(
     wandb_project_name="qwen-math-sft",
     train_batch_size=2,
     gradient_accumulation_steps=4,
-    data_module_choice="gsm8k_reasoning",
+    dataset_path="openai/gsm8k",
+    data_module_choice="gsm8k",
     max_prompt_length=1024,
     max_grad_norm=0.1,
     eval_batch_size=1,
     learning_rate=5e-5,
     tuning_mode="sft",
 )
-
 
 REWARD_MODEL_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
@@ -370,10 +375,11 @@ class TrainerWrapper:
             dataset_path = os.path.join(dataset_root_path, dataset_path)
             logger.info(f"Using dataset path: {dataset_path}")
 
+        custom_chat_template = None
         for k, v in CHAT_TEMPLATE_OVERRIDES.items():
             if self.config.model_id_or_path in v:
                 logger.info(f"Using chat template override: {k}")
-                self.config.custom_chat_template = k
+                custom_chat_template = k
 
         dataset_config = DatasetConfig(
             input_dataset_name=dataset_path,
@@ -383,24 +389,17 @@ class TrainerWrapper:
             notebook_mode=self.config.notebook_mode,
             tuning_mode=self.config.tuning_mode,
             max_samples=self.config.max_samples,
-            custom_chat_template=self.config.custom_chat_template,
+            custom_chat_template=custom_chat_template,
             train_on_inputs=self.config.train_on_inputs,
         )
-        # TODO clean this up
-        if self.config.data_module_choice == "code_contests":
-            self.data_module = CodeContestsDataModule(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "conversation":
-            self.data_module = ConversationDataModule(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "conversation_grpo":
-            self.data_module = ConversationGRPODataModule(
-                self.tokenizer, dataset_config
+        data_module_class = DATA_MODULE_MAP.get(self.config.data_module_choice)
+        if data_module_class is None:
+            raise ValueError(
+                f"Invalid data_module_choice: {self.config.data_module_choice}. "
+                f"Must be one of {list(DATA_MODULE_MAP.keys())}"
             )
-        elif self.config.data_module_choice == "conversation_dpo":
-            self.data_module = ConversationDPODataModule(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "playwright_summary_to_script":
-            self.data_module = PlaywrightSummaryToScript(self.tokenizer, dataset_config)
-        elif self.config.data_module_choice == "gsm8k_reasoning":
-            self.data_module = GSM8KReasoningDataModule(self.tokenizer, dataset_config)
+
+        self.data_module = data_module_class(self.tokenizer, dataset_config)
         self.data_module.setup("fit")
 
     def init_trainer(self, config_name: str | None = None):
@@ -509,6 +508,12 @@ class TrainerWrapper:
                     )
                 return padded
 
+            collator = (
+                basic_pad_collator
+                if self.config.data_collator_choice == "basic"
+                else ChatDataCollator(self.tokenizer)
+            )
+
             self.trainer = CustomSFTTrainer(
                 self.model,
                 peft_config=peft_config,
@@ -516,7 +521,7 @@ class TrainerWrapper:
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
                 tokenizer=self.tokenizer,  # type: ignore
-                data_collator=basic_pad_collator,
+                data_collator=collator,
             )
             self.trainer.set_custom_args(
                 self.config.max_eval_sample_length,
@@ -546,7 +551,7 @@ class TrainerWrapper:
                 num_generations=self.config.num_generations,
                 max_prompt_length=self.config.max_prompt_length,
                 max_completion_length=self.config.max_completion_length,
-                num_train_epochs=1,
+                num_train_epochs=self.config.n_epochs,
                 save_steps=self.config.save_steps,
                 max_grad_norm=self.config.max_grad_norm,
                 per_device_eval_batch_size=self.config.eval_batch_size,
@@ -558,10 +563,15 @@ class TrainerWrapper:
             self.trainer = GRPOTrainer(
                 model=self.model,
                 args=training_args,
-                train_dataset=self.data_module.train_dataset,
+                train_dataset=self.data_module.train_dataset,  # type: ignore
                 eval_dataset=self.data_module.val_dataset,
                 reward_funcs=[format_reward, correctness_reward],  # type: ignore
                 processing_class=self.tokenizer,
+            )
+            self.trainer.add_callback(
+                EvalCallback(
+                    self.model, self.tokenizer, self.data_module.val_dataset, device
+                )
             )
 
         elif self.config.tuning_mode == "reward":
@@ -569,7 +579,7 @@ class TrainerWrapper:
             self.trainer = RewardTrainer(
                 model=self.model,
                 args=config,
-                train_dataset=self.data_module.train_dataset,
+                train_dataset=self.data_module.train_dataset,  # type: ignore
                 eval_dataset=self.data_module.val_dataset,
             )
 

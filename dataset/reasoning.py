@@ -41,13 +41,3 @@ def get_gsm8k_questions(split="train") -> Dataset:
         }
     )  # type: ignore
     return data  # type: ignore
-
-
-class GSM8KReasoningDataModule(SmDataset):
-    def setup(self, stage: str | None = None):
-        self.data = get_gsm8k_questions().train_test_split(test_size=0.1)
-        self.train_dataset = self.data["train"]
-        self.val_dataset = self.data["test"]
-
-
-dataset = get_gsm8k_questions()

@@ -33,7 +33,7 @@ DataModuleChoice = Literal[
     "conversation_dpo",
     "playwright_summary_to_script",
     "gsm8k_reasoning",
-    "conversation_grpo",
+    "gsm8k",
 ]
 TuningModeChoice = Literal["dpo", "sft", "grpo", "reward"]
 

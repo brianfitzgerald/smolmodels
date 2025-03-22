@@ -5,7 +5,7 @@ from model.utils import (
     SmDataset,
 )
 from synthetic_data.utils import Conversation
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 
 COLS_TO_REMOVE = [
     "conversation",
@@ -18,8 +18,8 @@ class ConversationDataModule(SmDataset):
     """
 
     def post_setup(self):
-        self.train_dataset = self.train_dataset.remove_columns(COLS_TO_REMOVE)
-        self.val_dataset = self.val_dataset.remove_columns(COLS_TO_REMOVE)
+        self.train_dataset: Dataset = self.train_dataset.remove_columns(COLS_TO_REMOVE)
+        self.val_dataset: Dataset = self.val_dataset.remove_columns(COLS_TO_REMOVE)
 
     def process_samples_batch(self, examples: dict):
         out = self._tokenize_conversation(examples["conversation"])
@@ -60,37 +60,6 @@ def extract_answer_from_dataset(text):
     if "####" not in text:
         return None
     return text.split("####")[1].strip()
-
-
-SYSTEM_PROMPT = """
-Respond in the following format:
-
-<reasoning>
-...
-</reasoning>
-<answer>
-...
-</answer>
-"""
-
-
-class ConversationGRPODataModule(ConversationDataModule):
-    def init_dataset(self):
-        super().init_dataset()
-        data = load_dataset("openai/gsm8k", "main")["train"]  # type: ignore
-        formatted_data = []
-
-        for example in data:
-            formatted_example = {
-                "prompt": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": example["question"]},  # type: ignore
-                ],
-                "answer": extract_answer_from_dataset(example["answer"]),  # type: ignore
-            }
-            formatted_data.append(formatted_example)
-
-        self.train_dataset = formatted_data
 
 
 class ConversationDPODataModule(ConversationDataModule):
