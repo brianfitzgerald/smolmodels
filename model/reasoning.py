@@ -2,6 +2,7 @@ from typing import Optional
 from datasets import load_dataset, Dataset
 from transformers.trainer_callback import TrainerCallback
 import re
+from loguru import logger
 
 from trl_wrapper.wrapper_config import SmDataset
 
@@ -16,20 +17,29 @@ def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[floa
     responses = [completion[0]["content"] for completion in completions]
     q = prompts[0][-1]["content"]
     extracted_responses = [extract_xml_answer(r) for r in responses]
-    print(
-        "-" * 20,
-        f"Question:\n{q}",
-        f"\nAnswer:\n{answer[0]}",
-        f"\nResponse:\n{responses[0]}",
-        f"\nExtracted:\n{extracted_responses[0]}",
+    logger.info(
+        "-" * 20
+        + "\nQuestion:\n"
+        + q
+        + "\nAnswer:\n"
+        + answer[0]
+        + "\nResponse:\n"
+        + responses[0]
+        + "\nExtracted:\n"
+        + extracted_responses[0]
+        + "\n"
     )
-    return [2.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
+    rewards = [2.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
+    logger.info(f"Correctness rewards: {rewards}")
+    return rewards
 
 
 def int_reward_func(completions, **kwargs) -> list[float]:
     responses = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in responses]
-    return [0.5 if r.isdigit() else 0.0 for r in extracted_responses]
+    rewards = [0.5 if r.isdigit() else 0.0 for r in extracted_responses]
+    logger.info(f"Integer rewards: {rewards}")
+    return rewards
 
 
 def strict_format_reward_func(completions, **kwargs) -> list[float]:
@@ -37,7 +47,9 @@ def strict_format_reward_func(completions, **kwargs) -> list[float]:
     pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    return [0.5 if match else 0.0 for match in matches]
+    rewards = [0.5 if match else 0.0 for match in matches]
+    logger.info(f"Strict format rewards: {rewards}")
+    return rewards
 
 
 def soft_format_reward_func(completions, **kwargs) -> list[float]:
@@ -45,7 +57,9 @@ def soft_format_reward_func(completions, **kwargs) -> list[float]:
     pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    return [0.5 if match else 0.0 for match in matches]
+    rewards = [0.5 if match else 0.0 for match in matches]
+    logger.info(f"Soft format rewards: {rewards}")
+    return rewards
 
 
 def count_xml(text) -> float:
@@ -65,7 +79,9 @@ def count_xml(text) -> float:
 
 def xmlcount_reward_func(completions, **kwargs) -> list[float]:
     contents = [completion[0]["content"] for completion in completions]
-    return [count_xml(c) for c in contents]
+    rewards = [count_xml(c) for c in contents]
+    logger.info(f"XML count rewards: {rewards}")
+    return rewards
 
 
 def extract_xml_answer(text: str) -> str:
@@ -90,7 +106,7 @@ class EvalCallback(TrainerCallback):
 
     def on_step_end(self, args, state, control, **kwargs):  # type: ignore
         if state.global_step % args.eval_steps == 0:  # type: ignore
-            print(f"\nEvaluating at step {state.global_step}:")
+            logger.info(f"\nEvaluating at step {state.global_step}:")
         return control
 
 

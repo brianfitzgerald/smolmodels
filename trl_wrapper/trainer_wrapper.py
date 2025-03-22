@@ -180,6 +180,7 @@ GRPO_MATH_CONFIG = WrapperConfig(
     gradient_accumulation_steps=4,
     data_module_choice="gsm8k",
     max_prompt_length=256,
+    max_completion_length=768,
     max_grad_norm=0.1,
     eval_batch_size=1,
     learning_rate=5e-6,
@@ -243,8 +244,12 @@ class TrainerWrapper:
         # https://github.com/huggingface/trl/issues/1311#issuecomment-2016614091
         # self.tokenizer.add_special_tokens({"pad_token": "<PAD>"})
         self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.tokenizer.padding_side = "right"
-        self.tokenizer.truncation_side = "right"
+        if "qwen" in self.config.model_id_or_path:
+            self.tokenizer.padding_side = "left"
+            self.tokenizer.truncation_side = "left"
+        else:
+            self.tokenizer.padding_side = "right"
+            self.tokenizer.truncation_side = "right"
         if self.config.special_tokens is not None:
             logger.info(f"Adding special tokens: {self.config.special_tokens}")
             self.tokenizer.add_special_tokens(
@@ -493,11 +498,11 @@ class TrainerWrapper:
                 ],  # type: ignore
                 processing_class=self.tokenizer,
             )
-            self.trainer.add_callback(
-                EvalCallback(
-                    self.model, self.tokenizer, self.data_module.val_dataset, device
-                )
-            )
+            # self.trainer.add_callback(
+            #     EvalCallback(
+            #         self.model, self.tokenizer, self.data_module.val_dataset, device
+            #     )
+            # )
 
         elif self.config.tuning_mode == "reward":
             config = RewardConfig(optim=self.config.optimizer)
