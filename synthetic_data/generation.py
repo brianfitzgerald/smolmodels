@@ -1,7 +1,6 @@
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from enum import Enum
 import traceback
 from typing import Dict, List, Optional, cast, Literal
 from datetime import datetime, timedelta
@@ -24,7 +23,6 @@ from wrapt_timeout_decorator import timeout
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
-    gather_with_concurrency_limit,
     get_class_name,
 )
 
@@ -391,7 +389,7 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     ),
     "claude-3-5": RemoteModelChoice(
         AnthropicGenerationWrapper,
-        GenWrapperArgs(max_rps=50 / 60),
+        GenWrapperArgs(max_rps=100),
     ),
     "gpt-4o-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,
@@ -422,7 +420,6 @@ def get_generation_wrapper(
 ) -> GenerationWrapper:
     if "HF_TOKEN" in os.environ:
         hf_token = os.environ["HF_TOKEN"]
-        logger.info("Logging in to Hugging Face Hub")
         login(token=hf_token, add_to_git_credential=True)
     config = MODEL_CONFIGS[model_name]
     if args_override:

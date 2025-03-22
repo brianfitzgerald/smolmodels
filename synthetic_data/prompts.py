@@ -434,46 +434,129 @@ def format_codecontests_cot_generation_prompt(
     return conv
 
 
-def format_gutenberg_backtranslation_prompt(chunk: str) -> Conversation:
+def format_writing_backtranslation_prompt(original_paragraph: str) -> Conversation:
     conv: Conversation = [
         {
             "role": "user",
             "content": f"""
-You are tasked with creating an instruction for a large language model to recreate a paragraph from a book through a process called "back-translation." Here is the original paragraph:
+You are an expert in literary analysis and content creation. Your task is to analyze a given paragraph and then create detailed instructions for recreating a similar paragraph that captures its essence without directly copying it. This process is called "back-translation."
 
-<original_paragraph>
-{chunk}
-</original_paragraph>
+Here is the original paragraph you need to analyze:
 
-Back-translation involves taking a piece of text, conceptually translating it into another form or language, and then providing instructions to recreate the original text based on that conceptual translation. Your goal is to create an instruction that, when given to a large language model, would result in the recreation of a paragraph very similar in style, tone, and content to the original, without directly copying the exact wording.
+{original_paragraph}
 
-Follow these steps:
+Please follow these steps to complete your task:
 
-1. Carefully analyze the original paragraph, paying attention to:
-   - Writing style (e.g., formal, casual, literary)
-   - Tone (e.g., serious, humorous, melancholic)
-   - Content and themes
-   - Sentence structure and complexity
-   - Vocabulary level and any unique word choices
-   - Literary devices or techniques used (if any)
+1. Analyze the original paragraph:
+   Wrap your analysis in <analysis> tags as you examine the paragraph. Include the following elements:
+   
+   a) Brief summary (2-3 sentences)
+   b) Writing style (e.g., formal, casual, literary)
+   c) Tone (e.g., serious, humorous, melancholic)
+   d) Content and themes
+   e) Sentence structure and complexity
+   f) Vocabulary level and any unique word choices
+   g) Literary devices or techniques used (if any)
 
-2. Based on your analysis, create a detailed instruction for a large language model to write a paragraph that captures the essence of the original. Your instruction should:
-   - Describe the overall style and tone to aim for
-   - Outline the main ideas or plot points to include
-   - Suggest the type of vocabulary or literary devices to use
-   - Indicate the desired length and complexity of sentences
-   - Provide any other relevant details that would help recreate the paragraph's feel
+   For each element, quote specific sentences or phrases from the text to support your analysis. Be thorough in your examination.
 
-3. Ensure your instruction does not include any direct quotes or specific unique phrases from the original paragraph. The goal is to guide the creation of a similar paragraph, not an exact replica.
+2. Plan detailed instructions:
+   Based on your analysis, use <instruction_planning> tags to craft an instruction for recreating a paragraph that captures the essence of the original. Your planning should include:
+   
+   a) Style and Tone:
+   Describe the overall writing style and tone to aim for. Be specific about the mood and atmosphere the writer should create.
 
-4. Your instruction should be detailed enough to capture the essence of the original paragraph but general enough to allow for creativity in the recreation process.
+   b) Content and Themes:
+   Outline the main ideas, plot points, or narrative elements to include. Focus on the actions and events occurring in the paragraph, as well as any character development or thematic elements.
 
-Your instruction should be detailed, and can use bullet points, lists, and other formatting.
+   c) Sensory Details and Imagery:
+   Instruct on the use of sensory details and imagery to bring the scene to life. Specify which senses should be engaged and how.
 
+   d) Character Interaction (if applicable):
+   If the original paragraph includes character interactions, provide guidance on how to recreate similar dynamics.
+
+Present your final instruction in the following format:
+
+<instruction>
+<style_and_tone>
+[Your detailed description of the style and tone]
+</style_and_tone>
+
+<content_and_themes>
+[Your comprehensive outline of main ideas, plot points, or narrative elements]
+</content_and_themes>
+
+<structure>
+[Your guidance on sentence structure, paragraph organization, and overall flow]
+</structure>
+
+<character_interaction>
+[Your guidance on character dynamics, if applicable]
+</character_interaction>
+
+<setting_description>
+[Your advice on describing the setting, if important]
+</setting_description>
+</instruction>
+
+Remember to use your analysis to inform every aspect of your instruction, ensuring that the essence of the original paragraph is captured in your guidance.
 """,
         },
     ]
     return conv
+
+
+def format_classify_fiction_prompt(paragraph: str) -> Conversation:
+    return [
+        {
+            "role": "system",
+            "content": """
+Classify a given piece of text to determine whether it is a passage of narrative fiction that includes elements of dialogue and action, or if it is not.
+
+Consider the following when making your classification:
+
+- **Narrative Fiction**: Look for elements of storytelling, such as a plot or characters in action.
+- **Dialogue**: Identify the presence of conversations or spoken exchanges between characters.
+- **Action**: Detect descriptive sequences depicting physical actions or events.
+
+# Steps
+
+1. **Read the Text**: Carefully read through the provided text to identify key elements.
+2. **Identify Dialogue**: Look for quotation marks or other indicators of characters speaking.
+3. **Identify Action**: Seek out descriptions of characters performing actions or events unfolding.
+4. **Conclusion**: Decide if both dialogue and action are present indicative of narrative fiction.
+
+# Output Format
+
+- Output should be a single sentence classification: "Narrative Fiction" or "Not Narrative Fiction."
+
+# Examples
+
+### Example 1
+**Input**:  
+"John looked at Sarah and said, 'I can't believe this is happening.' He then rushed towards the door, pulling it open with force."
+
+**Output**:  
+"Narrative Fiction"
+
+### Example 2
+**Input**:  
+"The study of quantum mechanics requires an understanding of various complex principles and mathematical concepts."
+
+**Output**:  
+"Not Narrative Fiction"
+
+# Notes
+
+- Be aware of texts that might not follow traditional narrative forms yet qualify due to presence of characters, dialogue, and action.
+- Maintain objectivity, focusing only on the presence of required elements without inferring absent details.
+""",
+        },
+        {
+            "role": "user",
+            "content": paragraph,
+        },
+    ]
 
 
 def format_gutenberg_followup_prompt(instruction: str, completion: str) -> Conversation:
@@ -510,3 +593,11 @@ def format_gutenberg_followup_prompt(instruction: str, completion: str) -> Conve
             ],
         },
     ]
+
+
+def tags_to_instruction(tags: dict) -> str:
+    tags_str = "\n".join([f"- {v}" for v in tags.values()])
+    return f"""
+You are an expert writer. Your task is to take the following tags and create a detailed piece of writing.
+{tags_str}
+    """

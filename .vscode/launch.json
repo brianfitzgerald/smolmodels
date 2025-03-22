@@ -84,6 +84,16 @@
                 "--root_dir",
                 "~/Documents/epubs/scifi"
             ]
+        },
+        {
+            "name": "Upload Dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "util_scripts.py",
+            "args": [
+                "upload_dataset",
+                "epubs"
+            ]
         }
     ]
 }

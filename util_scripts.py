@@ -70,6 +70,19 @@ def download_dataset(dataset_name: str):
     pass
 
 
+def upload_dataset(dataset_name: str):
+    """
+    Upload a dataset to the modal datasets folder.
+    """
+    volume = MODEL_WEIGHTS_VOLUME
+    path = f"dataset_files/{dataset_name}.parquet"
+    logger.info(f"Uploading dataset to {path}")
+    with volume.batch_upload() as upload:
+        logger.info(f"Uploading {path}")
+        upload.put_file(path, path)
+    logger.info(f"Uploaded dataset to {path}")
+
+
 def convert_epubs_to_txt(root_dir: str, out_dir: str = "~/Documents/txt"):
     """
     Convert all epub files in the root_dir to txt.

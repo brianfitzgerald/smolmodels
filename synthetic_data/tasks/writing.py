@@ -13,12 +13,14 @@ from loguru import logger
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from pydantic import BaseModel
 
-from synthetic_data.generation import GenWrapperArgs
+from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
 from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
 from synthetic_data.judgemark import TASK_PROMPT
 from synthetic_data.prompts import (
-    format_gutenberg_backtranslation_prompt,
+    format_classify_fiction_prompt,
+    format_writing_backtranslation_prompt,
     format_gutenberg_followup_prompt,
+    tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
@@ -312,6 +314,34 @@ def _get_gutenberg_subset(n_shards: int = 1) -> pl.DataFrame:
     return out_pl
 
 
+def extract_fiction_label(text):
+    match = re.search(r"\b(Narrative Fiction|Not Narrative Fiction)\b", text)
+    if match:
+        label_str = match.group(1)
+        label = 1 if label_str == "Narrative Fiction" else 0
+        return label
+    else:
+        return None
+
+
+def extract_tags_from_instruction(text):
+    instruction_pattern = r"<instruction>(.*?)</instruction>"
+    instruction_match = re.search(instruction_pattern, text, re.DOTALL)
+
+    if not instruction_match:
+        return {}
+
+    instruction_content = instruction_match.group(1)
+    tag_pattern = r"<(\w+)>\s*(.*?)\s*</\1>"
+    matches = re.findall(tag_pattern, instruction_content, re.DOTALL)
+
+    extracted = {}
+    for tag, content in matches:
+        extracted[tag.strip()] = content.strip()
+
+    return extracted
+
+
 class GutenbergBacktranslation(BaseTask):
     """
     Generate a high quality prompt from a Gutenberg chunk.
@@ -358,22 +388,50 @@ class GutenbergBacktranslation(BaseTask):
             )
         return rows_out
 
-    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        return [format_gutenberg_backtranslation_prompt(p["text"]) for p in batch]
-
     def format_output_rows(
         self, completions: List[str], input_rows: list[dict]
     ) -> List:
         out_rows = []
         for completion, row in zip(completions, input_rows):
+            tags = extract_tags_from_instruction(completion)
             out_rows.append(
                 {
-                    "instruction": completion,
+                    "completion": completion,
                     "paragraph": row["text"],
                     **row,
+                    "tags": tags,
+                    "instruction": tags_to_instruction(tags),
                 }
             )
         return out_rows
+
+    async def generate(
+        self, generation_wrapper: GenerationWrapper, input_rows: list[dict]
+    ) -> list[dict]:
+        try:
+            filter_convs = [
+                format_classify_fiction_prompt(p["text"]) for p in input_rows
+            ]
+            filter_completions = await generation_wrapper.generate(filter_convs)
+            filter_labels = [extract_fiction_label(c) for c in filter_completions]
+            logger.info(filter_labels)
+
+            valid_rows = [
+                row for row, label in zip(input_rows, filter_labels) if label == 1
+            ]
+            logger.info(f"Valid rows: {len(valid_rows)}")
+
+            bt_convs = [
+                format_writing_backtranslation_prompt(p["text"]) for p in valid_rows
+            ]
+            completions = await generation_wrapper.generate(bt_convs)
+            return self.format_output_rows(completions, valid_rows)
+        except TimeoutError:
+            logger.error("Timeout error processing batch")
+            return []
+        except Exception as e:
+            logger.error(f"Error processing batch: {str(e)}")
+            return []
 
 
 class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):

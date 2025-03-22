@@ -75,7 +75,9 @@ class Toolformer(DPOTask):
 
     original_rows_batch: List[ToolFormerRow] = []
 
-    def format_output_rows(self, completions: List[str]) -> List[Dict]:
+    def format_output_rows(
+        self, completions: List[str], input_rows: List[Dict]
+    ) -> List[Dict]:
         row = None
         for completion in completions:
             question, tool_call, call_result, agent_output = get_matches(completion)

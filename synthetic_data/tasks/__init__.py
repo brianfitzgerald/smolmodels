@@ -1,11 +1,12 @@
 from abc import ABC
 from typing import Dict, List, Optional
 from datasets import Dataset
+from loguru import logger
 from rich.console import Console
 from evaluation.code_execution import (
     EvalTask,
 )
-from synthetic_data.generation import GenWrapperArgs
+from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
@@ -43,7 +44,7 @@ class BaseTask(ABC):
         """
         Prompt template to use for generating initial seed data.
         """
-        raise NotImplementedError
+        return []
 
     def format_output_rows(
         self, completions: list[str], input_rows: list[dict]
@@ -60,3 +61,17 @@ class BaseTask(ABC):
         Prompt template to use for generating initial seed data.
         """
         raise NotImplementedError
+
+    async def generate(
+        self, generation_wrapper: GenerationWrapper, input_rows: list[dict]
+    ) -> list[dict]:
+        try:
+            conversations = self.format_input_conversation(input_rows)
+            completions = await generation_wrapper.generate(conversations)
+            return self.format_output_rows(completions, input_rows)
+        except TimeoutError:
+            logger.error("Timeout error processing batch")
+            return []
+        except Exception as e:
+            logger.error(f"Error processing batch: {str(e)}")
+            return []

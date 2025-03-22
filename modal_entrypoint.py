@@ -12,7 +12,7 @@ from scripts.modal_definitons import (
 from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper
 from generate import main as generate_main
 
-DATASET_ROOT_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
+DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
 
 
 @app.function(
@@ -28,7 +28,7 @@ def training(config: str = "grpo_math"):
     cfg = CONFIGS[config]
     wrapper = TrainerWrapper(cfg, True)
     wrapper.init_model()
-    wrapper.init_data_module(dataset_root_path=DATASET_ROOT_PATH)
+    wrapper.init_data_module(dataset_root_path=DATASET_VOLUME_PATH)
     wrapper.init_trainer(config)
     logger.info(f"Starting training, config: {config}")
     wrapper.train()
@@ -42,11 +42,11 @@ def training(config: str = "grpo_math"):
 )
 def generation():
     logger.info(
-        f"Dataset root path: {DATASET_ROOT_PATH} contents: {os.listdir(DATASET_ROOT_PATH)}"
+        f"Dataset root path: {DATASET_VOLUME_PATH} contents: {os.listdir(DATASET_VOLUME_PATH)}"
     )
     generate_main(
         task_name="gutenberg_backtranslation_from_txt",
-        dataset_root_path=DATASET_ROOT_PATH,
+        dataset_root_path=DATASET_VOLUME_PATH,
         model="gemini-2.0-flash",
     )
 

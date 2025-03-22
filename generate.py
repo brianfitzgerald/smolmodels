@@ -55,23 +55,11 @@ async def process_batch(
     task: BaseTask, generation_wrapper, input_rows: list[dict]
 ) -> list[dict]:
     logger.info(f"Processing batch of {len(input_rows)} rows")
-    conversations_batch = task.format_input_conversation(input_rows)
-    if len(conversations_batch) == 0:
+    output_rows = await task.generate(generation_wrapper, input_rows)
+    if len(output_rows) == 0:
         logger.warning("Skipping empty batch")
         return []
-
-    logger.info(f"Generating batch of {len(conversations_batch)} completions...")
-    try:
-        completions = await generation_wrapper.generate(conversations_batch)
-        output_rows = task.format_output_rows(completions, input_rows)
-        logger.info(f"Generated {len(output_rows)} output rows")
-        return output_rows
-    except TimeoutError:
-        logger.error("Timeout error processing batch")
-        return []
-    except Exception as e:
-        logger.error(f"Error processing batch: {str(e)}")
-        return []
+    return output_rows
 
 
 async def collect_preprocessed_rows(
