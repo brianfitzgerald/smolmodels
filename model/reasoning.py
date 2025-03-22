@@ -400,7 +400,10 @@ class GSM8KDataModule(SmDataset):
             }
             formatted_data.append(formatted_example)
 
-        self.train_dataset = formatted_data
+        dataset = Dataset.from_list(formatted_data)
+        dataset = dataset.train_test_split(test_size=0.1)
+        self.train_dataset = dataset["train"]
+        self.val_dataset = dataset["test"]
 
     def setup(self, stage: Optional[str] = None):
         self.init_reasoning_dataset()

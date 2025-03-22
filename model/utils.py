@@ -18,7 +18,8 @@ from torchmetrics.text.bleu import BLEUScore
 from torchmetrics.text.rouge import ROUGEScore
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from trl_wrapper.trainer_wrapper import WrapperConfig
+from trl_wrapper.wrapper_config import DatasetConfig
+
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
 SAFETY_TASK_PREFIX = (
@@ -89,7 +90,7 @@ def class_name_to_underscore(cls):
 
 
 class SmDataset(pl.LightningDataModule):
-    def __init__(self, tokenizer: PreTrainedTokenizer, config: WrapperConfig):
+    def __init__(self, tokenizer: PreTrainedTokenizer, config: DatasetConfig):
         super().__init__()
 
         self.config = config

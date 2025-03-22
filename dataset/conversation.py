@@ -5,7 +5,7 @@ from model.utils import (
     SmDataset,
 )
 from synthetic_data.utils import Conversation
-from datasets import load_dataset, Dataset
+from datasets import Dataset
 
 COLS_TO_REMOVE = [
     "conversation",
