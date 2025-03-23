@@ -24,8 +24,6 @@ class BaseTask(ABC):
 
     dataset_columns: List[str] = []
 
-    eval_tasks: List[EvalTask] = []
-
     gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
     def load_custom(self, dataset_root_path: str) -> Dataset:

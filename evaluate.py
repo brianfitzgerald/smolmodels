@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from typing import Dict, List, cast
+from typing import Dict, List, Literal, cast
 
 import pandas as pd
 from datasets import Dataset, load_dataset
@@ -13,23 +13,17 @@ from datetime import datetime
 
 from evaluation.code_execution import (
     EvalResult,
+    EvalTask,
     eval_results_to_markdown,
     evaluate_codecontests,
 )
-from generate import ALL_TASKS
 from synthetic_data.generation import (
     RemoteModel,
     GenerationWrapper,
     get_generation_wrapper,
 )
+from synthetic_data.tasks.evals import EQBenchWriting
 from synthetic_data.utils import Conversation, dictl, ensure_directory
-
-
-async def sample_worker(
-    model_wrapper: GenerationWrapper, prompt: Conversation, sample: Dict
-):
-    out = await model_wrapper.generate([prompt])
-    return out, sample
 
 
 def _save_eval_results_to_csv(eval_results: List[EvalResult], out_dir: str):
@@ -48,20 +42,26 @@ def _save_eval_results_to_csv(eval_results: List[EvalResult], out_dir: str):
     test_results_pd.to_csv(f"{out_dir}/test_results.csv", index=False)
 
 
+EvalTaskName = Literal["eq_bench_writing"]
+
+EVAL_TASKS: Dict[EvalTaskName, type[EvalTask]] = {
+    "eq_bench_writing": EQBenchWriting,
+}
+
+
 async def main(
     batch_size: int = 8,
-    task_name: str = "codecontests",
-    gen_source: str = RemoteModel.VLLM.value,
+    eval_task_name: EvalTaskName = "eq_bench_writing",
+    gen_source: RemoteModel = "vllm",
 ):
     console = Console()
-    task = ALL_TASKS[task_name]()
 
-    console = Console()
+    task = EVAL_TASKS[eval_task_name]()
     model_wrapper = get_generation_wrapper(gen_source)
 
     simple_date = datetime.now().strftime("%m-%d-%-H-%-M")
     random_id = int(random.random() * 1000)
-    run_name = f"{task_name}_{gen_source}_{simple_date}_{random_id}"
+    run_name = f"{eval_task_name}_{gen_source}_{simple_date}_{random_id}"
     console.print(f"Starting eval run: {run_name}")
     current_dir = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(current_dir, "eval_results", run_name)
@@ -70,34 +70,29 @@ async def main(
     eval_results: List[EvalResult] = []
     md_out_lines = []
     with Progress() as progress:
-        for eval_task in task.eval_tasks:
-            dataset = cast(Dataset, load_dataset(eval_task.dataset_uri))[
-                eval_task.eval_split
+        dataset = cast(Dataset, load_dataset(task.dataset_uri))[task.eval_split]
+        progress_bar_title = f"Eval task: {task.dataset_uri}"
+        prog_task = progress.add_task(progress_bar_title, total=len(dataset))
+        for batch in dataset.iter(batch_size=batch_size):  # type: ignore
+            all_futures = []
+            samples_batch = dictl(batch)
+            eval_prompts_batch = [
+                task.format_inference_conversation(sample, task)
+                for sample in samples_batch
             ]
-            progress_bar_title = f"Eval task: {eval_task.dataset_uri}"
-            prog_task = progress.add_task(progress_bar_title, total=len(dataset))
-            for batch in dataset.iter(batch_size=batch_size):  # type: ignore
-                all_futures = []
-                samples_batch = dictl(batch)
-                eval_prompts_batch = [
-                    task.format_inference_conversation(sample, eval_task)
-                    for sample in samples_batch
-                ]
-                for prompt, sample in zip(eval_prompts_batch, samples_batch):
-                    all_futures.append(
-                        asyncio.create_task(
-                            sample_worker(model_wrapper, prompt, sample)
-                        )
-                    )
-                results: List[tuple[str, dict]] = await asyncio.gather(*all_futures)
+            for prompt, sample in zip(eval_prompts_batch, samples_batch):
+                all_futures.append(
+                    asyncio.create_task(sample_worker(model_wrapper, prompt, sample))
+                )
+            results: List[tuple[str, dict]] = await asyncio.gather(*all_futures)
 
-                eval_results.extend(evaluate_codecontests(console, results, eval_task))
-                progress.advance(prog_task, 1)
-                md_out_lines.extend(eval_results_to_markdown(eval_results))
-                with open(f"{out_dir}/eval_results.md", "w") as f:
-                    f.write("\n".join(md_out_lines))
+            eval_results.extend(evaluate_codecontests(console, results, task))
+            progress.advance(prog_task, 1)
+            md_out_lines.extend(eval_results_to_markdown(eval_results))
+            with open(f"{out_dir}/eval_results.md", "w") as f:
+                f.write("\n".join(md_out_lines))
 
-                _save_eval_results_to_csv(eval_results, out_dir)
+            _save_eval_results_to_csv(eval_results, out_dir)
 
     n_all_tests_passed = sum(
         sum(res.tests_pass) == len(res.tests_pass) for res in eval_results

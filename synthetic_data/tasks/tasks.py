@@ -338,23 +338,6 @@ class CodeContests(HumanEval):
 
     dataset_columns = ["chosen", "rejected", "name", "prompt"]
 
-    eval_tasks = [
-        EvalTask(
-            "humaneval",
-            "openai/openai_humaneval",
-            "humaneval",
-            "exec",
-            "test",
-        ),
-        # EvalTask(
-        #     "humaneval",
-        #     "google-research-datasets/mbpp",
-        #     "mbpp",
-        #     "ast",
-        #     "train",
-        # ),
-    ]
-
     def __init__(self) -> None:
         self.n_completions_per_sample = 1
         self.print_definitions = False

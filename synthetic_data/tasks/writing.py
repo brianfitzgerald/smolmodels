@@ -204,8 +204,8 @@ class GutenbergExtraction(BaseTask):
         return out_rows
 
 
-def _format_annotate_conv(text: str) -> Sequence[ChatCompletionMessageParam]:
-    prompt_formatted = TASK_PROMPT.replace("[TEST MODEL RESPONSE]", text).replace(
+def format_judgemark_conv(completion: str) -> Sequence[ChatCompletionMessageParam]:
+    prompt_formatted = TASK_PROMPT.replace("[TEST MODEL RESPONSE]", completion).replace(
         "[TEST MODEL RESPONSE END]", ""
     )
 
@@ -230,8 +230,8 @@ class WritingRewardAnnotate(BaseTask):
         for sample in samples_in:
             chosen_text = sample["chosen"][-1]["content"]
             rejected_text = sample["rejected"][-1]["content"]
-            samples_out.append(_format_annotate_conv(chosen_text))
-            samples_out.append(_format_annotate_conv(rejected_text))
+            samples_out.append(format_judgemark_conv(chosen_text))
+            samples_out.append(format_judgemark_conv(rejected_text))
             in_batch.extend([sample, sample])
         self.in_rows_batch = in_batch
         return samples_out

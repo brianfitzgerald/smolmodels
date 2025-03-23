@@ -1,6 +1,7 @@
 import ast
 import traceback
 from typing import Any, Callable, List, Optional, Tuple
+from datasets import Dataset
 from rich.syntax import Syntax
 from rich.console import Console
 from typing import Optional, Callable, Literal, Dict
@@ -17,6 +18,7 @@ import re
 import signal
 
 from evaluation.python_interpereter import evaluate_python_code_ast, LIST_SAFE_MODULES
+from synthetic_data.generation import GenerationWrapper
 from synthetic_data.utils import extract_code_block, extract_text_between_tags
 
 ALLOWED_FNS = {
@@ -320,11 +322,16 @@ CodeTaskFormat = Literal["humaneval", "mbpp"]
 
 @dataclass
 class EvalTask(ABC):
-    name: str
-    dataset_uri: str
-    code_task_format: Optional[CodeTaskFormat]
-    code_execution_mode: Optional[CodeExecutionMode]
-    eval_split: str = "test"
+    name: str = "base_task"
+    # only applies to code evals
+    code_task_format: Optional[CodeTaskFormat] = None
+    code_execution_mode: Optional[CodeExecutionMode] = None
+
+    def load_task_data(self) -> Dataset:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def run_eval(self, generation_wrapper: GenerationWrapper):
+        raise NotImplementedError("Subclasses must implement this method")
 
 
 @dataclass

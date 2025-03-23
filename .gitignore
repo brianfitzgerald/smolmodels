@@ -193,7 +193,6 @@ synthetic_image_data/*
 notebooks/logs/*
 *.arrow
 *.pt
-*.json
 *.pth
 *.model
 *.txt
