@@ -14,24 +14,31 @@ from trl_wrapper.wrapper_config import SmDataset
 
 # Reward functions
 def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[float]:
-    responses = [completion[0]["content"] for completion in completions]
+    model_generations = [completion[0]["content"] for completion in completions]
     q = prompts[0][-1]["content"]
-    extracted_responses = [extract_xml_answer(r) for r in responses]
+    extracted_responses = [extract_xml_answer(r) for r in model_generations]
+    extracted_responses_hash = [extract_hash_answer(r) for r in model_generations]
     logger.info(
         "-" * 20
         + "\nQuestion:\n"
         + q
         + "\nAnswer:\n"
         + answer[0]
-        + "\nResponse:\n"
-        + responses[0]
+        + "\nGenerated:\n"
+        + model_generations[0]
         + "\nExtracted:\n"
         + extracted_responses[0]
         + "\n"
     )
     rewards = [2.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
-    logger.info(f"Correctness rewards: {rewards}")
-    return rewards
+    rewards_hash = [
+        2.0 if r == a else 0.0 for r, a in zip(extracted_responses_hash, answer)
+    ]
+    rewards_max = [max(r, h) for r, h in zip(rewards, rewards_hash)]
+    logger.info(
+        f"XML rewards: {rewards} | Hash rewards: {rewards_hash} | Max rewards: {rewards_max}"
+    )
+    return rewards_max
 
 
 def int_reward_func(completions, **kwargs) -> list[float]:
@@ -122,6 +129,7 @@ class GSM8KDataModule(SmDataset):
 
 
 SYSTEM_PROMPT = """
+You are an expert reasoning model.
 Respond in the following format:
 <reasoning>
 ...
@@ -129,15 +137,23 @@ Respond in the following format:
 <answer>
 ...
 </answer>
-"""
 
-XML_COT_FORMAT = """\
-<reasoning>
-{reasoning}
+# Example
+
+User: Mr. Sam shared a certain amount of money between his two sons, Ken and Tony. If Ken got $1750, and Tony got twice as much as Ken, how much was the money shared?
+Assistant: <reasoning>
+Tony got twice $1750 which is 2*$1750 = 3500
+The total amount shared was $1750+$3500 = 5250
 </reasoning>
-<answer>
-{answer}
-</answer>
+<answer>5250</answer>
+
+# Example
+
+User: Bob has a collection of marbles. If his friend Tim has 20 marbles and Bob has three times as many marbles as Tim, how many marbles do they have together?
+Assistant: <reasoning>Bob has 3x20 = 60 marbles.
+Together, they have 20 + 60 = 80 marbles.</reasoning>
+<answer>80</answer>
+
 """
 
 

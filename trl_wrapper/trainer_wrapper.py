@@ -7,7 +7,6 @@ from datasets import load_dataset
 from loguru import logger
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.constants import DUMMY_TARGET_MODULES
-from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
@@ -18,11 +17,11 @@ from trl.trainer.grpo_trainer import GRPOTrainer
 from transformers.trainer_utils import SchedulerType
 from trl.trainer.reward_trainer import RewardTrainer
 from trl.trainer.reward_config import RewardConfig
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM  # type: ignore
 
 from dataset.code import CodeContestsDataModule
 from dataset.conversation import ConversationDPODataModule, ConversationDataModule
 from model.reasoning import (
-    EvalCallback,
     GSM8KDataModule,
     correctness_reward_func,
     int_reward_func,
@@ -46,6 +45,7 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_3B,
     MINISTRAL_8B,
     QWEN_0_5_B,
+    QWEN_1_5_B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -174,7 +174,8 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
 
 
 GRPO_MATH_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_0_5_B,
+    model_id_or_path=QWEN_1_5_B,
+    model_family="qwen",
     wandb_project_name="qwen-math-grpo",
     train_batch_size=4,
     gradient_accumulation_steps=4,
@@ -244,12 +245,10 @@ class TrainerWrapper:
         # https://github.com/huggingface/trl/issues/1311#issuecomment-2016614091
         # self.tokenizer.add_special_tokens({"pad_token": "<PAD>"})
         self.tokenizer.pad_token = self.tokenizer.eos_token
-        if "qwen" in self.config.model_id_or_path:
-            self.tokenizer.padding_side = "left"
-            self.tokenizer.truncation_side = "left"
-        else:
-            self.tokenizer.padding_side = "right"
-            self.tokenizer.truncation_side = "right"
+        padding_side = "left" if self.config.model_family == "qwen" else "right"
+        logger.info(f"Setting padding side to: {padding_side}")
+        self.tokenizer.padding_side = padding_side
+        self.tokenizer.truncation_side = padding_side
         if self.config.special_tokens is not None:
             logger.info(f"Adding special tokens: {self.config.special_tokens}")
             self.tokenizer.add_special_tokens(
@@ -282,7 +281,7 @@ class TrainerWrapper:
             torch_dtype=torch.bfloat16,
             quantization_config=bnb_config,
             ignore_mismatched_sizes=True,
-            use_cache=not self.config.using_mistral,
+            use_cache=self.config.model_family == "other",
         )
         if self.config.special_tokens is not None:
             logger.info(f"Resizing token embeddings for model to {len(self.tokenizer)}")
@@ -442,7 +441,7 @@ class TrainerWrapper:
 
         elif self.config.tuning_mode == "grpo":
             device = get_available_device()
-            use_vllm = "cuda" in device
+            use_vllm = "cuda" in device and not self.config.notebook_mode
             logger.info(f"Using vllm: {use_vllm}")
             training_args = GRPOConfig(
                 output_dir=output_dir,
@@ -467,6 +466,7 @@ class TrainerWrapper:
                 use_vllm=use_vllm,
                 vllm_gpu_memory_utilization=0.3,
                 vllm_device=device,
+                temperature=0.4,
                 report_to="wandb" if self.use_wandb else "none",
             )
             peft_config = LoraConfig(
@@ -495,7 +495,7 @@ class TrainerWrapper:
                     strict_format_reward_func,
                     int_reward_func,
                     correctness_reward_func,
-                ],  # type: ignore
+                ],
                 processing_class=self.tokenizer,
             )
             # self.trainer.add_callback(

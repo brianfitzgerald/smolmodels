@@ -45,11 +45,11 @@ pyright --createstub transformers
 
 ```bash
 # Training
-modal run -d modal_entrypoint.py::training --config grpo_math
+uv run modal run -d modal_entrypoint.py::training --config grpo_math
 # Generation
-modal run -d modal_entrypoint.py::generation
+uv run modal run -d modal_entrypoint.py::generation
 # Inference
-modal serve modal_vllm.py
+uv run modal serve modal_vllm.py
 ```
 
 

@@ -34,8 +34,12 @@ MISTRAL_7B = "mistralai/Mistral-7B-Instruct-v0.3"
 MINISTRAL_8B = "mistralai/Ministral-8B-Instruct-2410"
 
 QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
+QWEN_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
 
 DataCollatorChoice = Literal["basic", "chat"]
+
+
+ModelFamily = Literal["qwen", "mistral", "other"]
 
 
 @dataclass
@@ -44,6 +48,7 @@ class WrapperConfig:
     model_id_or_path: str = LLAMA_3_2_1B
     using_mistral: bool = False
     adapter_path: Optional[str] = None
+    model_family: ModelFamily = "other"
 
     # Experiment / Environment Settings
     notebook_mode: bool = False
