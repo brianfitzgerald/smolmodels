@@ -77,7 +77,7 @@ def upload_dataset(dataset_name: str):
     volume = MODEL_WEIGHTS_VOLUME
     path = f"dataset_files/{dataset_name}.parquet"
     logger.info(f"Uploading dataset to {path}")
-    with volume.batch_upload() as upload:
+    with volume.batch_upload(force=True) as upload:
         logger.info(f"Uploading {path}")
         upload.put_file(path, path)
     logger.info(f"Uploaded dataset to {path}")

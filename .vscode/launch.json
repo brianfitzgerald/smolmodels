@@ -92,7 +92,17 @@
             "program": "util_scripts.py",
             "args": [
                 "upload_dataset",
-                "epubs"
+                "gutenberg_backtranslate_from_txt_conversations"
+            ]
+        },
+        {
+            "name": "Download Dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "util_scripts.py",
+            "args": [
+                "download_dataset",
+                "gutenberg_backtranslate_from_txt"
             ]
         }
     ]

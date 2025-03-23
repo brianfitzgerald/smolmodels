@@ -160,7 +160,7 @@ class SmDataset(pl.LightningDataModule):
         self.custom_template = None
         if self.config.dataset_path is not None:
             chat_template_path = (
-                f"{self.prefix}chat_templates/{self.config.dataset_path}.jinja"
+                f"{self.prefix}chat_templates/{self.config.chat_template_path}.jinja"
             )
             logger.info(f"Loading custom chat template: {chat_template_path}")
             with open(chat_template_path) as f:
