@@ -330,7 +330,7 @@ class EvalTask(ABC):
     def load_task_data(self) -> Dataset:
         raise NotImplementedError("Subclasses must implement this method")
 
-    def run_eval(self, generation_wrapper: GenerationWrapper):
+    def run_eval(self, batch: dict, generation_wrapper: GenerationWrapper):
         raise NotImplementedError("Subclasses must implement this method")
 
 
