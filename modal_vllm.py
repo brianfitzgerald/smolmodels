@@ -3,6 +3,7 @@ import os
 from typing import Optional
 import modal
 from vllm import AsyncEngineArgs, AsyncLLMEngine
+from loguru import logger
 
 from scripts.modal_definitons import (
     MODEL_WEIGHTS_VOLUME,
@@ -29,19 +30,19 @@ from vllm.entrypoints.openai.cli_args import (
 
 def get_checkpoint_dir(
     base_run_dir: str,
-    model: Optional[str] = None,
+    model_id: Optional[str] = None,
     run: Optional[str] = None,
     steps: Optional[int] = None,
 ) -> str:
-    checkpoint_dir = model
-    print(f"model: {model}, run: {run}, steps: {steps}")
+    checkpoint_dir = model_id
+    logger.info(f"model id: {model_id}, run: {run}, steps: {steps}")
     if run:
         run_directory = os.path.join(base_run_dir, run)
-        print(f"run_directory: {run_directory}")
+        logger.info(f"run_directory: {run_directory}")
         if not os.path.exists(run_directory):
             raise ValueError(f"Run directory {run_directory} not found")
         checkpoints = os.listdir(run_directory)
-        print(f"checkpoints: {checkpoints}")
+        logger.info(f"checkpoints: {checkpoints}")
         checkpoints = [x for x in checkpoints if x.startswith("checkpoint-")]
         sorted_checkpoints = list(
             sorted(checkpoints, key=lambda x: int(x.split("-")[-1]))
@@ -124,9 +125,9 @@ def serve():
         os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"),
         # "meta-llama/Llama-3.2-3B-Instruct",
         None,
-        "02-20-19-1-609720-llama-3.2-3b-instruct-gutenberg-gutenberg-conv",
+        "03-23-2-21-106352-llama-3.2-3b-instruct-txt_bt-txt-bt",
     )
-    print(f"args.model: {args.model}")
+    logger.info(f"args.model: {args.model}")
     validate_parsed_serve_args(args)
 
     try:  # adapted from vLLM source -- https://github.com/vllm-project/vllm/blob/507ef787d85dec24490069ffceacbd6b161f4f72/vllm/entrypoints/openai/api_server.py#L235C1-L247C1
@@ -142,6 +143,6 @@ def serve():
         # When using single vLLM without engine_use_ray
         server = asyncio.run(get_server(args))
 
-    print("got server", server)
+    logger.info("got server", server)
 
     return server

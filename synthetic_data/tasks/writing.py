@@ -3,14 +3,13 @@ import os
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Sequence, Tuple, TypedDict
+from typing import Dict, List, Tuple, TypedDict
 
 import polars as pl
 import tiktoken
 from datasets import Dataset
 from huggingface_hub import snapshot_download
 from loguru import logger
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from pydantic import BaseModel
 
 from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
