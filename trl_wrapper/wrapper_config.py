@@ -49,6 +49,7 @@ class WrapperConfig:
     using_mistral: bool = False
     adapter_path: Optional[str] = None
     model_family: ModelFamily = "other"
+    grpo_beta: float = 0.0
 
     # Experiment / Environment Settings
     notebook_mode: bool = False

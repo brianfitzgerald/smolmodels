@@ -3908,7 +3908,7 @@ torch = [
     { name = "torchvision", marker = "sys_platform != 'darwin'", specifier = "==0.20.1", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchvision", marker = "sys_platform == 'darwin'", specifier = "==0.20.1" },
     { name = "transformers" },
-    { name = "trl", specifier = "==0.15.2" },
+    { name = "trl", specifier = "==0.16.0" },
 ]
 training = [
     { name = "bitsandbytes", marker = "sys_platform == 'linux'", specifier = ">=0.44.1" },
@@ -4425,7 +4425,7 @@ wheels = [
 
 [[package]]
 name = "trl"
-version = "0.15.2"
+version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -4433,9 +4433,9 @@ dependencies = [
     { name = "rich" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/fe/ae0d782c48eef56d0ec125ebd05998539ede7cbf0e307a48f9323998b9e7/trl-0.15.2.tar.gz", hash = "sha256:0f82190a058a0a194dbcfae1fe9548b68a0a05b2f4d1824f8db1ae7d949cdd47", size = 333962 }
+sdist = { url = "https://files.pythonhosted.org/packages/05/8c/cd2aae1c77b9180cf589e44def6f40c87e6b31603cdbea84c3d6c6825277/trl-0.16.0.tar.gz", hash = "sha256:0e76c6f697bd93c27fd1221ff18646413cf601ba543afef32c2fd87ecaabce4e", size = 351764 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/29/25378447c48359843de0e4ce1995d367210601c3b437ddf1c779b6393d74/trl-0.15.2-py3-none-any.whl", hash = "sha256:bf2b88e3cf5da08cd533dc03273d977965bd5d86c5878f76285fba45d9cb9634", size = 318931 },
+    { url = "https://files.pythonhosted.org/packages/ea/ee/1a18222044df9e7377338a3c0d774c7b10e8b076f253006096247e7be095/trl-0.16.0-py3-none-any.whl", hash = "sha256:23752d91f8a53cdecf71b53a1960c9d9b97689f458220c29993f16e3e81f1f60", size = 335718 },
 ]
 
 [[package]]

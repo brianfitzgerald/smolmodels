@@ -455,6 +455,7 @@ class TrainerWrapper:
                 logging_steps=1,
                 bf16=True,
                 per_device_train_batch_size=self.config.train_batch_size,
+                beta=self.config.grpo_beta,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 num_generations=self.config.num_generations,
                 max_prompt_length=self.config.max_prompt_length,

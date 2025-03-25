@@ -13,11 +13,12 @@ from trl_wrapper.wrapper_config import SmDataset
 
 
 # Reward functions
-def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[float]:
+def correctness_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
-    q = prompts[0][-1]["content"]
     extracted_responses = [extract_xml_answer(r) for r in model_generations]
     extracted_responses_hash = [extract_hash_answer(r) for r in model_generations]
+    answer = kwargs["answer"]
+    q = prompts[0][-1]["content"]
     logger.info(
         "-" * 20
         + "\nQuestion:\n"
@@ -41,7 +42,7 @@ def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[floa
     return rewards_max
 
 
-def int_reward_func(completions, **kwargs) -> list[float]:
+def int_reward_func(prompts, completions, **kwargs) -> list[float]:
     responses = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in responses]
     rewards = [0.5 if r.isdigit() else 0.0 for r in extracted_responses]
@@ -49,7 +50,7 @@ def int_reward_func(completions, **kwargs) -> list[float]:
     return rewards
 
 
-def strict_format_reward_func(completions, **kwargs) -> list[float]:
+def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
     pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
     responses = [completion[0]["content"] for completion in completions]
@@ -59,7 +60,7 @@ def strict_format_reward_func(completions, **kwargs) -> list[float]:
     return rewards
 
 
-def soft_format_reward_func(completions, **kwargs) -> list[float]:
+def soft_format_reward_func(prompts, completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has a specific format."""
     pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
     responses = [completion[0]["content"] for completion in completions]
@@ -84,7 +85,7 @@ def count_xml(text) -> float:
     return count
 
 
-def xmlcount_reward_func(completions, **kwargs) -> list[float]:
+def xmlcount_reward_func(prompts, completions, **kwargs) -> list[float]:
     contents = [completion[0]["content"] for completion in completions]
     rewards = [count_xml(c) for c in contents]
     logger.info(f"XML count rewards: {rewards}")
