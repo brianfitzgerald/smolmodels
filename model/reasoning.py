@@ -129,6 +129,17 @@ class GSM8KDataModule(SmDataset):
         self.init_dataset()
 
 
+class TwentyQDataModule(SmDataset):
+    def init_dataset(self):
+        dataset = load_dataset("roborovski/twenty_questions")["train"]  # type: ignore
+        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
+        self.train_dataset = dataset["train"]
+        self.val_dataset = dataset["test"]
+
+    def setup(self, stage: Optional[str] = None):
+        self.init_dataset()
+
+
 SYSTEM_PROMPT = """
 You are an expert reasoning model.
 Respond in the following format:

@@ -23,6 +23,7 @@ from dataset.code import CodeContestsDataModule
 from dataset.conversation import ConversationDPODataModule, ConversationDataModule
 from model.reasoning import (
     GSM8KDataModule,
+    TwentyQDataModule,
     correctness_reward_func,
     int_reward_func,
     soft_format_reward_func,
@@ -190,6 +191,24 @@ GRPO_MATH_CONFIG = WrapperConfig(
     num_generations=2,
 )
 
+GRPO_TWENTYQ_CONFIG = WrapperConfig(
+    model_id_or_path=QWEN_1_5_B,
+    model_family="qwen",
+    wandb_project_name="qwen-twentyq-grpo",
+    train_batch_size=2,
+    gradient_accumulation_steps=8,
+    data_module_choice="twentyq",
+    max_prompt_length=256,
+    max_completion_length=512,
+    max_grad_norm=0.1,
+    eval_batch_size=1,
+    learning_rate=5e-6,
+    lr_scheduler=SchedulerType.COSINE,
+    tuning_mode="grpo",
+    num_generations=2,
+)
+
+
 REWARD_MODEL_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
     dataset_path="trl-lib/ultrafeedback_binarized",
@@ -229,6 +248,7 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "code_contests": CodeContestsDataModule,
     "conversation": ConversationDataModule,
     "gsm8k": GSM8KDataModule,
+    "twentyq": TwentyQDataModule,
     "conversation_dpo": ConversationDPODataModule,
 }
 
