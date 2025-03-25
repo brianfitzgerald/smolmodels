@@ -1,9 +1,10 @@
 from typing import Optional
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, DatasetDict
 from transformers.trainer_callback import TrainerCallback
 import re
 from loguru import logger
 
+from gyms.twenty_questions.env import GUESSER_PROMPT
 from trl_wrapper.wrapper_config import SmDataset
 
 
@@ -129,10 +130,21 @@ class GSM8KDataModule(SmDataset):
         self.init_dataset()
 
 
+def _map_to_grpo_format(example: dict) -> dict:
+    return {
+        "prompt": [
+            {"role": "system", "content": GUESSER_PROMPT},
+            {"role": "user", "content": example["question"]},
+        ],
+        "answer": example["metadata"]["word"][0],
+    }
+
+
 class TwentyQDataModule(SmDataset):
     def init_dataset(self):
-        dataset = load_dataset("roborovski/twenty_questions")["train"]  # type: ignore
-        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
+        dataset: Dataset = load_dataset("roborovski/twenty_questions")["train"]  # type: ignore
+        dataset = dataset.map(_map_to_grpo_format)  # type: ignore
+        dataset: DatasetDict = dataset.train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
