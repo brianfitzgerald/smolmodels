@@ -3,10 +3,10 @@ from datasets import load_dataset, Dataset, DatasetDict
 from transformers.trainer_callback import TrainerCallback
 import re
 from loguru import logger
-
+import pandas as pd
 from gyms.twenty_questions.env import GUESSER_PROMPT
 from trl_wrapper.wrapper_config import SmDataset
-
+from trl.trainer.grpo_trainer import RewardFunc
 
 # Based on:
 # https://colab.research.google.com/drive/1bfhs1FMLW3FGa8ydvkOZyBNxLYOu0Hev?usp=sharing#scrollTo=ybtxR89X1YJq
@@ -14,24 +14,11 @@ from trl_wrapper.wrapper_config import SmDataset
 
 
 # Reward functions
-def correctness_reward_func(prompts, completions, **kwargs) -> list[float]:
+def math_correctness_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in model_generations]
     extracted_responses_hash = [extract_hash_answer(r) for r in model_generations]
     answer = kwargs["answer"]
-    q = prompts[0][-1]["content"]
-    logger.info(
-        "-" * 20
-        + "\nQuestion:\n"
-        + q
-        + "\nAnswer:\n"
-        + answer[0]
-        + "\nGenerated:\n"
-        + model_generations[0]
-        + "\nExtracted:\n"
-        + extracted_responses[0]
-        + "\n"
-    )
     rewards = [2.0 if r == a else 0.0 for r, a in zip(extracted_responses, answer)]
     rewards_hash = [
         2.0 if r == a else 0.0 for r, a in zip(extracted_responses_hash, answer)
@@ -48,26 +35,6 @@ def int_reward_func(prompts, completions, **kwargs) -> list[float]:
     extracted_responses = [extract_xml_answer(r) for r in responses]
     rewards = [0.5 if r.isdigit() else 0.0 for r in extracted_responses]
     logger.info(f"Integer rewards: {rewards}")
-    return rewards
-
-
-def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
-    """Reward function that checks if the completion has a specific format."""
-    pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
-    responses = [completion[0]["content"] for completion in completions]
-    matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    rewards = [0.5 if match else 0.0 for match in matches]
-    logger.info(f"Strict format rewards: {rewards}")
-    return rewards
-
-
-def soft_format_reward_func(prompts, completions, **kwargs) -> list[float]:
-    """Reward function that checks if the completion has a specific format."""
-    pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
-    responses = [completion[0]["content"] for completion in completions]
-    matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    rewards = [0.5 if match else 0.0 for match in matches]
-    logger.info(f"Soft format rewards: {rewards}")
     return rewards
 
 
@@ -119,6 +86,26 @@ class EvalCallback(TrainerCallback):
         return control
 
 
+def soft_format_reward_func(prompts, completions, **kwargs) -> list[float]:
+    """Reward function that checks if the completion has the right format, with variable spacing."""
+    pattern = r"<reasoning>.*?</reasoning>\s*<answer>.*?</answer>"
+    responses = [completion[0]["content"] for completion in completions]
+    matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
+    rewards = [0.5 if match else 0.0 for match in matches]
+    logger.info(f"Soft format rewards: {rewards}")
+    return rewards
+
+
+def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
+    """Reward function that checks if the completion has the right format, with strict spacing."""
+    pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    responses = [completion[0]["content"] for completion in completions]
+    matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
+    rewards = [0.5 if match else 0.0 for match in matches]
+    logger.info(f"Strict format rewards: {rewards}")
+    return rewards
+
+
 class GSM8KDataModule(SmDataset):
     def init_dataset(self):
         dataset = get_gsm8k_questions()
@@ -129,27 +116,130 @@ class GSM8KDataModule(SmDataset):
     def setup(self, stage: Optional[str] = None):
         self.init_dataset()
 
+    def reward_functions(self) -> list[RewardFunc]:
+        return [
+            xmlcount_reward_func,
+            soft_format_reward_func,
+            strict_format_reward_func,
+            int_reward_func,
+            math_correctness_reward_func,
+        ]
 
-def _map_to_grpo_format(example: dict) -> dict:
+
+def _twenty_q_map(example: dict) -> dict:
     return {
         "prompt": [
             {"role": "system", "content": GUESSER_PROMPT},
-            {"role": "user", "content": example["question"]},
         ],
         "answer": example["metadata"]["word"][0],
     }
 
 
+def twenty_questions_reward_func(prompts, completions, **kwargs) -> list[float]:
+    model_generations = [completion[0]["content"] for completion in completions]
+    extracted_responses = [extract_xml_answer(r) for r in model_generations]
+    return [0.0]
+
+
 class TwentyQDataModule(SmDataset):
     def init_dataset(self):
         dataset: Dataset = load_dataset("roborovski/twenty_questions")["train"]  # type: ignore
-        dataset = dataset.map(_map_to_grpo_format)  # type: ignore
+        dataset = dataset.map(_twenty_q_map)  # type: ignore
         dataset: DatasetDict = dataset.train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
 
     def setup(self, stage: Optional[str] = None):
         self.init_dataset()
+
+    def reward_functions(self) -> list[RewardFunc]:
+        return [
+            xmlcount_reward_func,
+            strict_format_reward_func,
+            int_reward_func,
+        ]
+
+
+CONNECTIONS_PROMPT = """
+You are an expert puzzle solving model.
+Find groups of words that are related to each other, and return the answer in the following format:
+Respond in the following format:
+<reasoning>
+...
+</reasoning>
+<answer>
+<group>
+...
+</group>
+<group>
+...
+</group>
+</answer>
+
+# Example
+
+User: apple, orange, banana, pear, corolla, charger,
+Assistant: <reasoning>
+The first group are all fruits.
+The second group are all cars.
+</reasoning>
+<answer>
+<group>apple, orange, banana, pear</group>
+<group>corolla, charger</group>
+</answer>
+
+# Example
+
+User: dog, cat, red, white,
+Assistant: <reasoning>
+The first group are all animals.
+The second group are all colors.
+</reasoning>
+<answer>
+<group>dog, cat</group>
+<group>red, white</group>
+</answer>
+"""
+
+
+def _connections_map(example: dict) -> dict:
+    words = example["words"]
+    words_formatted = ", ".join(words)
+    answer = []
+    for group in example["solution"]["groups"]:
+        answer.append(", ".join(group["words"]))
+    answer_formatted = "\n".join([f"<group>{a}</group>" for a in answer])
+    return {
+        "prompt": [
+            {
+                "role": "system",
+                "content": CONNECTIONS_PROMPT,
+            },
+            {"role": "user", "content": words_formatted},
+        ],
+        "answer": f"<answer>{answer_formatted}</answer>",
+    }
+
+
+class ConnectionsDataModule(SmDataset):
+    def init_dataset(self):
+        dataset = Dataset.from_pandas(
+            pd.read_json("../dataset_files/connections_prompts.jsonl", lines=True)
+        )
+        dataset = dataset.map(_connections_map)  # type: ignore
+        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
+        self.train_dataset = dataset["train"]
+        self.val_dataset = dataset["test"]
+
+    def setup(self, stage: Optional[str] = None):
+        self.init_dataset()
+
+    def reward_functions(self) -> list[RewardFunc]:
+        return [
+            xmlcount_reward_func,
+            strict_format_reward_func,
+            int_reward_func,
+        ]
 
 
 SYSTEM_PROMPT = """
@@ -177,7 +267,6 @@ User: Bob has a collection of marbles. If his friend Tim has 20 marbles and Bob 
 Assistant: <reasoning>Bob has 3x20 = 60 marbles.
 Together, they have 20 + 60 = 80 marbles.</reasoning>
 <answer>80</answer>
-
 """
 
 

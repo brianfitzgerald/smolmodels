@@ -22,13 +22,9 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM  # type:
 from dataset.code import CodeContestsDataModule
 from dataset.conversation import ConversationDPODataModule, ConversationDataModule
 from model.reasoning import (
+    ConnectionsDataModule,
     GSM8KDataModule,
     TwentyQDataModule,
-    correctness_reward_func,
-    int_reward_func,
-    soft_format_reward_func,
-    strict_format_reward_func,
-    xmlcount_reward_func,
 )
 from model.utils import (
     DataModuleChoice,
@@ -45,7 +41,6 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
     MINISTRAL_8B,
-    QWEN_0_5_B,
     QWEN_1_5_B,
     SMOL_LM_135M,
     DatasetConfig,
@@ -191,13 +186,13 @@ GRPO_MATH_CONFIG = WrapperConfig(
     num_generations=2,
 )
 
-GRPO_TWENTYQ_CONFIG = WrapperConfig(
+GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_1_5_B,
     model_family="qwen",
-    wandb_project_name="qwen-twentyq-grpo",
+    wandb_project_name="qwen-connections-grpo",
     train_batch_size=2,
     gradient_accumulation_steps=8,
-    data_module_choice="twentyq",
+    data_module_choice="connections",
     max_prompt_length=256,
     max_completion_length=512,
     max_grad_norm=0.1,
@@ -237,6 +232,7 @@ CONFIGS = {
     "gutenberg": GUTENBERG_CONFIG,
     "gutenberg_dpo": GUTENBERG_DPO_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
+    "grpo_connections": GRPO_CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
 }
 
@@ -250,6 +246,7 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "gsm8k": GSM8KDataModule,
     "twentyq": TwentyQDataModule,
     "conversation_dpo": ConversationDPODataModule,
+    "connections": ConnectionsDataModule,
 }
 
 
@@ -510,13 +507,7 @@ class TrainerWrapper:
                 model=self.model,
                 args=training_args,
                 train_dataset=self.data_module.train_dataset,  # type: ignore
-                reward_funcs=[
-                    xmlcount_reward_func,
-                    soft_format_reward_func,
-                    strict_format_reward_func,
-                    int_reward_func,
-                    correctness_reward_func,
-                ],
+                reward_funcs=self.data_module.reward_functions(),
                 processing_class=self.tokenizer,
             )
             # self.trainer.add_callback(

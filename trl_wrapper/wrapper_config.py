@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from transformers.tokenization_utils import PreTrainedTokenizer
 from transformers.trainer_utils import SchedulerType
 from transformers.training_args import OptimizerNames
+from trl.trainer.grpo_trainer import RewardFunc
 
 from model.utils import (
     IGNORE_TOKEN_INDEX,
@@ -262,3 +263,6 @@ class SmDataset(pl.LightningDataModule):
             else:
                 rich_text.append(decoded, style="bright_green")
         return rich_text
+
+    def reward_functions(self) -> list[RewardFunc]:
+        return []

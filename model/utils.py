@@ -29,6 +29,7 @@ DataModuleChoice = Literal[
     "gsm8k_reasoning",
     "gsm8k",
     "twentyq",
+    "connections",
 ]
 TuningModeChoice = Literal["dpo", "sft", "grpo", "reward"]
 
