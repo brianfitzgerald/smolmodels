@@ -239,7 +239,6 @@ class ConnectionsDataModule(SmDataset):
         return [
             xmlcount_reward_func,
             strict_format_reward_func,
-            int_reward_func,
         ]
 
 
