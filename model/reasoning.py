@@ -135,10 +135,45 @@ def _twenty_q_map(example: dict) -> dict:
     }
 
 
+def score_connections(solution_groups, submitted_groups):
+    score = 0
+    correct_group_names = []
+    print(solution_groups)
+    solution_sets = {
+        group_name: set(words) for group_name, words in solution_groups.items()
+    }
+    solved = set()  # Track which solution groups have been solved.
+
+    for submitted in submitted_groups:
+        submitted_set = set(submitted)
+        for group_name, correct_set in solution_sets.items():
+            if submitted_set == correct_set and group_name not in solved:
+                score += 1
+                correct_group_names.append(group_name)
+                solved.add(group_name)
+                break  # Move to the next submitted group after a match.
+    return score, correct_group_names
+
+
+def parse_groups(input_string):
+    # Find all occurrences of text within <group>...</group>
+    group_contents = re.findall(r"<group>(.*?)</group>", input_string, re.DOTALL)
+
+    groups = []
+    for content in group_contents:
+        # Split on commas and trim each word
+        words = [word.strip() for word in content.split(",") if word.strip()]
+        groups.append(words)
+
+    return groups
+
+
 def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
-    extracted_responses = [extract_xml_answer(r) for r in model_generations]
-    return [0.0]
+    groups = [parse_groups(r) for r in model_generations]
+    print(groups)
+    scores = [score_connections(kwargs["answer"], g) for g in groups]
+    return scores
 
 
 class TwentyQDataModule(SmDataset):
@@ -239,6 +274,7 @@ class ConnectionsDataModule(SmDataset):
         return [
             xmlcount_reward_func,
             strict_format_reward_func,
+            connections_reward_func,
         ]
 
 
