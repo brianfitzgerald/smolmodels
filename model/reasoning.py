@@ -135,7 +135,7 @@ def _twenty_q_map(example: dict) -> dict:
     }
 
 
-def twenty_questions_reward_func(prompts, completions, **kwargs) -> list[float]:
+def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in model_generations]
     return [0.0]
@@ -157,6 +157,7 @@ class TwentyQDataModule(SmDataset):
             xmlcount_reward_func,
             strict_format_reward_func,
             int_reward_func,
+            connections_reward_func,
         ]
 
 
