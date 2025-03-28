@@ -135,27 +135,26 @@ def _twenty_q_map(example: dict) -> dict:
     }
 
 
-def score_connections(solution_groups, submitted_groups):
+def score_connections(
+    solution_groups: list[list[str]], submitted_groups: list[list[str]]
+) -> float:
     score = 0
-    correct_group_names = []
-    print(solution_groups)
-    solution_sets = {
-        group_name: set(words) for group_name, words in solution_groups.items()
-    }
-    solved = set()  # Track which solution groups have been solved.
+
+    solution_sets = [set(group) for group in solution_groups]
+    solved = set()  # Keep track of which solution group indices have been solved.
 
     for submitted in submitted_groups:
         submitted_set = set(submitted)
-        for group_name, correct_set in solution_sets.items():
-            if submitted_set == correct_set and group_name not in solved:
+        for index, correct_set in enumerate(solution_sets):
+            if submitted_set == correct_set and index not in solved:
                 score += 1
-                correct_group_names.append(group_name)
-                solved.add(group_name)
-                break  # Move to the next submitted group after a match.
-    return score, correct_group_names
+                solved.add(index)
+                break
+
+    return float(score)
 
 
-def parse_groups(input_string):
+def parse_groups(input_string) -> list[list[str]]:
     # Find all occurrences of text within <group>...</group>
     group_contents = re.findall(r"<group>(.*?)</group>", input_string, re.DOTALL)
 
@@ -170,30 +169,10 @@ def parse_groups(input_string):
 
 def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
-    groups = [parse_groups(r) for r in model_generations]
-    print(groups)
+    groups: list[list[list[str]]] = [parse_groups(r) for r in model_generations]
     scores = [score_connections(kwargs["answer"], g) for g in groups]
+    logger.info(f"Connections scores: {scores}")
     return scores
-
-
-class TwentyQDataModule(SmDataset):
-    def init_dataset(self):
-        dataset: Dataset = load_dataset("roborovski/twenty_questions")["train"]  # type: ignore
-        dataset = dataset.map(_twenty_q_map)  # type: ignore
-        dataset: DatasetDict = dataset.train_test_split(test_size=0.1)  # type: ignore
-        self.train_dataset = dataset["train"]
-        self.val_dataset = dataset["test"]
-
-    def setup(self, stage: Optional[str] = None):
-        self.init_dataset()
-
-    def reward_functions(self) -> list[RewardFunc]:
-        return [
-            xmlcount_reward_func,
-            strict_format_reward_func,
-            int_reward_func,
-            connections_reward_func,
-        ]
 
 
 CONNECTIONS_PROMPT = """
@@ -242,8 +221,10 @@ def _connections_map(example: dict) -> dict:
     words = example["words"]
     words_formatted = ", ".join(words)
     answer = []
+    answer_groups = []
     for group in example["solution"]["groups"]:
         answer.append(", ".join(group["words"]))
+        answer_groups.append(group["words"])
     answer_formatted = "\n".join([f"<group>{a}</group>" for a in answer])
     return {
         "prompt": [
@@ -254,6 +235,7 @@ def _connections_map(example: dict) -> dict:
             {"role": "user", "content": words_formatted},
         ],
         "answer": f"<answer>{answer_formatted}</answer>",
+        "answer_formatted": answer_groups,
     }
 
 

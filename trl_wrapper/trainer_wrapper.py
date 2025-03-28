@@ -24,7 +24,6 @@ from dataset.conversation import ConversationDPODataModule, ConversationDataModu
 from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
-    TwentyQDataModule,
 )
 from model.utils import (
     DataModuleChoice,
@@ -244,7 +243,6 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "code_contests": CodeContestsDataModule,
     "conversation": ConversationDataModule,
     "gsm8k": GSM8KDataModule,
-    "twentyq": TwentyQDataModule,
     "conversation_dpo": ConversationDPODataModule,
     "connections": ConnectionsDataModule,
 }
