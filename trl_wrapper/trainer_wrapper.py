@@ -186,8 +186,8 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 GRPO_CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_1_5_B,
-    model_family="qwen",
+    model_id_or_path=LLAMA_3_2_1B,
+    model_family="other",
     wandb_project_name="qwen-connections-grpo",
     train_batch_size=2,
     gradient_accumulation_steps=8,

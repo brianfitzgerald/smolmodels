@@ -172,15 +172,34 @@ def score_connections(solution_groups, submitted_groups):
 
 def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
     model_generations = [completion[0]["content"] for completion in completions]
-    groups: list[list[list[str]]] = [parse_groups(r) for r in model_generations]
+    logger.info(f"Model generations: {model_generations}")
+    groups = [parse_groups(r) for r in model_generations]
+    logger.info(f"Groups: {groups}")
     scores = [score_connections(kwargs["answer"], g) for g in groups]
     logger.info(f"Connections scores: {scores}")
     return scores
 
 
+def group_size_reward_func(prompts, completions, **kwargs) -> list[float]:
+    model_generations = [completion[0]["content"] for completion in completions]
+    groups = [parse_groups(r) for r in model_generations]
+    sizes = [len(g) for g in groups]
+    rewards = [0.5 if s == 4 else 0.0 for s in sizes]
+    logger.info(f"Group size rewards: {rewards}")
+    return rewards
+
+
+def n_groups_reward_func(prompts, completions, **kwargs) -> list[float]:
+    model_generations = [completion[0]["content"] for completion in completions]
+    groups = [parse_groups(r) for r in model_generations]
+    rew = [0.5 if len(g) == 4 else 0.0 for g in groups]
+    logger.info(f"Number of groups rewards: {rew}")
+    return rew
+
+
 CONNECTIONS_PROMPT = """
 You are an expert puzzle solving model.
-Find groups of words that are related to each other, and return the answer in the following format:
+Find groups of words that are related to each other. Each group is four words long.
 Respond in the following format:
 <reasoning>
 ...
@@ -260,10 +279,12 @@ class ConnectionsDataModule(SmDataset):
             xmlcount_reward_func,
             strict_format_reward_func,
             connections_reward_func,
+            group_size_reward_func,
+            n_groups_reward_func,
         ]
 
 
-SYSTEM_PROMPT = """
+GSM8K_SYSTEM_PROMPT = """
 You are an expert reasoning model.
 Respond in the following format:
 <reasoning>
@@ -296,7 +317,7 @@ def get_gsm8k_questions(split="train") -> Dataset:
     data = data.map(  # type: ignore
         lambda x: {  # type: ignore
             "prompt": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": GSM8K_SYSTEM_PROMPT},
                 {"role": "user", "content": x["question"]},
             ],
             "answer": extract_hash_answer(x["answer"]),

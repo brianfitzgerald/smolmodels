@@ -22,7 +22,7 @@ DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=5),
 )
-def training(config: str = "grpo_math"):
+def training(config: str = "grpo_connections"):
     assert config in CONFIGS, f"Unknown config: {config}"
 
     cfg = CONFIGS[config]
