@@ -56,6 +56,8 @@ def count_xml(text) -> float:
 def xmlcount_reward_func(prompts, completions, **kwargs) -> list[float]:
     contents = [completion[0]["content"] for completion in completions]
     rewards = [count_xml(c) for c in contents]
+    # clamp values to [0, 1]
+    rewards = [max(0.0, min(1.0, r)) for r in rewards]
     logger.info(f"XML count rewards: {rewards}")
     return rewards
 
@@ -135,25 +137,6 @@ def _twenty_q_map(example: dict) -> dict:
     }
 
 
-def score_connections(
-    solution_groups: list[list[str]], submitted_groups: list[list[str]]
-) -> float:
-    score = 0
-
-    solution_sets = [set(group) for group in solution_groups]
-    solved = set()  # Keep track of which solution group indices have been solved.
-
-    for submitted in submitted_groups:
-        submitted_set = set(submitted)
-        for index, correct_set in enumerate(solution_sets):
-            if submitted_set == correct_set and index not in solved:
-                score += 1
-                solved.add(index)
-                break
-
-    return float(score)
-
-
 def parse_groups(input_string) -> list[list[str]]:
     # Find all occurrences of text within <group>...</group>
     group_contents = re.findall(r"<group>(.*?)</group>", input_string, re.DOTALL)
@@ -165,6 +148,26 @@ def parse_groups(input_string) -> list[list[str]]:
         groups.append(words)
 
     return groups
+
+
+def score_connections(solution_groups, submitted_groups):
+    score = 0
+    correct_group_indices = []  # Track indices of correctly solved solution groups.
+
+    # Convert each group in the solution_groups into a set.
+    solution_sets = [set(group) for group in solution_groups]
+    solved = set()  # Keep track of which solution group indices have been solved.
+
+    for submitted in submitted_groups:
+        submitted_set = set(submitted)
+        for index, correct_set in enumerate(solution_sets):
+            # Check if the submitted group matches a solution group and hasn't been solved already.
+            if submitted_set == correct_set and index not in solved:
+                score += 1
+                correct_group_indices.append(index)
+                solved.add(index)
+                break  # Move on to the next submitted group after a match.
+    return float(score)
 
 
 def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
