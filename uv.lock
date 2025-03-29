@@ -1986,7 +1986,7 @@ wheels = [
 
 [[package]]
 name = "modal"
-version = "0.73.57"
+version = "0.73.135"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2004,9 +2004,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchfiles" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/ed/56766574153bb565e2ae335609e37ee531285752aef23935727bfdab76ec/modal-0.73.57.tar.gz", hash = "sha256:c830a9987fecbdc5b168c01e83264b3f69e2bec544f4dab0a025f51e54301181", size = 467337 }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/cf/1f106699f7c420f7f7f90108e7ca2ec56c7bf5cd8a2975ab399654289036/modal-0.73.135.tar.gz", hash = "sha256:37a0066f2ea4af0ddeaff84436ac5eb01b74c8b15da9c047e9256d2b62abcd50", size = 483721 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/01/4c7b77a94002891fc4eb6e2c6fd9daf7ed9166dbeee6646bd3348a6f930d/modal-0.73.57-py3-none-any.whl", hash = "sha256:18c426f2a87917502dfe5a8cda32b0abe0d8cce6d6f30cd8299f9085616aa700", size = 533595 },
+    { url = "https://files.pythonhosted.org/packages/e0/ac/ffbfb4188c1626c76c493c8dec7738168d723a7eaac69a2c106706cd82e4/modal-0.73.135-py3-none-any.whl", hash = "sha256:fb55b98ef5fba2da67122a44a73ec888b28cbd083e31c66e61d97e8ffa56ab65", size = 551201 },
 ]
 
 [[package]]
@@ -3865,7 +3865,7 @@ requires-dist = [
     { name = "loguru" },
     { name = "matplotlib" },
     { name = "mistune", specifier = ">=3.1.0" },
-    { name = "modal", specifier = ">=0.72.50" },
+    { name = "modal", specifier = "==0.73.135" },
     { name = "ninja", specifier = ">=1.11.1.1" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "openai" },

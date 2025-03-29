@@ -1,31 +1,10 @@
-import asyncio
 import os
 from typing import Optional
 import modal
-from vllm import AsyncEngineArgs, AsyncLLMEngine
 from loguru import logger
 
-from scripts.modal_definitons import (
-    MODEL_WEIGHTS_VOLUME,
-    MODELS_VOLUME_PATH,
-    VLLM_IMAGE,
-    format_timeout,
-    app,
-)
-from vllm.usage.usage_lib import UsageContext
 
-
-from vllm.entrypoints.openai.api_server import (
-    init_app_state,
-    build_app,
-)
-from vllm.utils import (
-    FlexibleArgumentParser,
-)
-from vllm.entrypoints.openai.cli_args import (
-    make_arg_parser,
-    validate_parsed_serve_args,
-)
+# https://github.com/modal-labs/modal-examples/blob/main/06_gpu_and_ml/llm-serving/vllm_inference.py
 
 
 def get_checkpoint_dir(
@@ -59,90 +38,66 @@ def get_checkpoint_dir(
     return checkpoint_dir
 
 
-def get_model_config(engine):
-    import asyncio
-
-    try:  # adapted from vLLM source -- https://github.com/vllm-project/vllm/blob/507ef787d85dec24490069ffceacbd6b161f4f72/vllm/entrypoints/openai/api_server.py#L235C1-L247C1
-        event_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        event_loop = None
-
-    if event_loop is not None and event_loop.is_running():
-        # If the current is instanced by Ray Serve,
-        # there is already a running event loop
-        model_config = event_loop.run_until_complete(engine.get_model_config())
-    else:
-        # When using single vLLM without engine_use_ray
-        model_config = asyncio.run(engine.get_model_config())
-
-    return model_config
-
-
-TOKEN = "brianf"
-
-
-async def get_server(args, **uvicorn_kwargs):
-    engine_args = AsyncEngineArgs(
-        model=args.model,
-        tensor_parallel_size=1,
-        gpu_memory_utilization=0.90,
-        max_model_len=8096,
-        enforce_eager=False,  # capture the graph for faster inference, but slower cold starts (30s > 20s)
+vllm_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install(
+        "vllm==0.7.2",
+        "huggingface_hub[hf_transfer]==0.26.2",
+        "flashinfer-python==0.2.0.post2",  # pinning, very unstable
+        "loguru",
+        extra_index_url="https://flashinfer.ai/whl/cu124/torch2.5",
     )
+    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})  # faster model transfers
+)
 
-    engine = AsyncLLMEngine.from_engine_args(
-        engine_args, usage_context=UsageContext.OPENAI_API_SERVER
-    )
 
-    fastapi_app = build_app(args)
+app = modal.App("example-vllm-openai-compatible")
 
-    model_config = await engine.get_model_config()
-    await init_app_state(engine, model_config, fastapi_app.state, args)
+N_GPU = 1  # tip: for best results, first upgrade to more powerful GPUs, and only then increase GPU count
+API_KEY = "super-secret-key"  # api key, for auth. for production use, replace with a modal.Secret
 
-    return fastapi_app
+MINUTES = 60  # seconds
+
+VLLM_PORT = 8000
+
+
+hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
+vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+
+MODELS_DIR = "/llamas"
+MODEL_NAME = "neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w4a16"
+MODEL_REVISION = "a7c09948d9a632c2c840722f519672cd94af885d"
 
 
 @app.function(
-    image=VLLM_IMAGE,
-    gpu="l40s",
-    secrets=[modal.Secret.from_name("smolmodels")],
-    volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
-    timeout=format_timeout(hours=6),
-    container_idle_timeout=format_timeout(minutes=1),
-    allow_concurrent_inputs=1,
+    image=vllm_image,
+    gpu=f"H100:{N_GPU}",
+    # how many requests can one replica handle? tune carefully!
+    allow_concurrent_inputs=100,
+    # how long should we stay up with no requests?
+    scaledown_window=15 * MINUTES,
+    volumes={
+        "/root/.cache/huggingface": hf_cache_vol,
+        "/root/.cache/vllm": vllm_cache_vol,
+    },
 )
-@modal.asgi_app()
+@modal.web_server(port=VLLM_PORT, startup_timeout=5 * MINUTES)
 def serve():
-    parser = FlexibleArgumentParser(
-        description="vLLM OpenAI-Compatible RESTful API server."
-    )
-    parser = make_arg_parser(parser)
+    import subprocess
 
-    # don't actually parse cli args, just return the object
-    args = parser.parse_args([])
+    cmd = [
+        "vllm",
+        "serve",
+        "--uvicorn-log-level=info",
+        MODEL_NAME,
+        "--revision",
+        MODEL_REVISION,
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(VLLM_PORT),
+        "--api-key",
+        API_KEY,
+    ]
 
-    args.model = get_checkpoint_dir(
-        os.path.join(MODELS_VOLUME_PATH.as_posix(), "runs"),
-        # "meta-llama/Llama-3.2-3B-Instruct",
-        None,
-        "03-23-2-21-106352-llama-3.2-3b-instruct-txt_bt-txt-bt",
-    )
-    logger.info(f"args.model: {args.model}")
-    validate_parsed_serve_args(args)
-
-    try:  # adapted from vLLM source -- https://github.com/vllm-project/vllm/blob/507ef787d85dec24490069ffceacbd6b161f4f72/vllm/entrypoints/openai/api_server.py#L235C1-L247C1
-        event_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        event_loop = None
-
-    if event_loop is not None and event_loop.is_running():
-        # If the current is instanced by Ray Serve,
-        # there is already a running event loop
-        server = event_loop.run_until_complete(get_server(args))
-    else:
-        # When using single vLLM without engine_use_ray
-        server = asyncio.run(get_server(args))
-
-    logger.info("got server", server)
-
-    return server
+    subprocess.Popen(" ".join(cmd), shell=True)

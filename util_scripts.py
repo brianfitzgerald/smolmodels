@@ -5,7 +5,9 @@ import shutil
 import subprocess
 import concurrent.futures
 import polars as pl
+import openai
 
+from openai import OpenAI
 
 from loguru import logger
 
@@ -116,6 +118,35 @@ def convert_epubs_to_txt(root_dir: str, out_dir: str = "~/Documents/txt"):
 
     out_rows_pl = pl.from_dicts(out_rows)
     out_rows_pl.write_parquet(os.path.join("dataset_files", "epubs.parquet"))
+
+
+def _get_model_id(client: OpenAI):
+    all_models = client.models.list()
+
+    logger.info(f"Available models: {[x.id for x in all_models.data]}")
+    print(all_models)
+    first_model_id = all_models.data[0].id
+    model_id = first_model_id
+    logger.info(f"Selected model: {model_id}")
+    return model_id
+
+
+def test_openai_api(msg: str = "Hello! How are you?"):
+    """
+    Test the OpenAI API.
+    """
+    oai_client = OpenAI(
+        base_url="https://brianfitzgerald--example-vllm-openai-compatible-serve.modal.run/v1",
+        api_key="super-secret-key",
+    )
+    model_id = _get_model_id(oai_client)
+    response = oai_client.chat.completions.create(
+        model=model_id,
+        messages=[
+            {"role": "user", "content": msg},
+        ],
+    )
+    print(response.choices[0].message.content)
 
 
 if __name__ == "__main__":
