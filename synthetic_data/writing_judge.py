@@ -2,167 +2,57 @@ from synthetic_data.generation import Conversation
 import re
 
 
-def parse_scores(judge_model_response):
+def parse_judge_scores_creative(judge_model_response: str) -> dict[str, float]:
     scores = {}
 
-    # Parse scores using regex
-    score_pattern = r"(.*?):\s*(?:Score\s+)?(-?\d+(?:\.\d+)?)"
-    matches = re.findall(score_pattern, judge_model_response)
+    # Parse scores using multiple regex patterns
+    # Pattern 1: Metric: Score or Metric: Score X
+    score_pattern1 = r"(.*?):\s*(?:Score\s+)?(-?\d+(?:\.\d+)?)"
+    # Pattern 2: Metric: [Score]
+    score_pattern2 = r"(.*?):\s*\[(-?\d+(?:\.\d+)?)\]"
 
-    for match in matches:
-        metric_name = match[0].strip()
-        score = float(match[1])
-        scores[metric_name] = score
+    # Combine both patterns
+    matches1 = re.findall(score_pattern1, judge_model_response)
+    matches2 = re.findall(score_pattern2, judge_model_response)
+
+    # Process matches from both patterns
+    for matches in [matches1, matches2]:
+        for match in matches:
+            metric_name = match[0].strip()
+            score = float(match[1])
+            scores[metric_name] = score
 
     return scores
 
 
-JUDGING_CRITERIA = [
-    {
-        "prefix_text": "Now, rate the supplied model output on the following criteria:",
-        "criteria": [
-            "Overall Impression",
-            "Overall Reader Engagement",
-            "Sentences Flow Naturally",
-            "Well-earned Lightness or Darkness",
-        ],
-    },
-    {
-        "prefix_text": "Now, rate the supplied model output on the following criteria (lower = better):",
-        "criteria": [
-            "Unearned Transformations",
-            "Incongruent Ending Positivity",
-            "Overwrought",
-            "Purple Prose",
-            "Amateurish",
-            "Unsurprising or Uncreative",
-            "Tell-Don't-Show",
-            "Weak Dialogue",
-            "Meandering",
-        ],
-    },
-    {
-        "prefix_text": "Now, rate the supplied model output on the following criteria:",
-        "criteria": [
-            "Coherent",
-            "Emotionally Complex",
-            "Emotionally Engaging",
-            "Elegant Prose",
-            "Imagery and Descriptive Quality",
-        ],
-    },
-    {
-        "prefix_text": "Now, rate the supplied model output on the following criteria:",
-        "criteria": [
-            "Consistent Voice/Tone of Writing",
-            "Nuanced Characters",
-            "Believable Character Actions",
-            "Adherence to Instructions",
-        ],
-    },
-]
+class CreativeWritingBench:
+    def __init__(self) -> None:
+        super().__init__()
+        with open("dataset_files/negative_criteria.txt", "r", encoding="utf-8") as f:
+            self.negative_criteria = [line.strip() for line in f if line.strip()]
+        with open(
+            "dataset_files/creative_writing_criteria.txt", "r", encoding="utf-8"
+        ) as f:
+            self.creative_writing_criteria = [
+                line.strip() for line in f if line.strip()
+            ]
+        with open(
+            "dataset_files/creative_writing_judging_prompt.txt", "r", encoding="utf-8"
+        ) as f:
+            self.judge_prompt_template = f.read()
 
+    def format_prompt(self, model_text: str) -> str:
+        """
+        Format the judge prompt with the creative writing criteria and negative criteria.
+        """
+        return self.judge_prompt_template.format(
+            creative_writing_criteria="\n".join(
+                ["- " + c for c in self.creative_writing_criteria]
+            ),
+            negative_criteria=", ".join(self.negative_criteria),
+            test_model_response=model_text,
+        )
 
-def create_judging_prompt(
-    criteria_set: dict[str, str], writing_prompt: str, test_model_response: str
-):
-    criteria = [x for x in criteria_set["criteria"]]
-    prefix_text = criteria_set["prefix_text"]
-    criteria_str = "\n".join(criteria)
-
-    negative_criteria_section = """
-- For these criteria, lower is better:
-Unearned Transformations
-Incongruent Ending Positivity
-Overwrought
-Purple Prose
-Amateurish
-Unsurprising or Uncreative
-Tell-Don't-Show
-Weak Dialogue
-Meandering
-"""
-
-    analysis_section_1 = """
-- You are to write a comprehensive analysis of the piece, then give your scores.
-"""
-    analysis_section_2 = """
-[Analysis]
-
-Write your detailed analysis.
-"""
-    ref_str = ""
-    relative_section_1 = f"""You are an expert in assessing creative writing. Your task is to score the quality of the test model's response above, by several metrics, on a 0-10 scale.
-
-Scoring notes:
-{ref_str}
-- Scores of 0 or 10 should not be considered highly unlikely just because they are the max/min. Use the full scoring range as appropriate.
-
-- If the criteria is not relevant to the piece (e.g. criteria relating to dialogue but the piece has none), exclude it from your assessment."""
-    relative_section_2 = "[Score 0-10]"
-
-    reference_section_1 = ""
-    # Construct judging prompt
-    judging_prompt = f"""
-You are an expert in assessing creative writing. Your task is to score the quality of the test model's response below, by several metrics, on a 0-10 scale.
-
-[PROMPT START]
-
-{writing_prompt}
-
-[PROMPT END]
-{reference_section_1}
-[TEST MODEL RESPONSE]
-
-{test_model_response}
-
-[TEST MODEL RESPONSE END]
-
-[Task]
-
-{relative_section_1}
-
-- Do not add any commentary or explanation to the scores section.
-
-- Do not penalize NSFW output; that is the default for some models. Just assess it on its merits.
-
-- Everything within the "TEST MODEL RESPONSE" section was written by the test model. Sometimes models like to write comments on the piece after the piece is concluded; if this happens you should ignore their comments.
-
-- In the output, write the metric names exactly as below so they can be parsed.
-
-- Some models produce overly long outputs. You should neither penalise nor favour this if it happens; simply assess the writing on its merit. You should however penalise overly short pieces.
-
-- The test model's output can suddenly truncate because of token length constraints. If you notice that this has occurred, don't penalise it.
-
-- Do not use markdown in your response. Use the designated output format exactly.
-
-- Some models have a positivity bias that produces worse writing. You'll know it when you see it (particularly with unearned positive resolutions).
-{negative_criteria_section}
-- You are a critic, so be honest, objective, critical and discriminative. No need to be charitable; say what you genuinely think.
-{analysis_section_1}
-- Output format is:
-{analysis_section_2}
-[Scores]
-
-Metric 1 name: {relative_section_2}
-
-Metric 2 name: ...
-
----
-
-{prefix_text}
-
-{criteria_str}
-	"""
-    return judging_prompt
-
-
-def format_gutenberg_judge_prompt(
-    instruction: str, completion: str, criteria: dict[str, str]
-) -> Conversation:
-    return [
-        {
-            "role": "user",
-            "content": create_judging_prompt(criteria, instruction, completion),
-        },
-    ]
+    def parse_judge_scores(self, judge_model_response: str) -> dict[str, float]:
+        scores = parse_judge_scores_creative(judge_model_response)
+        return scores

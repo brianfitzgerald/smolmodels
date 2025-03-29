@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
 from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
-from synthetic_data.judgemark import TASK_PROMPT
 from synthetic_data.prompts import (
     format_classify_fiction_prompt,
     format_writing_backtranslation_prompt,
@@ -25,9 +24,7 @@ from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.writing_judge import (
-    JUDGING_CRITERIA,
-    format_gutenberg_judge_prompt,
-    parse_scores,
+    CreativeWritingBench,
 )
 
 
@@ -438,64 +435,17 @@ class GutenbergBacktranslation(BaseTask):
 class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
     output_dataset_name = "gutenberg_backtranslate_from_txt"
     seed_data_format = DatasetFormat.CUSTOM
-    seed_data_location = "epubs"
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         return Dataset.from_parquet(os.path.join(dataset_root_path, "epubs.parquet"))  # type: ignore
 
 
-class WritingScoreAnnotate(BaseTask):
+class BacktranslateBestOfN(BaseTask):
     output_dataset_name = "gutenberg_score_annotated"
     dataset_columns = ["text", "title", "author", "category", "type", "id"]
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "gutenberg_backtranslate"
     output_dataset_format = DatasetFormat.PARQUET
 
-    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        samples_in = batch
-        self.samples_in = samples_in
-        self.sample_idxs = []
-        formatted_convs = []
-        for i, sample in enumerate(samples_in):
-            for j in range(len(JUDGING_CRITERIA)):
-                formatted_convs.append(
-                    format_gutenberg_judge_prompt(
-                        sample["instruction"], sample["paragraph"], JUDGING_CRITERIA[j]
-                    )
-                )
-            self.sample_idxs.extend([i] * len(formatted_convs))
-
-        return formatted_convs
-
-    def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
-        out_rows = []
-        for completion, sample_idx in zip(completions, self.sample_idxs):
-            sample = self.samples_in[sample_idx]
-            scores = parse_scores(completion)
-            out_rows.append({**sample, "scores": scores})
-        return out_rows
-
-
-class GutenbergFollowUp(BaseTask):
-    output_dataset_name = "gutenberg_followup"
-    dataset_columns = ["text", "title", "author", "category", "type", "id"]
-    seed_data_format = DatasetFormat.CUSTOM
-    output_dataset_format = DatasetFormat.PARQUET
-
-    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        samples_in = batch
-        self.samples_in = samples_in
-        return [
-            format_gutenberg_followup_prompt(sample["paragraph"], sample["instruction"])
-            for sample in samples_in
-        ]
-
-    def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
-        out_rows = []
-        for completion, sample in zip(completions, input_rows):
-            out_rows.append({**sample, "output": completion})
-        return out_rows
+    def __init__(self) -> None:
+        self.bench = CreativeWritingBench()

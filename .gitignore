@@ -195,7 +195,6 @@ notebooks/logs/*
 *.pt
 *.pth
 *.model
-*.txt
 out/
 notebooks/dataset_caches/*
 runs/
