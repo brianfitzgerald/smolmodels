@@ -444,7 +444,6 @@ class TrainerWrapper:
                 args=args,
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
-                tokenizer=self.tokenizer,  # type: ignore
                 data_collator=basic_pad_collator,
             )
             self.trainer.set_custom_args(
