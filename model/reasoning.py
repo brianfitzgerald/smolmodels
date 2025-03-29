@@ -151,7 +151,7 @@ def parse_groups(input_string) -> list[list[str]]:
 
 
 def score_connections(solution_groups, submitted_groups):
-    soft_score, hard_score = 0, 0
+    hard_score = 0
     correct_group_indices = []  # Track indices of correctly solved solution groups.
 
     solution_sets = [set(group) for group in solution_groups]
@@ -168,6 +168,24 @@ def score_connections(solution_groups, submitted_groups):
     return float(hard_score)
 
 
+def score_connections_soft(solution_groups, submitted_groups):
+    total_score = 0
+    # Convert each solution group to a set for easier comparisons.
+    solution_sets = [set(group) for group in solution_groups]
+
+    # For each solution group, determine the best (largest) number of correct items found
+    # among all submitted groups.
+    for sol_set in solution_sets:
+        best_match_count = 0
+        for submitted in submitted_groups:
+            submitted_set = set(submitted)
+            match_count = len(sol_set.intersection(submitted_set))
+            best_match_count = max(best_match_count, match_count)
+        total_score += best_match_count * 0.25
+
+    return total_score
+
+
 def _generations(completions: list[dict]) -> list[str]:
     return [completion[0]["content"] for completion in completions]
 
@@ -177,7 +195,7 @@ def connections_soft_group_reward_func(prompts, completions, **kwargs) -> list[f
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     logger.info(f"Connections func rewards: {groups}")
-    scores = [score_connections(kwargs["answer"], g) for g in groups]
+    scores = [score_connections_soft(kwargs["answer"], g) for g in groups]
     logger.info(f"Connections scores: {scores}")
     return scores
 
@@ -297,6 +315,7 @@ class ConnectionsDataModule(SmDataset):
             strict_format_reward_func,
             connections_soft_group_reward_func,
             group_size_reward_func,
+            connections_hard_group_reward_func,
             n_groups_reward_func,
         ]
 

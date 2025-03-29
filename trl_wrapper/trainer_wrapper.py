@@ -195,6 +195,7 @@ GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     max_prompt_length=256,
     max_completion_length=512,
     max_grad_norm=0.1,
+    n_epochs=10,
     eval_batch_size=1,
     learning_rate=5e-6,
     lr_scheduler=SchedulerType.COSINE,
