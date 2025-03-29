@@ -2,7 +2,6 @@ from model.reasoning import (
     parse_groups,
     connections_soft_group_reward_func,
     connections_hard_group_reward_func,
-    score_connections,
     score_connections_soft,
 )
 

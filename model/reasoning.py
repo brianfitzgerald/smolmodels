@@ -1,5 +1,5 @@
 from typing import Optional
-from datasets import load_dataset, Dataset, DatasetDict
+from datasets import load_dataset, Dataset
 from transformers.trainer_callback import TrainerCallback
 import re
 from loguru import logger
