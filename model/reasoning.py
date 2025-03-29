@@ -151,37 +151,53 @@ def parse_groups(input_string) -> list[list[str]]:
 
 
 def score_connections(solution_groups, submitted_groups):
-    score = 0
+    soft_score, hard_score = 0, 0
     correct_group_indices = []  # Track indices of correctly solved solution groups.
 
-    # Convert each group in the solution_groups into a set.
     solution_sets = [set(group) for group in solution_groups]
-    solved = set()  # Keep track of which solution group indices have been solved.
+    solved = set()
 
     for submitted in submitted_groups:
         submitted_set = set(submitted)
         for index, correct_set in enumerate(solution_sets):
-            # Check if the submitted group matches a solution group and hasn't been solved already.
             if submitted_set == correct_set and index not in solved:
-                score += 1
+                hard_score += 1
                 correct_group_indices.append(index)
                 solved.add(index)
-                break  # Move on to the next submitted group after a match.
-    return float(score)
+                break
+    return float(hard_score)
 
 
-def connections_reward_func(prompts, completions, **kwargs) -> list[float]:
-    model_generations = [completion[0]["content"] for completion in completions]
-    logger.info(f"Model generations: {model_generations}")
+def _generations(completions: list[dict]) -> list[str]:
+    return [completion[0]["content"] for completion in completions]
+
+
+def connections_soft_group_reward_func(prompts, completions, **kwargs) -> list[float]:
+    """Reward the num correct in each group."""
+    model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    logger.info(f"Groups: {groups}")
+    logger.info(f"Connections func rewards: {groups}")
     scores = [score_connections(kwargs["answer"], g) for g in groups]
     logger.info(f"Connections scores: {scores}")
     return scores
 
 
+def connections_hard_group_reward_func(prompts, completions, **kwargs) -> list[float]:
+    """Reward whether each group is correct as a whole or not."""
+    model_generations = _generations(completions)
+    print("Generations:")
+    for g in model_generations:
+        print("-" * 80)
+        print(g)
+    generation_groups = [parse_groups(r) for r in model_generations]
+    logger.info(f"Connections func rewards: {generation_groups}")
+    scores = [score_connections(kwargs["answer"], g) for g in generation_groups]
+    logger.info(f"Connections scores: {scores}")
+    return scores
+
+
 def group_size_reward_func(prompts, completions, **kwargs) -> list[float]:
-    model_generations = [completion[0]["content"] for completion in completions]
+    model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     sizes = [len(g) for g in groups]
     rewards = [0.5 if s == 4 else 0.0 for s in sizes]
@@ -190,7 +206,7 @@ def group_size_reward_func(prompts, completions, **kwargs) -> list[float]:
 
 
 def n_groups_reward_func(prompts, completions, **kwargs) -> list[float]:
-    model_generations = [completion[0]["content"] for completion in completions]
+    model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     rew = [0.5 if len(g) == 4 else 0.0 for g in groups]
     logger.info(f"Number of groups rewards: {rew}")
@@ -200,6 +216,7 @@ def n_groups_reward_func(prompts, completions, **kwargs) -> list[float]:
 CONNECTIONS_PROMPT = """
 You are an expert puzzle solving model.
 Find groups of words that are related to each other. Each group is four words long.
+You may only use each word in one group.
 Respond in the following format:
 <reasoning>
 ...
@@ -278,7 +295,7 @@ class ConnectionsDataModule(SmDataset):
         return [
             xmlcount_reward_func,
             strict_format_reward_func,
-            connections_reward_func,
+            connections_soft_group_reward_func,
             group_size_reward_func,
             n_groups_reward_func,
         ]

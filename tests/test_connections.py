@@ -1,4 +1,4 @@
-from model.reasoning import parse_groups, connections_reward_func
+from model.reasoning import parse_groups, connections_soft_group_reward_func
 
 
 def test_parse_groups_single():
@@ -39,7 +39,7 @@ def test_connections_reward_func_correct():
     content = "<group>apple, banana</group><group>cherry, date</group>"
     completions = [[{"content": content}]]
     prompts = []  # Not used in the function.
-    scores = connections_reward_func(prompts, completions, answer=answer)
+    scores = connections_soft_group_reward_func(prompts, completions, answer=answer)
     # Expecting a score of 2.0.
     assert scores == [2.0]
 
@@ -51,7 +51,7 @@ def test_connections_reward_func_incorrect():
     content = "<group>apple, grape</group>"
     completions = [[{"content": content}]]
     prompts = []  # Not used in the function.
-    scores = connections_reward_func(prompts, completions, answer=answer)
+    scores = connections_soft_group_reward_func(prompts, completions, answer=answer)
     # No submitted group matches any answer group, so score should be 0.0.
     assert scores == [0.0]
 
@@ -65,6 +65,6 @@ def test_connections_reward_func_multiple_completions():
     content2 = "<group>apple, banana</group><group>cherry, date</group>"
     completions = [[{"content": content1}], [{"content": content2}]]
     prompts = []  # Not used in the function.
-    scores = connections_reward_func(prompts, completions, answer=answer)
+    scores = connections_soft_group_reward_func(prompts, completions, answer=answer)
     # First completion should yield 1.0 and second should yield 2.0.
     assert scores == [1.0, 2.0]

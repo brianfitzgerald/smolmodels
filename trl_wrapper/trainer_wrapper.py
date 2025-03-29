@@ -186,8 +186,8 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 GRPO_CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=LLAMA_3_2_1B,
-    model_family="other",
+    model_id_or_path=QWEN_1_5_B,
+    model_family="qwen",
     wandb_project_name="qwen-connections-grpo",
     train_batch_size=2,
     gradient_accumulation_steps=8,
@@ -456,7 +456,7 @@ class TrainerWrapper:
 
         elif self.config.tuning_mode == "grpo":
             device = get_available_device()
-            use_vllm = "cuda" in device and not self.config.notebook_mode
+            use_vllm = "cuda" in device and os.environ.get("USE_VLLM", "0") == "1"
             logger.info(f"Using vllm: {use_vllm}")
             training_args = GRPOConfig(
                 output_dir=output_dir,
