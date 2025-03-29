@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import concurrent.futures
 import polars as pl
-import openai
 
 from openai import OpenAI
 
@@ -131,12 +130,15 @@ def _get_model_id(client: OpenAI):
     return model_id
 
 
-def test_openai_api(msg: str = "Hello! How are you?"):
+def test_openai_api(
+    msg: str = "Hello! How are you?",
+    base_url: str = "https://brianfitzgerald--vllm-server-serve.modal.run",
+):
     """
     Test the OpenAI API.
     """
     oai_client = OpenAI(
-        base_url="https://brianfitzgerald--example-vllm-openai-compatible-serve.modal.run/v1",
+        base_url=f"{base_url}/v1",
         api_key="super-secret-key",
     )
     model_id = _get_model_id(oai_client)
@@ -145,6 +147,7 @@ def test_openai_api(msg: str = "Hello! How are you?"):
         messages=[
             {"role": "user", "content": msg},
         ],
+        max_tokens=2048,
     )
     print(response.choices[0].message.content)
 

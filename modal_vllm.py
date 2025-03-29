@@ -2,6 +2,8 @@ import os
 from typing import Optional
 import modal
 from loguru import logger
+from scripts.modal_definitons import MODEL_WEIGHTS_VOLUME
+import subprocess
 
 
 # https://github.com/modal-labs/modal-examples/blob/main/06_gpu_and_ml/llm-serving/vllm_inference.py
@@ -51,7 +53,7 @@ vllm_image = (
 )
 
 
-app = modal.App("example-vllm-openai-compatible")
+app = modal.App("vllm-server")
 
 N_GPU = 1  # tip: for best results, first upgrade to more powerful GPUs, and only then increase GPU count
 API_KEY = "super-secret-key"  # api key, for auth. for production use, replace with a modal.Secret
@@ -64,9 +66,7 @@ VLLM_PORT = 8000
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
-MODELS_DIR = "/llamas"
-MODEL_NAME = "neuralmagic/Meta-Llama-3.1-8B-Instruct-quantized.w4a16"
-MODEL_REVISION = "a7c09948d9a632c2c840722f519672cd94af885d"
+MODEL_NAME = "03-21-3-7-766288-llama-3.2-3b-instruct-txt_bt-txt-bt"
 
 
 @app.function(
@@ -79,19 +79,24 @@ MODEL_REVISION = "a7c09948d9a632c2c840722f519672cd94af885d"
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,
+        "/model-weights": MODEL_WEIGHTS_VOLUME,
     },
 )
 @modal.web_server(port=VLLM_PORT, startup_timeout=5 * MINUTES)
 def serve():
-    import subprocess
+    model_checkpoint = get_checkpoint_dir(
+        base_run_dir="/model-weights/runs",
+        run=MODEL_NAME,
+        steps=None,
+    )
+
+    logger.info(f"model checkpoint: {model_checkpoint}")
 
     cmd = [
         "vllm",
         "serve",
         "--uvicorn-log-level=info",
-        MODEL_NAME,
-        "--revision",
-        MODEL_REVISION,
+        model_checkpoint,
         "--host",
         "0.0.0.0",
         "--port",
