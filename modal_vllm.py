@@ -55,27 +55,20 @@ vllm_image = (
 
 app = modal.App("vllm-server")
 
-N_GPU = 1  # tip: for best results, first upgrade to more powerful GPUs, and only then increase GPU count
-API_KEY = "super-secret-key"  # api key, for auth. for production use, replace with a modal.Secret
-
+API_KEY = "super-secret-key"
 MINUTES = 60  # seconds
-
 VLLM_PORT = 8000
-
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
-MODEL_NAME = "03-21-3-7-766288-llama-3.2-3b-instruct-txt_bt-txt-bt"
+MODEL_NAME = "03-29-18-45-613561-llama-3.2-3b-instruct-txt_bt-txt-bt"
 
 
 @app.function(
     image=vllm_image,
-    gpu=f"H100:{N_GPU}",
-    # how many requests can one replica handle? tune carefully!
-    allow_concurrent_inputs=100,
-    # how long should we stay up with no requests?
-    scaledown_window=15 * MINUTES,
+    gpu="l40s",
+    allow_concurrent_inputs=10,
     volumes={
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,

@@ -49,7 +49,8 @@ uv run modal run -d modal_entrypoint.py::training
 # Generation
 uv run modal run -d modal_entrypoint.py::generation
 # Inference
-uv run modal serve modal_vllm.py
+modal deploy modal_vllm.py
+python util_scripts.py test_openai_api
 ```
 
 

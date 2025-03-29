@@ -131,7 +131,7 @@ def _get_model_id(client: OpenAI):
 
 
 def test_openai_api(
-    msg: str = "Hello! How are you?",
+    msg: str = "Write a story told entirely through a series of brief correspondences: telegrams or letters or emails between two characters. The correspondence should span several months or years, and reveal a gradually unfolding plot. Use distinct voices for each character, and include details that provide insight into their personalities and motivations. The story should build to an emotional climax, and the final letter should provide a satisfying resolution. The setting is a lighthouse keeper writing to his mother. He is working class and Scottish. He is struggling with the isolation of his posting. Write naturally and without cliches.",
     base_url: str = "https://brianfitzgerald--vllm-server-serve.modal.run",
 ):
     """

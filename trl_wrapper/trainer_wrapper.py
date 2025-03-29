@@ -189,18 +189,18 @@ GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_1_5_B,
     model_family="qwen",
     wandb_project_name="qwen-connections-grpo",
-    train_batch_size=2,
+    train_batch_size=4,
     gradient_accumulation_steps=8,
     data_module_choice="connections",
     max_prompt_length=256,
     max_completion_length=512,
     max_grad_norm=0.1,
-    n_epochs=10,
+    n_epochs=50,
     eval_batch_size=1,
-    learning_rate=5e-6,
+    learning_rate=1e-6,
     lr_scheduler=SchedulerType.COSINE,
     tuning_mode="grpo",
-    num_generations=2,
+    num_generations=4,
 )
 
 
