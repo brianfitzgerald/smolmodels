@@ -103,10 +103,10 @@ TXT_BT_CONFIG = WrapperConfig(
     gradient_accumulation_steps=4,
     data_module_choice="conversation",
     tuning_mode="sft",
-    learning_rate=1e-5,
+    learning_rate=1e-6,
     dataset_path="dataset_files/gutenberg_backtranslate_from_txt_conversations.parquet",
-    n_epochs=5,
-    eval_steps=50,
+    n_epochs=2,
+    eval_steps=500,
     run_suffix="txt-bt",
 )
 
