@@ -13,7 +13,6 @@ from anthropic import AnthropicError, AsyncAnthropic
 from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
-from huggingface_hub import login
 from loguru import logger
 from openai import NOT_GIVEN, LengthFinishReasonError, NotGiven, AsyncOpenAI, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -276,8 +275,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             completion_requests = []
             for conversation in conversations:
                 conversation = cast(List[MessageParam], conversation)
+                assert self.args.model_id is not None, (
+                    "model_id is required for AnthropicGenerationWrapper"
+                )
                 request = self.client.messages.create(
-                    model="claude-3-5-sonnet-20240620",
+                    model=self.args.model_id,
                     messages=conversation,
                     temperature=0,
                     max_tokens=4096,
@@ -319,6 +321,7 @@ class GeminiWrapper(GenerationWrapper):
         if api_key is None:
             raise ValueError("GOOGLE_API_KEY is required for GeminiWrapper")
         self.client = genai.Client(api_key=api_key)
+        self.args = args
 
     @timeout(30)
     async def generate(self, conversations: List[Conversation]):
@@ -344,6 +347,7 @@ class GeminiWrapper(GenerationWrapper):
 
 
 RemoteModel = Literal[
+    "claude-3-7",
     "claude-3-5",
     "qwen-qwq",
     "deepseek-v3",
@@ -389,7 +393,11 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     ),
     "claude-3-5": RemoteModelChoice(
         AnthropicGenerationWrapper,
-        GenWrapperArgs(max_rps=100),
+        GenWrapperArgs(max_rps=100, model_id="claude-3-5-sonnet-20241022"),
+    ),
+    "claude-3-7": RemoteModelChoice(
+        AnthropicGenerationWrapper,
+        GenWrapperArgs(max_rps=100, model_id="claude-3-7-sonnet-20250219"),
     ),
     "gpt-4o-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,
@@ -418,9 +426,6 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
 def get_generation_wrapper(
     model_name: RemoteModel, args_override: GenWrapperArgs | None = None
 ) -> GenerationWrapper:
-    if "HF_TOKEN" in os.environ:
-        hf_token = os.environ["HF_TOKEN"]
-        login(token=hf_token, add_to_git_credential=True)
     config = MODEL_CONFIGS[model_name]
     if args_override:
         for field in fields(args_override):

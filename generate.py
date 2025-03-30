@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from copy import copy
 from typing import Dict, Optional, cast
+from huggingface_hub import login
 
 from dotenv import load_dotenv
 import fire
@@ -153,6 +154,10 @@ def main(
     args_override: GenWrapperArgs | None = None
     generation_wrapper = get_generation_wrapper(model, args_override)
     environment: Optional[TextEnv] = None
+
+    if "HF_TOKEN" in os.environ:
+        hf_token = os.environ["HF_TOKEN"]
+        login(token=hf_token, add_to_git_credential=True)
 
     if task_name:
         task = ALL_TASKS[task_name]()

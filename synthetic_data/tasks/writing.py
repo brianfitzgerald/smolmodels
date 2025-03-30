@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -12,7 +13,11 @@ from huggingface_hub import snapshot_download
 from loguru import logger
 from pydantic import BaseModel
 
-from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
+from synthetic_data.generation import (
+    GenWrapperArgs,
+    GenerationWrapper,
+    get_generation_wrapper,
+)
 from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
 from synthetic_data.prompts import (
     format_classify_fiction_prompt,
@@ -388,40 +393,78 @@ class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
         return Dataset.from_parquet(os.path.join(dataset_root_path, "epubs.parquet"))  # type: ignore
 
 
+async def _generate_and_score(
+    generator: GenerationWrapper,
+    input_rows: List[Dict],
+    bench: CreativeWritingBench,
+    judge_generator: GenerationWrapper,
+):
+    input_convs: list[Conversation] = [
+        [{"role": "user", "content": row["instruction"]}] for row in input_rows
+    ]
+    logger.info(
+        f"Generating {len(input_convs)} completions with {generator.args.model_id}"
+    )
+    completions = await generator.generate(input_convs)
+    logger.info(
+        f"Generated {len(completions)} completions with {generator.args.model_id}"
+    )
+    judge_convs: list[Conversation] = [
+        [
+            {
+                "role": "user",
+                "content": bench.format_prompt(row["instruction"], completion),
+            }
+        ]
+        for row, completion in zip(input_rows, completions)
+    ]
+    judge_completions = await judge_generator.generate(judge_convs)
+    scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
+    return [
+        {
+            "scores": s,
+            "completion": c,
+            "instruction": r["instruction"],
+            "model_id": generator.args.model_id,
+        }
+        for r, s, c in zip(input_rows, scores_formatted, completions)
+    ]
+
+
 class BacktranslateBestOfN(BaseTask):
     """
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """
 
     output_dataset_name = "gutenberg_score_annotated"
-    dataset_columns = ["completions", "instruction"]
+    dataset_columns = ["completion", "instruction", "scores", "model_id"]
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "gutenberg_backtranslate_from_txt"
     output_dataset_format = DatasetFormat.PARQUET
 
     def __init__(self) -> None:
         self.bench = None
+        self.generators = [
+            get_generation_wrapper("gemini-2.0-flash"),
+            get_generation_wrapper("gpt-4o-mini"),
+        ]
+        self.judge_generator = get_generation_wrapper("gemini-2.0-flash")
 
     async def generate(
         self, generation_wrapper: GenerationWrapper, input_rows: List[Dict]
     ) -> list[dict]:
         if self.bench is None:
             self.bench = CreativeWritingBench(self.dataset_root_path)
-        input_convs: list[Conversation] = [
-            [{"role": "user", "content": row["instruction"]}] for row in input_rows
-        ]
-        completions = await generation_wrapper.generate(input_convs)
-        logger.info(f"Generated {len(completions)} completions")
-        logger.info(completions[0])
-        score_convs: list[Conversation] = [
-            [
-                {
-                    "role": "user",
-                    "content": self.bench.format_prompt(row["instruction"], completion),
-                }
+        # Launch generation and scoring for each generator concurrently
+        results = await asyncio.gather(
+            *[
+                _generate_and_score(
+                    generator, input_rows, self.bench, self.judge_generator
+                )
+                for generator in self.generators
             ]
-            for row, completion in zip(input_rows, completions)
-        ]
-        scores = await generation_wrapper.generate(score_convs)
-        scores_formatted = [self.bench.parse_judge_scores(score) for score in scores]
-        return scores_formatted
+        )
+
+        # Flatten the list of lists into a single list of results
+        all_results = [item for sublist in results for item in sublist]
+        return all_results
