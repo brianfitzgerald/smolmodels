@@ -26,10 +26,8 @@ from synthetic_data.tasks.writing import (
     GutenbergBacktranslationFromTxt,
     GutenbergExtraction,
     GutenbergBacktranslation,
-    GutenbergFollowUp,
     ScreenplaySummarize,
-    WritingRewardAnnotate,
-    WritingScoreAnnotate,
+    BacktranslateBestOfN,
 )
 from synthetic_data.utils import DatasetFormat, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
@@ -40,9 +38,7 @@ ALL_TASKS: Dict[str, type[BaseTask]] = {
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
     "gutenberg_backtranslation_from_txt": GutenbergBacktranslationFromTxt,
-    "gutenberg_followup": GutenbergFollowUp,
-    "writing_reward": WritingRewardAnnotate,
-    "writing_score": WritingScoreAnnotate,
+    "backtranslate_best_of_n": BacktranslateBestOfN,
 }
 
 
@@ -209,43 +205,10 @@ def main(
     output_dataset = cast(Dataset, output_dataset)
 
     # Load input dataset
-
-    input_dataset: Dataset
-    input_dataset_location: Optional[str] = None
-    if task.seed_data_format in (
-        DatasetFormat.HF_DATASET,
-        DatasetFormat.PARQUET,
-        DatasetFormat.TSV,
-    ):
-        input_dataset_location = task.seed_data_location
-
     logger.info(
-        f"Loading input dataset: {input_dataset_location}, format: {task.seed_data_format.value}"
+        f"Loading input dataset: {task.seed_data_location}, format: {task.seed_data_format.value}"
     )
-    if task.seed_data_format == DatasetFormat.CUSTOM:
-        input_dataset = task.load_custom(dataset_root_path=dataset_root_path)
-    elif task.seed_data_format == DatasetFormat.NONE:
-        input_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
-    else:
-        assert input_dataset_location, (
-            f"Input dataset location must be provided, but is {input_dataset_location}"
-        )
-        if task.seed_data_format == DatasetFormat.HF_DATASET:
-            input_dataset = cast(
-                Dataset, load_dataset(input_dataset_location, split=split)
-            )
-        elif task.seed_data_format == DatasetFormat.TSV:
-            seed_data = pd.read_csv(
-                os.path.join(dataset_root_path, f"{input_dataset_location}.tsv"),
-                on_bad_lines="skip",
-            )
-            input_dataset = Dataset.from_pandas(seed_data)
-        elif task.seed_data_format == DatasetFormat.PARQUET:
-            input_dataset = Dataset.from_parquet(
-                os.path.join(dataset_root_path, f"{input_dataset_location}.parquet")
-            )  # type: ignore
-        else:
-            raise ValueError(f"Unrecognized seed_data_format: {task.seed_data_format}")
+    input_dataset: Dataset = task.load_dataset(dataset_root_path=dataset_root_path)
 
     # Resume from position
 

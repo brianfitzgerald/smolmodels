@@ -200,58 +200,6 @@ class GutenbergExtraction(BaseTask):
         return out_rows
 
 
-def format_eq_bench_scoring_prompt(
-    completion: str,
-) -> Conversation:
-    prompt_formatted = TASK_PROMPT.replace("[TEST MODEL RESPONSE]", completion).replace(
-        "[TEST MODEL RESPONSE END]", ""
-    )
-
-    return [
-        {"role": "user", "content": prompt_formatted},
-    ]
-
-
-class WritingRewardAnnotate(BaseTask):
-    output_dataset_name = "writing_reward_annotated"
-    dataset_columns = ["completions", "test_results", "name"]
-    seed_data_format = DatasetFormat.HF_DATASET
-    output_dataset_format = DatasetFormat.HF_DATASET
-    seed_data_location = (
-        "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
-    )
-
-    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        samples_in = batch
-        in_batch = []
-        samples_out = []
-        for sample in samples_in:
-            chosen_text = sample["chosen"][-1]["content"]
-            rejected_text = sample["rejected"][-1]["content"]
-            samples_out.append(format_eq_bench_scoring_prompt(chosen_text))
-            samples_out.append(format_eq_bench_scoring_prompt(rejected_text))
-            in_batch.extend([sample, sample])
-        self.in_rows_batch = in_batch
-        return samples_out
-
-    def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
-        out_rows = []
-        for completion, row in zip(completions, input_rows):
-            out_rows.append({**row, "output": completion})
-        self.in_rows_batch = []
-        return out_rows
-
-
-def _contains_dialogue(text):
-    return bool(DIALOGUE_REGEX.search(text))
-
-
-def _count_sentences(text):
-    return len(re.findall(r"[.!?]", text))
-
-
 def find_valid_paragraph_chunks(
     lst: list[str],
     encoder: tiktoken.Encoding,
@@ -441,11 +389,31 @@ class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
 
 
 class BacktranslateBestOfN(BaseTask):
+    """
+    Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
+    """
+
     output_dataset_name = "gutenberg_score_annotated"
-    dataset_columns = ["text", "title", "author", "category", "type", "id"]
+    dataset_columns = ["completions", "instruction"]
     seed_data_format = DatasetFormat.PARQUET
-    seed_data_location = "gutenberg_backtranslate"
+    seed_data_location = "gutenberg_backtranslate_from_txt_conversations"
     output_dataset_format = DatasetFormat.PARQUET
 
     def __init__(self) -> None:
         self.bench = CreativeWritingBench()
+
+    async def generate(
+        self, generation_wrapper: GenerationWrapper, input_rows: List[Dict]
+    ) -> list[dict]:
+        input_convs: list[Conversation] = [
+            [{"role": "user", "content": row["instruction"]}] for row in input_rows
+        ]
+        completions = await generation_wrapper.generate(input_convs)
+
+        score_convs: list[Conversation] = [
+            [{"role": "user", "content": self.bench.format_prompt(completion)}]
+            for completion in completions
+        ]
+        scores = await generation_wrapper.generate(score_convs)
+        scores_formatted = [self.bench.parse_judge_scores(score) for score in scores]
+        return scores_formatted

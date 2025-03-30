@@ -1,8 +1,6 @@
 from abc import ABC
 from typing import Dict, List, Optional
-from datasets import Dataset
 from loguru import logger
-from rich.console import Console
 from evaluation.code_execution import (
     EvalTask,
 )
@@ -11,6 +9,9 @@ from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
 )
+from datasets import Dataset, load_dataset
+import pandas as pd
+import os
 
 
 class BaseTask(ABC):
@@ -73,3 +74,32 @@ class BaseTask(ABC):
         except Exception as e:
             logger.error(f"Error processing batch: {str(e)}")
             return []
+
+    def load_dataset(self, dataset_root_path: str) -> Dataset:
+        """
+        Load the seed dataset based on the specified format.
+        """
+        if self.seed_data_format == DatasetFormat.CUSTOM:
+            return self.load_custom(dataset_root_path=dataset_root_path)
+        else:
+            assert self.seed_data_location, (
+                f"Input dataset location must be provided, but is {self.seed_data_location}"
+            )
+            if self.seed_data_format == DatasetFormat.HF_DATASET:
+                return load_dataset(self.seed_data_location, split=self.seed_data_split)  # type: ignore
+            elif self.seed_data_format == DatasetFormat.TSV:
+                seed_data = pd.read_csv(
+                    os.path.join(dataset_root_path, f"{self.seed_data_location}.tsv"),
+                    on_bad_lines="skip",
+                )
+                return Dataset.from_pandas(seed_data)
+            elif self.seed_data_format == DatasetFormat.PARQUET:
+                return Dataset.from_parquet(
+                    os.path.join(
+                        dataset_root_path, f"{self.seed_data_location}.parquet"
+                    )
+                )  # type: ignore
+            else:
+                raise ValueError(
+                    f"Unrecognized seed_data_format: {self.seed_data_format}"
+                )
