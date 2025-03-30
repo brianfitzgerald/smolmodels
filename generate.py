@@ -156,6 +156,7 @@ def main(
 
     if task_name:
         task = ALL_TASKS[task_name]()
+        task.dataset_root_path = dataset_root_path
     else:
         assert environment_name, "Environment name must be passed"
         environment = ALL_ENVIRONMENTS[environment_name](generation_wrapper, 0)
@@ -163,7 +164,6 @@ def main(
         args_override = task.gen_wrapper_args_override
 
     output_dataset = Dataset.from_dict({k: [] for k in task.dataset_columns})
-    split = task.seed_data_split
 
     if task_name and environment_name:
         raise ValueError("Only one of task_name or environment should be passed")
@@ -208,7 +208,7 @@ def main(
     logger.info(
         f"Loading input dataset: {task.seed_data_location}, format: {task.seed_data_format.value}"
     )
-    input_dataset: Dataset = task.load_dataset(dataset_root_path=dataset_root_path)
+    input_dataset: Dataset = task.load_dataset()
 
     # Resume from position
 

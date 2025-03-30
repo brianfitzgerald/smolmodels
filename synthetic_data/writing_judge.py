@@ -1,3 +1,4 @@
+import os
 from synthetic_data.generation import Conversation
 import re
 
@@ -26,22 +27,30 @@ def parse_judge_scores_creative(judge_model_response: str) -> dict[str, float]:
 
 
 class CreativeWritingBench:
-    def __init__(self) -> None:
+    def __init__(self, dataset_root_path: str) -> None:
         super().__init__()
-        with open("dataset_files/negative_criteria.txt", "r", encoding="utf-8") as f:
+        with open(
+            os.path.join(dataset_root_path, "negative_criteria.txt"),
+            "r",
+            encoding="utf-8",
+        ) as f:
             self.negative_criteria = [line.strip() for line in f if line.strip()]
         with open(
-            "dataset_files/creative_writing_criteria.txt", "r", encoding="utf-8"
+            os.path.join(dataset_root_path, "creative_writing_criteria.txt"),
+            "r",
+            encoding="utf-8",
         ) as f:
             self.creative_writing_criteria = [
                 line.strip() for line in f if line.strip()
             ]
         with open(
-            "dataset_files/creative_writing_judging_prompt.txt", "r", encoding="utf-8"
+            os.path.join(dataset_root_path, "creative_writing_judging_prompt.txt"),
+            "r",
+            encoding="utf-8",
         ) as f:
             self.judge_prompt_template = f.read()
 
-    def format_prompt(self, model_text: str) -> str:
+    def format_prompt(self, writing_prompt: str, model_response: str) -> str:
         """
         Format the judge prompt with the creative writing criteria and negative criteria.
         """
@@ -49,8 +58,9 @@ class CreativeWritingBench:
             creative_writing_criteria="\n".join(
                 ["- " + c for c in self.creative_writing_criteria]
             ),
-            negative_criteria=", ".join(self.negative_criteria),
-            test_model_response=model_text,
+            lower_is_better_criteria=", ".join(self.negative_criteria),
+            test_model_response=model_response,
+            writing_prompt=writing_prompt,
         )
 
     def parse_judge_scores(self, judge_model_response: str) -> dict[str, float]:

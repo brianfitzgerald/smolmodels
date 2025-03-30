@@ -396,23 +396,31 @@ class BacktranslateBestOfN(BaseTask):
     output_dataset_name = "gutenberg_score_annotated"
     dataset_columns = ["completions", "instruction"]
     seed_data_format = DatasetFormat.PARQUET
-    seed_data_location = "gutenberg_backtranslate_from_txt_conversations"
+    seed_data_location = "gutenberg_backtranslate_from_txt"
     output_dataset_format = DatasetFormat.PARQUET
 
     def __init__(self) -> None:
-        self.bench = CreativeWritingBench()
+        self.bench = None
 
     async def generate(
         self, generation_wrapper: GenerationWrapper, input_rows: List[Dict]
     ) -> list[dict]:
+        if self.bench is None:
+            self.bench = CreativeWritingBench(self.dataset_root_path)
         input_convs: list[Conversation] = [
             [{"role": "user", "content": row["instruction"]}] for row in input_rows
         ]
         completions = await generation_wrapper.generate(input_convs)
-
+        logger.info(f"Generated {len(completions)} completions")
+        logger.info(completions[0])
         score_convs: list[Conversation] = [
-            [{"role": "user", "content": self.bench.format_prompt(completion)}]
-            for completion in completions
+            [
+                {
+                    "role": "user",
+                    "content": self.bench.format_prompt(row["instruction"], completion),
+                }
+            ]
+            for row, completion in zip(input_rows, completions)
         ]
         scores = await generation_wrapper.generate(score_convs)
         scores_formatted = [self.bench.parse_judge_scores(score) for score in scores]
