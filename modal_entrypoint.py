@@ -45,9 +45,8 @@ def generation():
         f"Dataset root path: {DATASET_VOLUME_PATH} contents: {os.listdir(DATASET_VOLUME_PATH)}"
     )
     generate_main(
-        task_name="gutenberg_backtranslation_from_txt",
+        task_name="backtranslate_best_of_n",
         dataset_root_path=DATASET_VOLUME_PATH,
-        model="gemini-2.0-flash",
     )
 
     # generate_main(

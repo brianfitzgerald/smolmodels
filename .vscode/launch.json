@@ -26,7 +26,7 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "gutenberg_backtranslation_from_txt",
+                "backtranslate_best_of_n",
                 "--batch_size",
                 "4"
             ],

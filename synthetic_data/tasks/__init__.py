@@ -12,6 +12,9 @@ from synthetic_data.utils import (
 from datasets import Dataset, load_dataset
 import pandas as pd
 import os
+from typing import Literal
+
+RunMode = Literal["modal", "cli", "notebook"]
 
 
 class BaseTask(ABC):
@@ -27,7 +30,11 @@ class BaseTask(ABC):
 
     gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
-    dataset_root_path: str
+    run_mode: RunMode = "cli"
+
+    def __init__(self, run_mode: RunMode = "cli") -> None:
+        self.run_mode = run_mode
+        self.dataset_root_path = ".." if run_mode == "notebook" else "."
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """

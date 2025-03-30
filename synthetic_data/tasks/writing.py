@@ -418,6 +418,9 @@ async def _generate_and_score(
         ]
         for row, completion in zip(input_rows, completions)
     ]
+    logger.info(
+        f"Judging {len(judge_convs)} completions with {judge_generator.args.model_id}"
+    )
     judge_completions = await judge_generator.generate(judge_convs)
     scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
     return [
@@ -426,8 +429,9 @@ async def _generate_and_score(
             "completion": c,
             "instruction": r["instruction"],
             "model_id": generator.args.model_id,
+            "prompt_id": i,
         }
-        for r, s, c in zip(input_rows, scores_formatted, completions)
+        for i, (r, s, c) in enumerate(zip(input_rows, scores_formatted, completions))
     ]
 
 
@@ -447,6 +451,7 @@ class BacktranslateBestOfN(BaseTask):
         self.generators = [
             get_generation_wrapper("gemini-2.0-flash"),
             get_generation_wrapper("gpt-4o-mini"),
+            get_generation_wrapper("gpt-4o"),
         ]
         self.judge_generator = get_generation_wrapper("gemini-2.0-flash")
 

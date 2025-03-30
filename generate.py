@@ -3,10 +3,10 @@ from collections.abc import AsyncGenerator
 from copy import copy
 from typing import Dict, Optional, cast
 from huggingface_hub import login
+from typing import Literal
 
 from dotenv import load_dotenv
 import fire
-import pandas as pd
 from datasets import Dataset, load_dataset
 from datasets.data_files import EmptyDatasetError
 from datasets.exceptions import DatasetNotFoundError
@@ -34,7 +34,14 @@ from synthetic_data.utils import DatasetFormat, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
 
 
-ALL_TASKS: Dict[str, type[BaseTask]] = {
+TaskName = Literal[
+    "screenplay_summarize",
+    "gutenberg_extraction",
+    "gutenberg_backtranslation",
+    "gutenberg_backtranslation_from_txt",
+    "backtranslate_best_of_n",
+]
+ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
@@ -129,7 +136,7 @@ async def process_dataset(
 
 
 def main(
-    task_name: str | None = None,
+    task_name: TaskName | None = None,
     environment_name: str | None = None,
     save_every_n_batches: int = 5,
     batch_size: int = 8,
@@ -138,6 +145,7 @@ def main(
     model: RemoteModel = "gemini-2.0-flash",
     n_epochs: int = 1,
     dataset_root_path: str = "dataset_files",
+    running_on_modal: bool = False,
     **kwargs,
 ):
     """
@@ -161,7 +169,7 @@ def main(
 
     if task_name:
         task = ALL_TASKS[task_name]()
-        task.dataset_root_path = dataset_root_path
+        task.run_mode = "cli" if not running_on_modal else "modal"
     else:
         assert environment_name, "Environment name must be passed"
         environment = ALL_ENVIRONMENTS[environment_name](generation_wrapper, 0)
