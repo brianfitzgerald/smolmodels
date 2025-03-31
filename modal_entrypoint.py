@@ -44,10 +44,7 @@ def generation():
     logger.info(
         f"Dataset root path: {DATASET_VOLUME_PATH} contents: {os.listdir(DATASET_VOLUME_PATH)}"
     )
-    generate_main(
-        task_name="backtranslate_best_of_n",
-        dataset_root_path=DATASET_VOLUME_PATH,
-    )
+    generate_main(task_name="backtranslate_best_of_n", run_mode="modal")
 
     # generate_main(
     #     environment_name="twenty_questions",

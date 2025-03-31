@@ -22,7 +22,7 @@ from synthetic_data.generation import (
     RemoteModel,
     save_output_dataset,
 )
-from synthetic_data.tasks import BaseTask
+from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.writing import (
     GutenbergBacktranslationFromTxt,
     GutenbergExtraction,
@@ -109,7 +109,7 @@ async def process_dataset(
     batch_size: int,
     save_every_n_batches: int,
     output_dataset: Dataset,
-    dataset_root_path: str,
+    out_dir: str,
 ) -> list[dict]:
     all_new_dataset_rows = []
     batch_count = 0
@@ -129,7 +129,7 @@ async def process_dataset(
                 task.output_dataset_name,
                 all_new_dataset_rows,
                 task.output_dataset_format,
-                dataset_root_path,
+                out_dir,
             )
 
     return all_new_dataset_rows
@@ -144,8 +144,7 @@ def main(
     resume_input_position: bool = True,
     model: RemoteModel = "gemini-2.0-flash",
     n_epochs: int = 1,
-    dataset_root_path: str = "dataset_files",
-    running_on_modal: bool = False,
+    run_mode: RunMode = "cli",
     **kwargs,
 ):
     """
@@ -168,8 +167,7 @@ def main(
         login(token=hf_token, add_to_git_credential=True)
 
     if task_name:
-        task = ALL_TASKS[task_name]()
-        task.run_mode = "cli" if not running_on_modal else "modal"
+        task = ALL_TASKS[task_name](run_mode)
     else:
         assert environment_name, "Environment name must be passed"
         environment = ALL_ENVIRONMENTS[environment_name](generation_wrapper, 0)
@@ -233,6 +231,13 @@ def main(
     logger.info(
         f"Input dataset length: {len(input_dataset)} Output dataset: {len(output_dataset)}"
     )
+    out_dir = (
+        "../dataset_files"
+        if run_mode == "notebook"
+        else "./dataset_files"
+        if run_mode == "cli"
+        else "/dataset_files"
+    )
 
     # Generation loop for generation tasks
     if not environment_name:
@@ -245,7 +250,7 @@ def main(
                     batch_size,
                     save_every_n_batches,
                     output_dataset,
-                    dataset_root_path,
+                    out_dir,
                 )
             )
 
@@ -256,7 +261,7 @@ def main(
                     task.output_dataset_name,
                     all_new_dataset_rows,
                     task.output_dataset_format,
-                    dataset_root_path,
+                    out_dir,
                 )
     else:
         assert environment, "Environment must be passed"
@@ -266,7 +271,7 @@ def main(
                 envs,
                 n_epochs,
                 save_every_n_batches,
-                dataset_root_path=dataset_root_path,
+                run_mode,
             )
         )
 

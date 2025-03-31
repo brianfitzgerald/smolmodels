@@ -34,7 +34,13 @@ class BaseTask(ABC):
 
     def __init__(self, run_mode: RunMode = "cli") -> None:
         self.run_mode = run_mode
-        self.dataset_root_path = ".." if run_mode == "notebook" else "."
+        self.dataset_root_path = (
+            "../dataset_files"
+            if run_mode == "notebook"
+            else "./dataset_files"
+            if run_mode == "cli"
+            else "/dataset_files"
+        )
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """

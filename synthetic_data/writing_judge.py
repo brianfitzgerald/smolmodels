@@ -1,6 +1,7 @@
 import os
 from synthetic_data.generation import Conversation
 import re
+from synthetic_data.tasks import RunMode
 
 
 def parse_judge_scores_creative(judge_model_response: str) -> dict[str, float]:
@@ -27,16 +28,23 @@ def parse_judge_scores_creative(judge_model_response: str) -> dict[str, float]:
 
 
 class CreativeWritingBench:
-    def __init__(self, dataset_root_path: str) -> None:
+    def __init__(self, run_mode: RunMode) -> None:
         super().__init__()
+        template_path = (
+            "/prompt_templates/"
+            if run_mode == "modal"
+            else "../prompt_templates/"
+            if run_mode == "notebook"
+            else "./prompt_templates/"
+        )
         with open(
-            os.path.join(dataset_root_path, "negative_criteria.txt"),
+            os.path.join(template_path, "negative_criteria.txt"),
             "r",
             encoding="utf-8",
         ) as f:
             self.negative_criteria = [line.strip() for line in f if line.strip()]
         with open(
-            os.path.join(dataset_root_path, "creative_writing_criteria.txt"),
+            os.path.join(template_path, "creative_writing_criteria.txt"),
             "r",
             encoding="utf-8",
         ) as f:
@@ -44,7 +52,7 @@ class CreativeWritingBench:
                 line.strip() for line in f if line.strip()
             ]
         with open(
-            os.path.join(dataset_root_path, "creative_writing_judging_prompt.txt"),
+            os.path.join(template_path, "creative_writing_judging_prompt.txt"),
             "r",
             encoding="utf-8",
         ) as f:

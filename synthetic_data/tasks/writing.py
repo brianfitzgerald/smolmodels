@@ -18,16 +18,16 @@ from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.gutenberg_parser import DIALOGUE_REGEX, super_cleaner
+from synthetic_data.gutenberg_parser import super_cleaner
 from synthetic_data.prompts import (
     format_classify_fiction_prompt,
     format_writing_backtranslation_prompt,
-    format_gutenberg_followup_prompt,
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat
+from synthetic_data.tasks import RunMode
 from synthetic_data.writing_judge import (
     CreativeWritingBench,
 )
@@ -446,7 +446,8 @@ class BacktranslateBestOfN(BaseTask):
     seed_data_location = "gutenberg_backtranslate_from_txt"
     output_dataset_format = DatasetFormat.PARQUET
 
-    def __init__(self) -> None:
+    def __init__(self, run_mode: RunMode = "cli") -> None:
+        super().__init__(run_mode)
         self.bench = None
         self.generators = [
             get_generation_wrapper("gemini-2.0-flash"),
@@ -459,7 +460,7 @@ class BacktranslateBestOfN(BaseTask):
         self, generation_wrapper: GenerationWrapper, input_rows: List[Dict]
     ) -> list[dict]:
         if self.bench is None:
-            self.bench = CreativeWritingBench(self.dataset_root_path)
+            self.bench = CreativeWritingBench(self.run_mode)
         # Launch generation and scoring for each generator concurrently
         results = await asyncio.gather(
             *[
