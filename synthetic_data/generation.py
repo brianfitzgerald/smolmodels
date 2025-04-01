@@ -53,7 +53,9 @@ def save_output_dataset(
             raise ValueError(
                 f"dataset_output_dir is required for {DatasetFormat.PARQUET} format"
             )
-        concatted_dataset.to_parquet(os.path.join(dataset_output_dir, filename))
+        dataset_path = os.path.join(dataset_output_dir, filename)
+        logger.info(f"Saving to {dataset_path}")
+        concatted_dataset.to_parquet(dataset_path)
     else:
         raise ValueError(f"Unsupported output format: {format}")
 

@@ -71,7 +71,7 @@ async def collect_preprocessed_rows(
 ) -> AsyncGenerator[list[dict], None]:
     input_buffer = []
     current_position = 0
-    results = []
+
     while current_position < len(input_dataset):
         # Fill input buffer
         while len(input_buffer) < max_input_buffer and current_position < len(
@@ -83,7 +83,6 @@ async def collect_preprocessed_rows(
         if not input_buffer:
             break
 
-        logger.info(f"Processing buffer of {len(input_buffer)} rows")
         # Process current buffer
         results = []
         for row in input_buffer:
@@ -94,12 +93,15 @@ async def collect_preprocessed_rows(
 
         # Yield batches of preprocessed rows
         while len(results) >= batch_size:
-            yield results[:batch_size]
+            batch_to_yield = results[:batch_size]
+            yield batch_to_yield
             results = results[batch_size:]
 
-    # Yield any remaining rows
-    if results:
-        yield results
+        # Yield any remaining rows from this buffer iteration
+        if results:
+            yield results
+
+    logger.info("Finished collecting preprocessed rows.")
 
 
 async def process_dataset(
@@ -139,7 +141,7 @@ def main(
     task_name: TaskName | None = None,
     environment_name: str | None = None,
     save_every_n_batches: int = 5,
-    batch_size: int = 8,
+    batch_size: int = 16,
     restart: bool = False,
     resume_input_position: bool = True,
     model: RemoteModel = "gemini-2.0-flash",
@@ -220,6 +222,7 @@ def main(
         f"Loading input dataset: {task.seed_data_location}, format: {task.seed_data_format.value}"
     )
     input_dataset: Dataset = task.load_dataset()
+    logger.info(f"Input dataset length: {len(input_dataset)}")
 
     # Resume from position
 
@@ -236,7 +239,7 @@ def main(
         if run_mode == "notebook"
         else "./dataset_files"
         if run_mode == "cli"
-        else "/dataset_files"
+        else "/model-weights/dataset_files"
     )
 
     # Generation loop for generation tasks

@@ -406,9 +406,6 @@ async def _generate_and_score(
         f"Generating {len(input_convs)} completions with {generator.args.model_id}"
     )
     completions = await generator.generate(input_convs)
-    logger.info(
-        f"Generated {len(completions)} completions with {generator.args.model_id}"
-    )
     judge_convs: list[Conversation] = [
         [
             {
@@ -422,6 +419,11 @@ async def _generate_and_score(
         f"Judging {len(judge_convs)} completions with {judge_generator.args.model_id}"
     )
     judge_completions = await judge_generator.generate(judge_convs)
+
+    if any([x is None for x in judge_completions]):
+        logger.warning("Some judge completions were None")
+        return []
+
     scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
     return [
         {
@@ -440,7 +442,7 @@ class BacktranslateBestOfN(BaseTask):
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """
 
-    output_dataset_name = "gutenberg_score_annotated"
+    output_dataset_name = "backtranslate_best_of_n"
     dataset_columns = ["completion", "instruction", "scores", "model_id"]
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "gutenberg_backtranslate_from_txt"
@@ -471,6 +473,6 @@ class BacktranslateBestOfN(BaseTask):
             ]
         )
 
-        # Flatten the list of lists into a single list of results
         all_results = [item for sublist in results for item in sublist]
+        all_results = [x for x in all_results if x is not None]
         return all_results

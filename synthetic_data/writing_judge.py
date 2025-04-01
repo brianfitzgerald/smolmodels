@@ -1,30 +1,6 @@
 import os
-from synthetic_data.generation import Conversation
 import re
 from synthetic_data.tasks import RunMode
-
-
-def parse_judge_scores_creative(judge_model_response: str) -> dict[str, float]:
-    scores = {}
-
-    # Parse scores using multiple regex patterns
-    # Pattern 1: Metric: Score or Metric: Score X
-    score_pattern1 = r"(.*?):\s*(?:Score\s+)?(-?\d+(?:\.\d+)?)"
-    # Pattern 2: Metric: [Score]
-    score_pattern2 = r"(.*?):\s*\[(-?\d+(?:\.\d+)?)\]"
-
-    # Combine both patterns
-    matches1 = re.findall(score_pattern1, judge_model_response)
-    matches2 = re.findall(score_pattern2, judge_model_response)
-
-    # Process matches from both patterns
-    for matches in [matches1, matches2]:
-        for match in matches:
-            metric_name = match[0].strip()
-            score = float(match[1])
-            scores[metric_name] = score
-
-    return scores
 
 
 class CreativeWritingBench:
@@ -72,5 +48,18 @@ class CreativeWritingBench:
         )
 
     def parse_judge_scores(self, judge_model_response: str) -> dict[str, float]:
-        scores = parse_judge_scores_creative(judge_model_response)
+        scores = {}
+
+        score_pattern1 = r"(.*?):\s*(?:Score\s+)?(-?\d+(?:\.\d+)?)"
+        score_pattern2 = r"(.*?):\s*\[(-?\d+(?:\.\d+)?)\]"
+
+        matches1 = re.findall(score_pattern1, judge_model_response)
+        matches2 = re.findall(score_pattern2, judge_model_response)
+
+        for matches in [matches1, matches2]:
+            for match in matches:
+                metric_name = match[0].strip()
+                score = float(match[1])
+                scores[metric_name] = score
+
         return scores
