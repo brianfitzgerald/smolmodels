@@ -4,12 +4,10 @@ import shutil
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 import lightning.pytorch as pl
 import torch
-from torchmetrics.text.bleu import BLEUScore
-from torchmetrics.text.rouge import ROUGEScore
 
 
 PROMPT_EXPANSION_TASK_PREFIX = "Expand the following prompt to add more detail: "
@@ -29,6 +27,7 @@ DataModuleChoice = Literal[
     "gsm8k_reasoning",
     "gsm8k",
     "connections",
+    "writing_grpo",
 ]
 TuningModeChoice = Literal["dpo", "sft", "grpo", "reward"]
 
@@ -80,19 +79,6 @@ class SmModel(pl.LightningModule):
         super().__init__()
         self.params = hparams
         self.model_choice = ModelChoice.CAUSAL_LM
-
-
-def compute_metrics(inputs: List[str], generated: List[str]):
-    rouge = ROUGEScore()
-    bleu = BLEUScore()
-
-    rouge_scores = rouge(inputs, generated)
-    bleu_score = bleu(inputs, generated)
-
-    return {
-        **rouge_scores,
-        "bleu": bleu_score.item(),
-    }
 
 
 def ensure_directory(directory: str, clear: bool = True):

@@ -102,7 +102,7 @@
             "program": "util_scripts.py",
             "args": [
                 "download_dataset",
-                "gutenberg_backtranslate_from_txt_conversations"
+                "backtranslate_best_of_n"
             ]
         }
     ]

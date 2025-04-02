@@ -45,12 +45,3 @@ def generation():
         f"Dataset root path: {DATASET_VOLUME_PATH} contents: {os.listdir(DATASET_VOLUME_PATH)}"
     )
     generate_main(task_name="backtranslate_best_of_n", run_mode="modal")
-
-    # generate_main(
-    #     environment_name="twenty_questions",
-    #     dataset_root_path=dataset_root_path,
-    #     model="o3-mini",
-    #     n_epochs=100,
-    #     batch_size=32,
-    #     save_every_n_batches=1,
-    # )

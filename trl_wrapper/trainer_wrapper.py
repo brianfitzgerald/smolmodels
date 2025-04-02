@@ -24,6 +24,7 @@ from dataset.conversation import ConversationDPODataModule, ConversationDataModu
 from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
+    WritingGRPODataModule,
 )
 from model.utils import (
     DataModuleChoice,
@@ -203,6 +204,24 @@ GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     num_generations=4,
 )
 
+GRPO_WRITING_CONFIG = WrapperConfig(
+    model_id_or_path=QWEN_1_5_B,
+    model_family="qwen",
+    wandb_project_name="qwen-writing-grpo",
+    train_batch_size=4,
+    gradient_accumulation_steps=8,
+    data_module_choice="writing_grpo",
+    max_prompt_length=256,
+    max_completion_length=512,
+    max_grad_norm=0.1,
+    n_epochs=50,
+    eval_batch_size=1,
+    learning_rate=1e-6,
+    lr_scheduler=SchedulerType.COSINE,
+    tuning_mode="grpo",
+    num_generations=4,
+)
+
 
 REWARD_MODEL_CONFIG = WrapperConfig(
     model_id_or_path=SMOL_LM_135M,
@@ -246,6 +265,7 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "gsm8k": GSM8KDataModule,
     "conversation_dpo": ConversationDPODataModule,
     "connections": ConnectionsDataModule,
+    "writing_grpo": WritingGRPODataModule,
 }
 
 

@@ -21,6 +21,7 @@ from model.utils import (
     TuningModeChoice,
     ensure_directory,
 )
+from synthetic_data.tasks import RunMode
 from synthetic_data.utils import EvalDataModeChoice
 
 MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
@@ -38,8 +39,6 @@ QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 QWEN_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
 
 DataCollatorChoice = Literal["basic", "chat"]
-
-
 ModelFamily = Literal["qwen", "mistral", "other"]
 
 
@@ -105,6 +104,7 @@ class WrapperConfig:
 @dataclass
 class DatasetConfig(WrapperConfig):
     chat_template_path: str | None = None
+    run_mode: RunMode = "cli"
 
 
 def class_name_to_underscore(cls):

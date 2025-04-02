@@ -4,7 +4,7 @@ import os
 import modal
 
 APP_NAME = "smolmodels"
-MODELS_FOLDER = "/models"
+MODELS_FOLDER = "/model-weights"
 
 cuda_version = "12.4.0"  # should be no greater than host CUDA version
 flavor = "devel"  #  includes full CUDA toolkit
