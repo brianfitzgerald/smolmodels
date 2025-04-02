@@ -111,6 +111,20 @@ TXT_BT_CONFIG = WrapperConfig(
     run_suffix="txt-bt",
 )
 
+WRITING_DPO_CONFIG = WrapperConfig(
+    model_id_or_path=LLAMA_3_2_3B,
+    wandb_project_name="gutenberg",
+    train_batch_size=8,
+    gradient_accumulation_steps=4,
+    data_module_choice="writing_dpo",
+    tuning_mode="dpo",
+    learning_rate=1e-6,
+    n_epochs=2,
+    eval_steps=500,
+    run_suffix="txt-bt-dpo",
+)
+
+
 GUTENBERG_DPO_CONFIG = WrapperConfig(
     model_id_or_path=LLAMA_3_2_3B,
     wandb_project_name="gutenberg",
@@ -253,6 +267,8 @@ CONFIGS = {
     "grpo_math": GRPO_MATH_CONFIG,
     "grpo_connections": GRPO_CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
+    "grpo_writing": GRPO_WRITING_CONFIG,
+    "writing_dpo": WRITING_DPO_CONFIG,
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
@@ -584,11 +600,11 @@ class TrainerWrapper:
             self.trainer = CustomDPOTrainer(
                 self.model,
                 ref_model=None,  # set to none since we use peft
-                peft_config=peft_config,
+                peft_config=peft_config,  # type: ignore
                 args=args,
                 train_dataset=self.data_module.train_dataset,
                 eval_dataset=self.data_module.val_dataset,
-                tokenizer=self.tokenizer,  # type: ignore
+                processing_class=self.tokenizer,
             )
             self.trainer.set_custom_args(
                 self.config.max_eval_sample_length,
