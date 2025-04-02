@@ -317,36 +317,6 @@ class ConnectionsDataModule(SmDataset):
         ]
 
 
-def writing_score_reward_func(prompts, completions, **kwargs) -> list[float]:
-    model_generations = _generations(completions)
-    scores = kwargs["scores"]
-    rewards = [0.5 if s == 1 else 0.0 for s in scores]
-    logger.info(f"Writing score rewards: {rewards}")
-    return rewards
-
-
-def _writing_map(example: dict[str, str]) -> dict:
-    return {
-        "prompt": [
-            {"role": "user", "content": example["instruction"]},
-        ],
-        "answer": example["completion"],
-        "scores": example["scores"],
-    }
-
-
-class WritingGRPODataModule(SmDataset):
-    def setup(self, stage: Optional[str] = None):
-        dataset = Dataset.from_parquet(
-            "../dataset_files/backtranslate_best_of_n.parquet"
-        )
-        dataset = dataset.map(_writing_map)  # type: ignore
-        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
-
-    def reward_functions(self) -> list[RewardFunc]:
-        return [writing_score_reward_func]
-
-
 GSM8K_SYSTEM_PROMPT = """
 You are an expert reasoning model.
 Respond in the following format:

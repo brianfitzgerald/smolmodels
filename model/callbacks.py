@@ -222,5 +222,5 @@ class GradientNormLogger(pl.Callback):
     Logs the gradient norm.
     """
 
-    def on_after_backward(self, trainer, model):
+    def on_after_backward(self, trainer, pl_module):
         model.log("grad_norm_total", gradient_norm(model))

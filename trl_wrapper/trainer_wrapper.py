@@ -24,8 +24,8 @@ from dataset.conversation import ConversationDPODataModule, ConversationDataModu
 from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
-    WritingGRPODataModule,
 )
+from dataset.writing import WritingGRPODataModule, WritingDPODataModule
 from model.utils import (
     DataModuleChoice,
     ensure_directory,
@@ -266,6 +266,7 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "conversation_dpo": ConversationDPODataModule,
     "connections": ConnectionsDataModule,
     "writing_grpo": WritingGRPODataModule,
+    "writing_dpo": WritingDPODataModule,
 }
 
 
