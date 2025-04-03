@@ -18,6 +18,7 @@ from transformers.trainer_utils import SchedulerType
 from trl.trainer.reward_trainer import RewardTrainer
 from trl.trainer.reward_config import RewardConfig
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM  # type: ignore
+from transformers.training_args import OptimizerNames
 
 from dataset.code import CodeContestsDataModule
 from dataset.conversation import ConversationDPODataModule, ConversationDataModule
@@ -201,10 +202,11 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 GRPO_CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_1_5_B,
-    model_family="qwen",
+    model_id_or_path=MINISTRAL_8B,
+    model_family="mistral",
     wandb_project_name="qwen-connections-grpo",
-    train_batch_size=4,
+    num_generations=4,
+    train_batch_size=8,
     gradient_accumulation_steps=8,
     data_module_choice="connections",
     max_prompt_length=256,
@@ -212,10 +214,11 @@ GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     max_grad_norm=0.1,
     n_epochs=50,
     eval_batch_size=1,
-    learning_rate=1e-6,
-    lr_scheduler=SchedulerType.COSINE,
+    learning_rate=3e-4,
+    gradient_checkpointing=True,
+    lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
+    optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
-    num_generations=4,
 )
 
 GRPO_WRITING_CONFIG = WrapperConfig(
@@ -265,7 +268,7 @@ CONFIGS = {
     "gutenberg": GUTENBERG_CONFIG,
     "gutenberg_dpo": GUTENBERG_DPO_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
-    "grpo_connections": GRPO_CONNECTIONS_CONFIG,
+    "connections": GRPO_CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
     "grpo_writing": GRPO_WRITING_CONFIG,
     "writing_dpo": WRITING_DPO_CONFIG,
@@ -515,6 +518,7 @@ class TrainerWrapper:
                 num_train_epochs=self.config.n_epochs,
                 save_steps=self.config.save_steps,
                 max_grad_norm=self.config.max_grad_norm,
+                gradient_checkpointing=self.config.gradient_checkpointing,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 use_vllm=use_vllm,
                 vllm_gpu_memory_utilization=0.3,

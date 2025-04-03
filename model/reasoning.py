@@ -195,9 +195,10 @@ def connections_soft_group_reward_func(prompts, completions, **kwargs) -> list[f
     """Reward the num correct in each group."""
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    logger.info(f"Connections func rewards: {groups}")
     scores = [score_connections_soft(kwargs["answer"], g) for g in groups]
-    logger.info(f"Connections scores: {scores}")
+    logger.info(f"Connections group soft scores: {scores}")
+    scores = [s * 2 for s in scores]  # Scale the score to be between 0 and 5
+    scores = [max(0.0, min(5.0, s)) for s in scores]  # Clamp to [0, 5]
     return scores
 
 
@@ -209,9 +210,10 @@ def connections_hard_group_reward_func(prompts, completions, **kwargs) -> list[f
         print("-" * 80)
         print(g)
     generation_groups = [parse_groups(r) for r in model_generations]
-    logger.info(f"Connections func rewards: {generation_groups}")
     scores = [score_connections(kwargs["answer"], g) for g in generation_groups]
-    logger.info(f"Connections scores: {scores}")
+    scores = [s * 5 for s in scores]  # Scale the score to be between 0 and 5
+    scores = [max(0.0, min(5.0, s)) for s in scores]  # Clamp to [0, 5]
+    logger.info(f"Connections group hard scores: {scores}")
     return scores
 
 
@@ -234,7 +236,7 @@ def n_groups_reward_func(prompts, completions, **kwargs) -> list[float]:
 
 CONNECTIONS_PROMPT = """
 You are an expert puzzle solving model.
-Find groups of words that are related to each other. Each group is four words long.
+Find groups of words that are related to each other. Each group is four words long. There are exactly four groups in total.
 You may only use each word in one group.
 Respond in the following format:
 <reasoning>
