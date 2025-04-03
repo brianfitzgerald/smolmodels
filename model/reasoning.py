@@ -7,6 +7,7 @@ import pandas as pd
 from gyms.twenty_questions.env import GUESSER_PROMPT
 from trl_wrapper.wrapper_config import SmDataset
 from trl.trainer.grpo_trainer import RewardFunc
+import itertools
 
 # Based on:
 # https://colab.research.google.com/drive/1bfhs1FMLW3FGa8ydvkOZyBNxLYOu0Hev?usp=sharing#scrollTo=ybtxR89X1YJq
@@ -279,7 +280,7 @@ def _connections_map(example: dict) -> dict:
     words_formatted = ", ".join(words)
     answer = []
     answer_groups = []
-    for group in example["solution"]["groups"]:
+    for group in example["groups"]:
         answer.append(", ".join(group["words"]))
         answer_groups.append(group["words"])
     answer_formatted = "\n".join([f"<group>{a}</group>" for a in answer])
@@ -292,19 +293,33 @@ def _connections_map(example: dict) -> dict:
             {"role": "user", "content": words_formatted},
         ],
         "answer": f"<answer>{answer_formatted}</answer>",
-        "answer_formatted": answer_groups,
+        "answer_groups": answer_groups,
     }
 
 
 class ConnectionsDataModule(SmDataset):
     def setup(self, stage: Optional[str] = None):
-        dataset = Dataset.from_pandas(
-            pd.read_json("../dataset_files/connections_prompts.jsonl", lines=True)
+        prompts_pd = pd.read_json(
+            "../dataset_files/connections_prompts.jsonl", lines=True
         )
-        dataset = dataset.map(_connections_map)  # type: ignore
-        dataset = dataset.train_test_split(test_size=0.1)  # type: ignore
-        self.train_dataset = dataset["train"]
-        self.val_dataset = dataset["test"]
+        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")
+
+        groups = [
+            {
+                "groups": (
+                    g := df_groups.sample(4, replace=False).reset_index(drop=True)
+                ).to_dict(orient="records"),
+                "words": list(itertools.chain.from_iterable(g["words"].dropna())),
+            }
+            for _ in range(100000)
+        ]
+
+        groups_pd = pd.DataFrame(groups)
+        groups_dataset = Dataset.from_pandas(groups_pd)
+        groups_dataset = groups_dataset.map(_connections_map)
+        groups_dataset = groups_dataset.train_test_split(test_size=0.1)  # type: ignore
+        self.train_dataset = groups_dataset["train"]
+        self.val_dataset = groups_dataset["test"]
 
     def reward_functions(self) -> list[RewardFunc]:
         return [
