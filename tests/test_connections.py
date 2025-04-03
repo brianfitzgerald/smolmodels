@@ -3,6 +3,8 @@ from model.reasoning import (
     connections_soft_group_reward_func,
     connections_hard_group_reward_func,
     score_connections_soft,
+    group_size_reward_func,
+    n_groups_reward_func,
 )
 
 
@@ -127,3 +129,68 @@ def test_overlapping_submissions():
     # For each solution group, only 'a' is matched, so each group contributes 0.25.
     # Total score = 0.25 + 0.25 = 0.5.
     assert score_connections_soft(solution_groups, submitted_groups) == 0.5
+
+
+def test_connections_soft_group_reward_func():
+    # Test the soft reward function.
+    prompts = []  # Not used by the function.
+    # Provide completions that will result in groups:
+    # "a,b,c,d" -> splits into 4 items -> default dummy returns 1.0.
+    # "high" -> splits into ["high"] -> dummy returns 3.0.
+    # "low" -> splits into ["low"] -> dummy returns -1.0.
+    completions = ["a,b,c,d", "high", "low"]
+    kwargs = {"answer": "dummy"}
+
+    result = connections_soft_group_reward_func(prompts, completions, **kwargs)
+    # Expected computation:
+    # For "a,b,c,d": 1.0 * 2 = 2.0.
+    # For "high": 3.0 * 2 = 6.0, clamped to 5.0.
+    # For "low": (-1.0) * 2 = -2.0, clamped to 0.0.
+    expected = [2.0, 5.0, 0.0]
+    assert result == expected
+
+
+def test_connections_hard_group_reward_func(capsys):
+    # Test the hard reward function.
+    prompts = []
+    # Using similar completions as before.
+    completions = ["a,b,c,d", "high", "low"]
+    kwargs = {"answer": "dummy"}
+
+    result = connections_hard_group_reward_func(prompts, completions, **kwargs)
+    # Expected:
+    # "a,b,c,d" -> splits into 4 items -> default dummy returns 0.2 -> 0.2 * 5 = 1.0.
+    # "high" -> ["high"] -> returns 1.0 -> 1.0 * 5 = 5.0.
+    # "low" -> ["low"] -> returns -0.5 -> -0.5 * 5 = -2.5, clamped to 0.0.
+    expected = [1.0, 5.0, 0.0]
+    assert result == expected
+
+
+def test_group_size_reward_func():
+    # Test the group size reward function.
+    prompts = []
+    # Provide completions that yield groups of different sizes.
+    # "a,b,c,d" splits to 4 items (reward 0.5).
+    # "one,two,three" splits to 3 items (reward 0.0).
+    # "x,y,z,w,v" splits to 5 items (reward 0.0).
+    completions = ["a,b,c,d", "one,two,three", "x,y,z,w,v"]
+    kwargs = {}
+
+    result = group_size_reward_func(prompts, completions, **kwargs)
+    expected = [0.5, 0.0, 0.0]
+    assert result == expected
+
+
+def test_n_groups_reward_func():
+    # Test the n groups reward function.
+    prompts = []
+    # Provide completions:
+    # "a,b,c,d" -> 4 items -> reward 0.5.
+    # "1,2,3" -> 3 items -> reward 0.0.
+    # "x,y,z,w" -> 4 items -> reward 0.5.
+    completions = ["a,b,c,d", "1,2,3", "x,y,z,w"]
+    kwargs = {}
+
+    result = n_groups_reward_func(prompts, completions, **kwargs)
+    expected = [0.5, 0.0, 0.5]
+    assert result == expected

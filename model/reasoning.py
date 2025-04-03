@@ -304,7 +304,7 @@ class ConnectionsDataModule(SmDataset):
         prompts_pd = pd.read_json(
             "../dataset_files/connections_prompts.jsonl", lines=True
         )
-        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")
+        df_groups = pd.json_normalize(prompts_pd["solution"], "groups")  # type: ignore
 
         groups = [
             {
