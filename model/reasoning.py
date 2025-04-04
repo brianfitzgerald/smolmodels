@@ -158,8 +158,7 @@ def score_connections_hard(solution_groups, submitted_groups):
                 solved.add(index)
                 break
 
-    hard_score = hard_score / len(solution_groups)
-    return float(hard_score) * 4
+    return float(hard_score)
 
 
 def score_connections_soft(solution_groups, submitted_groups):
@@ -176,8 +175,6 @@ def score_connections_soft(solution_groups, submitted_groups):
             best_match_count = max(best_match_count, match_count)
         total_score += best_match_count / B
 
-    total_score /= B
-    total_score = math.pow(total_score, 3) * 2
     return float(total_score)
 
 
@@ -214,10 +211,10 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     rewards = []
     for sample in sizes:
         sample_reward = 0.0
-        for group in sample:
-            if group == 4:
+        for group_len in sample:
+            if group_len == 4:
                 sample_reward += 1.0
-        rewards.append(sample_reward / len(sample))
+        rewards.append(sample_reward / 4)
     logger.info(f"Group size rewards: {rewards}")
     return rewards
 

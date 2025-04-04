@@ -74,6 +74,8 @@ class WrapperConfig:
     max_eval_sample_length: int = 1024
     max_completion_length: int = 200
 
+    warmup_steps: int = 1000
+
     # Training Parameters
     train_batch_size: int = 4
     eval_batch_size: int = 2

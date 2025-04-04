@@ -201,7 +201,7 @@ GRPO_MATH_CONFIG = WrapperConfig(
     num_generations=2,
 )
 
-GRPO_CONNECTIONS_CONFIG = WrapperConfig(
+CONNECTIONS_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,
     model_family="mistral",
     wandb_project_name="qwen-connections-grpo",
@@ -214,7 +214,7 @@ GRPO_CONNECTIONS_CONFIG = WrapperConfig(
     max_grad_norm=0.1,
     n_epochs=50,
     eval_batch_size=1,
-    learning_rate=1e-5,
+    learning_rate=1e-6,
     gradient_checkpointing=True,
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
     optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
@@ -268,7 +268,7 @@ CONFIGS = {
     "gutenberg": GUTENBERG_CONFIG,
     "gutenberg_dpo": GUTENBERG_DPO_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
-    "connections": GRPO_CONNECTIONS_CONFIG,
+    "connections": CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
     "grpo_writing": GRPO_WRITING_CONFIG,
     "writing_dpo": WRITING_DPO_CONFIG,
@@ -505,7 +505,7 @@ class TrainerWrapper:
                 adam_beta1=0.9,
                 adam_beta2=0.99,
                 weight_decay=0.1,
-                warmup_steps=100,
+                warmup_steps=self.config.warmup_steps,
                 lr_scheduler_type=self.config.lr_scheduler.value,
                 logging_steps=1,
                 bf16=True,
@@ -523,7 +523,7 @@ class TrainerWrapper:
                 use_vllm=use_vllm,
                 vllm_gpu_memory_utilization=0.3,
                 vllm_device=device,
-                temperature=0.6,
+                temperature=0.4,
                 report_to="wandb" if self.use_wandb else "none",
             )
             peft_config = LoraConfig(
