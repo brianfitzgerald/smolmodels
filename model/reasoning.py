@@ -4,7 +4,6 @@ from transformers.trainer_callback import TrainerCallback
 import re
 from loguru import logger
 import pandas as pd
-from gyms.twenty_questions.env import GUESSER_PROMPT
 from trl_wrapper.wrapper_config import SmDataset
 from trl.trainer.grpo_trainer import RewardFunc
 import itertools
@@ -41,24 +40,22 @@ def int_reward_func(prompts, completions, **kwargs) -> list[float]:
 
 def count_xml(text) -> float:
     count = 0.0
-    if text.count("<reasoning>\n") == 1:
+    if text.count("<reasoning>") == 1:
         count += 0.125
-    if text.count("\n</reasoning>\n") == 1:
+    if text.count("</reasoning>") == 1:
         count += 0.125
-    if text.count("\n<answer>\n") == 1:
+    if text.count("<answer>") == 1:
         count += 0.125
-        count -= len(text.split("\n</answer>\n")[-1]) * 0.001
-    if text.count("\n</answer>") == 1:
+        count -= len(text.split("<answer>")[-1]) * 0.001
+    if text.count("</answer>") == 1:
         count += 0.125
-        count -= (len(text.split("\n</answer>")[-1]) - 1) * 0.001
+        count -= (len(text.split("<answer>")[-1]) - 1) * 0.001
     return count
 
 
 def xmlcount_reward_func(prompts, completions, **kwargs) -> list[float]:
     contents = [completion[0]["content"] for completion in completions]
     rewards = [count_xml(c) for c in contents]
-    # clamp values to [0, 1]
-    rewards = [max(0.0, min(1.0, r)) for r in rewards]
     logger.info(f"XML count rewards: {rewards}")
     return rewards
 
@@ -101,7 +98,7 @@ def soft_format_reward_func(prompts, completions, **kwargs) -> list[float]:
 
 def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
     """Reward function that checks if the completion has the right format, with strict spacing."""
-    pattern = r"^<reasoning>\n.*?\n</reasoning>\n<answer>\n.*?\n</answer>\n$"
+    pattern = r"^<reasoning>.*?</reasoning>\s*<answer>.*?</answer>\s*$"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
     rewards = [0.5 if match else 0.0 for match in matches]
@@ -119,7 +116,8 @@ class GSM8KDataModule(SmDataset):
     def setup(self, stage: Optional[str] = None):
         self.init_dataset()
 
-    def reward_functions(self) -> list[RewardFunc]:
+    @classmethod
+    def reward_functions(cls) -> list[RewardFunc]:
         return [
             xmlcount_reward_func,
             soft_format_reward_func,
@@ -127,15 +125,6 @@ class GSM8KDataModule(SmDataset):
             int_reward_func,
             math_correctness_reward_func,
         ]
-
-
-def _twenty_q_map(example: dict) -> dict:
-    return {
-        "prompt": [
-            {"role": "system", "content": GUESSER_PROMPT},
-        ],
-        "answer": example["metadata"]["word"][0],
-    }
 
 
 def parse_groups(input_string) -> list[list[str]]:
@@ -215,8 +204,14 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
 def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    sizes = [len(g) for g in groups]
-    rewards = [0.5 if s == 4 else 0.0 for s in sizes]
+    sizes = [[len(s) for s in s] for s in groups]
+    rewards = []
+    for sample in sizes:
+        sample_reward = 0.0
+        for group in sample:
+            if group == 4:
+                sample_reward += 1.0
+        rewards.append(sample_reward)
     logger.info(f"Group size rewards: {rewards}")
     return rewards
 
@@ -295,7 +290,7 @@ def _connections_map(example: dict) -> dict:
 
 
 class ConnectionsDataModule(SmDataset):
-    def setup(self, stage: Optional[str] = None):
+    def init_dataset(self):
         prompts_pd = pd.read_json(
             "../dataset_files/connections_prompts.jsonl", lines=True
         )
@@ -318,7 +313,8 @@ class ConnectionsDataModule(SmDataset):
         self.train_dataset = groups_dataset["train"]
         self.val_dataset = groups_dataset["test"]
 
-    def reward_functions(self) -> list[RewardFunc]:
+    @classmethod
+    def reward_functions(cls) -> list[RewardFunc]:
         return [
             xmlcount_reward_func,
             strict_format_reward_func,

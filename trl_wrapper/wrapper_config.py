@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import os
 import re
 from dataclasses import dataclass
@@ -264,5 +265,6 @@ class SmDataset(pl.LightningDataModule):
                 rich_text.append(decoded, style="bright_green")
         return rich_text
 
-    def reward_functions(self) -> list[RewardFunc]:
+    @classmethod
+    def reward_functions(cls) -> list[RewardFunc]:
         return []

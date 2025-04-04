@@ -1,4 +1,9 @@
-from model.reasoning import parse_groups, hard_group_reward, soft_group_reward
+from model.reasoning import (
+    parse_groups,
+    hard_group_reward,
+    soft_group_reward,
+    ConnectionsDataModule,
+)
 
 
 FIRST_SAMPLE = {
@@ -86,3 +91,20 @@ def test_connections_reward_func_correct():
         FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
     )
     assert soft_score == [4.0]
+
+
+def test_connections_reward_func_partially_correct():
+    completion = [
+        [
+            {
+                "content": "<reasoning>The first group are all fruits.</reasoning>\n<answer><group>crush, rout, shellac, trash</group>\n<group>bottom, buns, seat</group>\n<group>blue, fin, gray</group></answer>"
+            }
+        ]
+    ]
+    total_score = 0
+    for reward_func in ConnectionsDataModule.reward_functions():
+        score = reward_func(
+            FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
+        )
+        total_score += score[0]
+    assert total_score == 3.769
