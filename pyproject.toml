@@ -22,7 +22,6 @@ dependencies = [
     "loguru",
     "webdataset",
     "wheel",
-    "pytest",
     "datacommons",
     "datacommons-pandas>=0.0.3",
     "ipykernel>=6.29.5",
@@ -53,6 +52,9 @@ dependencies = [
     "kagglehub>=0.3.7",
     "nltk>=3.9.1",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
 
 [dependency-groups]
 torch = [

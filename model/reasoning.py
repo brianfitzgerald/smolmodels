@@ -151,7 +151,8 @@ def parse_groups(input_string) -> list[list[str]]:
     return groups
 
 
-def score_connections(solution_groups, submitted_groups):
+def score_connections_hard(solution_groups, submitted_groups):
+    """Return the number of correct groups."""
     hard_score = 0
     correct_group_indices = []  # Track indices of correctly solved solution groups.
 
@@ -170,39 +171,35 @@ def score_connections(solution_groups, submitted_groups):
 
 
 def score_connections_soft(solution_groups, submitted_groups):
+    """Return the best match count for each solution group."""
     total_score = 0
-    # Convert each solution group to a set for easier comparisons.
     solution_sets = [set(group) for group in solution_groups]
 
-    # For each solution group, determine the best (largest) number of correct items found
-    # among all submitted groups.
     for sol_set in solution_sets:
         best_match_count = 0
         for submitted in submitted_groups:
             submitted_set = set(submitted)
             match_count = len(sol_set.intersection(submitted_set))
             best_match_count = max(best_match_count, match_count)
-        total_score += best_match_count * 0.25
+        total_score += best_match_count // 4
 
-    return total_score
+    return float(total_score)
 
 
 def _generations(completions: list[dict]) -> list[str]:
     return [completion[0]["content"] for completion in completions]
 
 
-def connections_soft_group_reward_func(prompts, completions, **kwargs) -> list[float]:
+def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward the num correct in each group."""
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     scores = [score_connections_soft(kwargs["answer"], g) for g in groups]
     logger.info(f"Connections group soft scores: {scores}")
-    scores = [s * 2 for s in scores]  # Scale the score to be between 0 and 5
-    scores = [max(0.0, min(5.0, s)) for s in scores]  # Clamp to [0, 5]
     return scores
 
 
-def connections_hard_group_reward_func(prompts, completions, **kwargs) -> list[float]:
+def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward whether each group is correct as a whole or not."""
     model_generations = _generations(completions)
     print("Generations:")
@@ -210,14 +207,12 @@ def connections_hard_group_reward_func(prompts, completions, **kwargs) -> list[f
         print("-" * 80)
         print(g)
     generation_groups = [parse_groups(r) for r in model_generations]
-    scores = [score_connections(kwargs["answer"], g) for g in generation_groups]
-    scores = [s * 5 for s in scores]  # Scale the score to be between 0 and 5
-    scores = [max(0.0, min(5.0, s)) for s in scores]  # Clamp to [0, 5]
+    scores = [score_connections_hard(kwargs["answer"], g) for g in generation_groups]
     logger.info(f"Connections group hard scores: {scores}")
     return scores
 
 
-def group_size_reward_func(prompts, completions, **kwargs) -> list[float]:
+def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     sizes = [len(g) for g in groups]
@@ -226,7 +221,7 @@ def group_size_reward_func(prompts, completions, **kwargs) -> list[float]:
     return rewards
 
 
-def n_groups_reward_func(prompts, completions, **kwargs) -> list[float]:
+def n_groups_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     rew = [0.5 if len(g) == 4 else 0.0 for g in groups]
@@ -327,10 +322,10 @@ class ConnectionsDataModule(SmDataset):
         return [
             xmlcount_reward_func,
             strict_format_reward_func,
-            connections_soft_group_reward_func,
-            group_size_reward_func,
-            connections_hard_group_reward_func,
-            n_groups_reward_func,
+            soft_group_reward,
+            group_size_reward,
+            hard_group_reward,
+            n_groups_reward,
         ]
 
 
