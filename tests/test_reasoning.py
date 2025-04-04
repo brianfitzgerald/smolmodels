@@ -109,4 +109,4 @@ def test_connections_reward_func_partially_correct():
             answer=FIRST_SAMPLE["answer_groups"],  # type: ignore
         )
         total_score += score[0]
-    assert round(total_score, 2) == 1.86
+    assert round(total_score, 2) == 2.59

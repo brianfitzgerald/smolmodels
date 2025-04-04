@@ -159,7 +159,6 @@ def score_connections_hard(solution_groups, submitted_groups):
                 break
 
     hard_score = hard_score / len(solution_groups)
-    hard_score = math.pow(hard_score, 3)
     return float(hard_score) * 4
 
 
@@ -167,6 +166,7 @@ def score_connections_soft(solution_groups, submitted_groups):
     """Return the best match count for each solution group."""
     total_score = 0
     solution_sets = [set(group) for group in solution_groups]
+    B = len(solution_sets)
 
     for sol_set in solution_sets:
         best_match_count = 0
@@ -174,9 +174,9 @@ def score_connections_soft(solution_groups, submitted_groups):
             submitted_set = set(submitted)
             match_count = len(sol_set.intersection(submitted_set))
             best_match_count = max(best_match_count, match_count)
-        total_score += best_match_count // 4
+        total_score += best_match_count / B
 
-    total_score = total_score / len(solution_groups)
+    total_score /= B
     total_score = math.pow(total_score, 3) * 2
     return float(total_score)
 
@@ -186,11 +186,11 @@ def _generations(completions: list[dict]) -> list[str]:
 
 
 def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
-    """Reward the num correct in each group."""
+    """Reward the number of correct groups."""
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     scores = [score_connections_soft(kwargs["answer"], g) for g in groups]
-    logger.info(f"Connections group soft scores: {scores}")
+    logger.info(f"Soft accuracy scores: {scores}")
     return scores
 
 
@@ -203,7 +203,7 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
         print(g)
     generation_groups = [parse_groups(r) for r in model_generations]
     scores = [score_connections_hard(kwargs["answer"], g) for g in generation_groups]
-    logger.info(f"Connections group hard scores: {scores}")
+    logger.info(f"Hard accuracy scores: {scores}")
     return scores
 
 
@@ -217,7 +217,7 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
         for group in sample:
             if group == 4:
                 sample_reward += 1.0
-        rewards.append(sample_reward)
+        rewards.append(sample_reward / len(sample))
     logger.info(f"Group size rewards: {rewards}")
     return rewards
 
@@ -225,7 +225,7 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
 def n_groups_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    rew = [0.5 if len(g) == 4 else 0.0 for g in groups]
+    rew = [0.25 if len(g) == 4 else 0.0 for g in groups]
     logger.info(f"Number of groups rewards: {rew}")
     return rew
 
