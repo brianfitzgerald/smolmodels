@@ -102,7 +102,7 @@ def strict_format_reward_func(prompts, completions, **kwargs) -> list[float]:
     pattern = r"^<reasoning>.*?</reasoning>\s*<answer>.*?</answer>\s*$"
     responses = [completion[0]["content"] for completion in completions]
     matches = [re.match(pattern, r, flags=re.DOTALL) for r in responses]
-    rewards = [0.5 if match else 0.0 for match in matches]
+    rewards = [0.25 if match else 0.0 for match in matches]
     logger.info(f"Strict format rewards: {rewards}")
     return rewards
 
@@ -204,18 +204,22 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
     return scores
 
 
-def group_size_reward(prompts, completions, **kwargs) -> list[float]:
+def group_size_reward(_prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     sizes = [[len(s) for s in s] for s in groups]
     rewards = []
-    for sample in sizes:
+    for group_lens in sizes:
         sample_reward = 0.0
-        for group_len in sample:
+        for group_len in group_lens:
             if group_len == 4:
                 sample_reward += 1.0
-        rewards.append(sample_reward / 4)
+        # expect 4 groups, so normalize by dividing by 4
+        rewards.append(sample_reward / len(group_lens))
     logger.info(f"Group size rewards: {rewards}")
+
+    # scale to be between 0 and 0.5
+    rewards = [r / 2 if r > 0 else 0.0 for r in rewards]
     return rewards
 
 

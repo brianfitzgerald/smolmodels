@@ -2,6 +2,7 @@ from model.reasoning import (
     parse_groups,
     hard_group_reward,
     soft_group_reward,
+    group_size_reward,
     ConnectionsDataModule,
 )
 
@@ -89,7 +90,7 @@ def test_connections_reward_func_correct():
     soft_score = soft_group_reward(
         FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
     )
-    assert soft_score == [2.0]
+    assert soft_score == [4.0]
     assert hard_score == [4.0]
 
 
@@ -109,4 +110,49 @@ def test_connections_reward_func_partially_correct():
             answer=FIRST_SAMPLE["answer_groups"],  # type: ignore
         )
         total_score += score[0]
-    assert round(total_score, 2) == 2.59
+    assert round(total_score, 2) == 4.19
+
+
+def test_soft_reward_values():
+    completions = [
+        "<answer><group>crush, rout, shellac, trash</group></answer>",
+        "<answer><group>crush, rout, shellac</group></answer>",
+        "<answer><group>rout, shellac</group></answer>",
+        "<answer><group>rout</group></answer>",
+    ]
+    for c, expected in zip(completions, [1.0, 0.75, 0.5, 0.25]):
+        score = soft_group_reward(
+            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
+        )
+        assert score == [expected]
+
+
+def test_hard_reward_values():
+    completions = [
+        "<answer><group>crush, rout, shellac, trash</group></answer>",
+        "<answer><group>crush, rout, shellac</group></answer>",
+        "<answer><group>rout, shellac</group></answer>",
+        "<answer><group>rout</group></answer>",
+    ]
+    for c, expected in zip(completions, [1.0, 0, 0, 0]):
+        score = hard_group_reward(
+            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
+        )
+        assert score == [expected]
+
+
+def test_group_size_rewards():
+    completions = [
+        "<answer><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group><group>crush, rout, shellac, trash</group></answer>",
+        "<answer><group>crush, rout, shellac</group><group>crush, rout, shellac, rout</group></answer>",
+        "<answer><group>crush, rout, shellac</group></answer>",
+        "<answer><group>rout, shellac</group></answer>",
+        "<answer><group>rout</group></answer>",
+    ]
+    for c, expected in zip(completions, [0.5, 0.25, 0, 0, 0]):
+        score = group_size_reward(
+            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
+        )
+        assert score == [expected], (
+            f"Expected {expected} but got {score} for completion: {c}"
+        )
