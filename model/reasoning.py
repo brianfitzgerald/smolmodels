@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 from datasets import load_dataset, Dataset
 from transformers.trainer_callback import TrainerCallback
@@ -156,7 +157,10 @@ def score_connections_hard(solution_groups, submitted_groups):
                 correct_group_indices.append(index)
                 solved.add(index)
                 break
-    return float(hard_score)
+
+    hard_score = hard_score / len(solution_groups)
+    hard_score = math.pow(hard_score, 3)
+    return float(hard_score) * 4
 
 
 def score_connections_soft(solution_groups, submitted_groups):
@@ -172,6 +176,8 @@ def score_connections_soft(solution_groups, submitted_groups):
             best_match_count = max(best_match_count, match_count)
         total_score += best_match_count // 4
 
+    total_score = total_score / len(solution_groups)
+    total_score = math.pow(total_score, 3) * 2
     return float(total_score)
 
 

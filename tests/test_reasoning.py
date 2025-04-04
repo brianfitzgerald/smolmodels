@@ -86,11 +86,11 @@ def test_connections_reward_func_correct():
     hard_score = hard_group_reward(
         FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
     )
-    assert hard_score == [4.0]
     soft_score = soft_group_reward(
         FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
     )
-    assert soft_score == [4.0]
+    assert soft_score == [2.0]
+    assert hard_score == [4.0]
 
 
 def test_connections_reward_func_partially_correct():
@@ -104,7 +104,9 @@ def test_connections_reward_func_partially_correct():
     total_score = 0
     for reward_func in ConnectionsDataModule.reward_functions():
         score = reward_func(
-            FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
+            FIRST_SAMPLE["prompt"],
+            completion,
+            answer=FIRST_SAMPLE["answer_groups"],  # type: ignore
         )
         total_score += score[0]
-    assert total_score == 3.769
+    assert round(total_score, 2) == 1.86
