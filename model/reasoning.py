@@ -296,7 +296,7 @@ def _connections_map(example: dict) -> dict:
 
 
 class ConnectionsDataModule(SmDataset):
-    def init_dataset(self):
+    def setup(self, stage: Optional[str] = None):
         prompts_pd = pd.read_json(
             "../dataset_files/connections_prompts.jsonl", lines=True
         )
