@@ -74,9 +74,8 @@ training = [
     "bitsandbytes>=0.44.1; sys_platform == 'linux'",
     "liger-kernel>=0.5.2; sys_platform == 'linux'",
     "flash-attn; sys_platform == 'linux'",
+    "vllm==0.7.3",
 ]
-
-inference = ["vllm==0.7.3"]
 
 [tool.uv]
 default-groups = ["torch"]
