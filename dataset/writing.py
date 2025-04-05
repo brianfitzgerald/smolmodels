@@ -15,7 +15,7 @@ def _sum_scores(scores: dict[str, float | None] | None) -> float:
     return total
 
 
-def _pick_completions(group):
+def _pick_dpo_pair(group):
     chosen_row = group.loc[group["score_total"].idxmax()]
     rejected_row = group.loc[group["score_total"].idxmin()]
     return pd.Series(
@@ -45,7 +45,7 @@ class WritingDPODataModule(SmDataset):
             lambda group: group["score_total"].max() != group["score_total"].min()
         )
         dataset_pd = (
-            dataset_pd.groupby("instruction_id").apply(_pick_completions).reset_index()
+            dataset_pd.groupby("instruction_id").apply(_pick_dpo_pair).reset_index()
         )
         dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
         self.train_dataset = dataset["train"]

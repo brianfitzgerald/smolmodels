@@ -113,7 +113,7 @@ TXT_BT_CONFIG = WrapperConfig(
 )
 
 WRITING_DPO_CONFIG = WrapperConfig(
-    model_id_or_path=LLAMA_3_2_3B,
+    model_id_or_path=MINISTRAL_8B,
     wandb_project_name="gutenberg",
     train_batch_size=4,
     gradient_accumulation_steps=4,
@@ -123,20 +123,6 @@ WRITING_DPO_CONFIG = WrapperConfig(
     n_epochs=2,
     eval_steps=500,
     run_suffix="txt-bt-dpo",
-)
-
-
-GUTENBERG_DPO_CONFIG = WrapperConfig(
-    model_id_or_path=LLAMA_3_2_3B,
-    wandb_project_name="gutenberg",
-    train_batch_size=4,
-    gradient_accumulation_steps=2,
-    data_module_choice="conversation_dpo",
-    tuning_mode="dpo",
-    learning_rate=1e-6,
-    dataset_path="jondurbin/gutenberg-dpo-v0.1",
-    n_epochs=5,
-    run_suffix="gutenberg-dpo",
 )
 
 
@@ -267,7 +253,6 @@ CONFIGS = {
     "codecontests_cot_dpo": CODECONTESTS_COT_CONFIG,
     "ultrafeedback": ULTRAFEEDBACK_CONFIG,
     "gutenberg": GUTENBERG_CONFIG,
-    "gutenberg_dpo": GUTENBERG_DPO_CONFIG,
     "grpo_math": GRPO_MATH_CONFIG,
     "connections": CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
@@ -591,7 +576,7 @@ class TrainerWrapper:
                 dataset_num_proc=1 if self.config.notebook_mode else 4,
                 max_length=self.config.max_sequence_length,
                 max_prompt_length=self.config.max_prompt_length,
-                precompute_ref_log_probs=not self.config.using_mistral,
+                precompute_ref_log_probs=False,
                 precompute_ref_batch_size=self.config.logprob_precompute_batch_size,
                 dataloader_pin_memory=True,
                 beta=self.config.dpo_beta,
