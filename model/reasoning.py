@@ -214,7 +214,6 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
         for group_len in group_lens:
             if group_len == 4:
                 sample_reward += 1.0
-        # expect 4 groups, so normalize by dividing by 4
         rewards.append(sample_reward)
     logger.info(f"Group size rewards: {rewards}")
 
