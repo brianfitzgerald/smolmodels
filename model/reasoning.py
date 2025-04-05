@@ -194,17 +194,17 @@ def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
 def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward whether each group is correct as a whole or not."""
     model_generations = _generations(completions)
-    print("Generations:")
+    logger.info("Generations:")
     for g in model_generations:
-        print("-" * 80)
-        print(g)
+        logger.info("-" * 40)
+        logger.info(g)
     generation_groups = [parse_groups(r) for r in model_generations]
     scores = [score_connections_hard(kwargs["answer"], g) for g in generation_groups]
     logger.info(f"Hard accuracy scores: {scores}")
     return scores
 
 
-def group_size_reward(_prompts, completions, **kwargs) -> list[float]:
+def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
     sizes = [[len(s) for s in s] for s in groups]
@@ -215,11 +215,11 @@ def group_size_reward(_prompts, completions, **kwargs) -> list[float]:
             if group_len == 4:
                 sample_reward += 1.0
         # expect 4 groups, so normalize by dividing by 4
-        rewards.append(sample_reward / len(group_lens))
+        rewards.append(sample_reward)
     logger.info(f"Group size rewards: {rewards}")
 
-    # scale to be between 0 and 0.5
-    rewards = [r / 2 if r > 0 else 0.0 for r in rewards]
+    # scale to be between 0 and 0.25
+    rewards = [r / 4 if r > 0 else 0.0 for r in rewards]
     return rewards
 
 
