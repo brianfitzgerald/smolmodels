@@ -1,4 +1,3 @@
-from collections.abc import Callable
 import os
 import re
 from dataclasses import dataclass
@@ -47,9 +46,7 @@ ModelFamily = Literal["qwen", "mistral", "other"]
 class WrapperConfig:
     # Model & Adapter Configuration
     model_id_or_path: str = LLAMA_3_2_1B
-    using_mistral: bool = False
     adapter_path: Optional[str] = None
-    model_family: ModelFamily = "other"
     grpo_beta: float = 0.0
 
     # Experiment / Environment Settings
@@ -71,7 +68,7 @@ class WrapperConfig:
     # Prompt & Sequence Lengths
     max_sequence_length: int = 1512  # sequence length for trimming completions
     max_prompt_length: int = 1024
-    max_eval_sample_length: int = 1024
+    max_eval_sample_length: int = 512
     max_completion_length: int = 200
 
     warmup_steps: int = 1000
@@ -102,6 +99,18 @@ class WrapperConfig:
 
     # Generation Parameters
     num_generations: int = 1
+
+    @property
+    def model_family(self) -> ModelFamily:
+        if self.model_id_or_path.startswith("mistralai"):
+            return "mistral"
+        elif self.model_id_or_path.startswith("Qwen"):
+            return "qwen"
+        return "other"
+
+    @property
+    def using_mistral(self) -> bool:
+        return self.model_family == "mistral"
 
 
 @dataclass

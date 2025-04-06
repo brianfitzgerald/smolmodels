@@ -26,7 +26,7 @@ from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
 )
-from dataset.writing import WritingGRPODataModule, WritingDPODataModule
+from dataset.writing import WritingDPODataModule
 from model.utils import (
     DataModuleChoice,
     ensure_directory,
@@ -62,7 +62,6 @@ DOLPHIN_DPO_CONFIG = WrapperConfig(
     wandb_project_name="dolphin-dpo",
     train_batch_size=12,
     max_samples=20000,
-    using_mistral=True,
 )
 
 CODECONTESTS_CONFIG = WrapperConfig(
@@ -70,7 +69,6 @@ CODECONTESTS_CONFIG = WrapperConfig(
     wandb_project_name="codecontests-ministral-8b",
     train_batch_size=12,
     data_module_choice="conversation_dpo",
-    using_mistral=True,
 )
 
 CODECONTESTS_SFT_CONFIG = WrapperConfig(
@@ -78,7 +76,6 @@ CODECONTESTS_SFT_CONFIG = WrapperConfig(
     wandb_project_name="codecontests-ministral-8b",
     train_batch_size=16,
     data_module_choice="conversation_dpo",
-    using_mistral=True,
     tuning_mode="sft",
     learning_rate=1e-5,
 )
@@ -172,7 +169,6 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
 
 GRPO_MATH_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_1_5_B,
-    model_family="qwen",
     wandb_project_name="qwen-math-grpo",
     train_batch_size=2,
     gradient_accumulation_steps=8,
@@ -189,7 +185,6 @@ GRPO_MATH_CONFIG = WrapperConfig(
 
 CONNECTIONS_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,
-    model_family="mistral",
     wandb_project_name="qwen-connections-grpo",
     num_generations=4,
     train_batch_size=8,
@@ -210,7 +205,6 @@ CONNECTIONS_CONFIG = WrapperConfig(
 
 GRPO_WRITING_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_1_5_B,
-    model_family="qwen",
     wandb_project_name="qwen-writing-grpo",
     train_batch_size=4,
     gradient_accumulation_steps=8,
@@ -270,7 +264,6 @@ DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
     "gsm8k": GSM8KDataModule,
     "conversation_dpo": ConversationDPODataModule,
     "connections": ConnectionsDataModule,
-    "writing_grpo": WritingGRPODataModule,
     "writing_dpo": WritingDPODataModule,
 }
 

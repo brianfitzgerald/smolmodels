@@ -39,7 +39,7 @@ SMOLMODELS_IMAGE = (
     .run_commands(
         [
             "uv sync",
-            "uv sync --group torch --group training --group inference --no-build-isolation",
+            "uv sync --group torch --group training --no-build-isolation",
         ]
     )
     .run_commands("uv pip install huggingface_hub[hf_transfer] hf_transfer --system")
