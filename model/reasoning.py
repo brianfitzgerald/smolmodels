@@ -1,4 +1,3 @@
-import math
 from typing import Optional
 from datasets import load_dataset, Dataset
 from transformers.trainer_callback import TrainerCallback
@@ -165,7 +164,7 @@ def score_connections_soft(solution_groups, submitted_groups):
     """Return the best match count for each solution group."""
     total_score = 0
     solution_sets = [set(group) for group in solution_groups]
-    B = len(solution_sets)
+    group_size = len(solution_sets[0])
 
     for sol_set in solution_sets:
         best_match_count = 0
@@ -173,7 +172,7 @@ def score_connections_soft(solution_groups, submitted_groups):
             submitted_set = set(submitted)
             match_count = len(sol_set.intersection(submitted_set))
             best_match_count = max(best_match_count, match_count)
-        total_score += best_match_count / B
+        total_score += best_match_count / group_size
 
     return float(total_score)
 

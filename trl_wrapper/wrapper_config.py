@@ -134,7 +134,7 @@ class SmDataset(pl.LightningDataModule):
         self.train_dataset: Dataset | None = None
         self.val_dataset: Dataset | None = None
         self.tokenizer = tokenizer
-        self.num_workers = 1 if config.notebook_mode else 4
+        self.num_workers = 1 if config.notebook_mode else None
         current_dir = Path().resolve().name
         self.prefix = "/"
         if current_dir == "notebooks":

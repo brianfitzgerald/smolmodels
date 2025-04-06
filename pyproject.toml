@@ -51,6 +51,7 @@ dependencies = [
     "sigstore>=1.0.0",
     "kagglehub>=0.3.7",
     "nltk>=3.9.1",
+    "pytest>=8.3.4",
 ]
 
 [tool.pytest.ini_options]

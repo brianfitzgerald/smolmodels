@@ -131,6 +131,22 @@ def test_soft_reward_values():
     assert scores == expected_scores
 
 
+def test_soft_reward_values_multiple_groups():
+    completions = [
+        "<answer><group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group></answer>",
+        "<answer><group>crush, rout, shellac, trash</group><group>cami, halter, tank, tee</group></answer>",
+        "<answer><group>crush, rout, shellac, trash</group></answer>",
+    ]
+    scores = []
+    expected_scores = [4.0, 2.0, 1.0]
+    for c in completions:
+        score = soft_group_reward(
+            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
+        )
+        scores.append(score[0])
+    assert scores == expected_scores
+
+
 def test_hard_reward_values():
     completions = [
         "<answer><group>crush, rout, shellac, trash</group></answer>",

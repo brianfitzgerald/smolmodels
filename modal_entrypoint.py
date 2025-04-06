@@ -18,7 +18,7 @@ DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files
 
 @app.function(
     image=SMOLMODELS_IMAGE,
-    gpu=modal.gpu.A100(size="80GB"),
+    gpu="A100-80GB",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=5),

@@ -31,8 +31,6 @@ def _pick_dpo_pair(group: pd.Series) -> pd.Series:
             "model_chosen": chosen_row["model_id"],
             "model_rejected": rejected_row["model_id"],
             "prompt": chosen_row["instruction"],
-            "score_breakdown_chosen": chosen_row["scores"],
-            "score_breakdown_rejected": rejected_row["scores"],
         }
     )
 
