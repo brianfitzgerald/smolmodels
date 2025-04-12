@@ -116,8 +116,7 @@ class GSM8KDataModule(SmDataset):
     def setup(self, stage: Optional[str] = None):
         self.init_dataset()
 
-    @classmethod
-    def reward_functions(cls) -> list[RewardFunc]:
+    def reward_functions(self) -> list[RewardFunc]:
         return [
             xmlcount_reward_func,
             soft_format_reward_func,
@@ -345,8 +344,7 @@ class ConnectionsDataModule(SmDataset):
         self.train_dataset = groups_dataset["train"]
         self.val_dataset = groups_dataset["test"]
 
-    @classmethod
-    def reward_functions(cls) -> list[RewardFunc]:
+    def reward_functions(self) -> list[RewardFunc]:
         return [
             xmlcount_reward_func,
             strict_format_reward_func,

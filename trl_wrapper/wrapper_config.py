@@ -276,6 +276,5 @@ class SmDataset(pl.LightningDataModule):
                 rich_text.append(decoded, style="bright_green")
         return rich_text
 
-    @classmethod
-    def reward_functions(cls) -> list[RewardFunc]:
+    def reward_functions(self) -> list[RewardFunc]:
         return []

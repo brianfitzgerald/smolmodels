@@ -1,14 +1,16 @@
+import asyncio
 from functools import partial
 from synthetic_data.generation import (
-    GenWrapperArgs,
     GenerationWrapper,
     get_generation_wrapper,
 )
+from synthetic_data.writing_judge import CreativeWritingBench
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
 from typing import Optional
 import pandas as pd
 from trl.trainer.grpo_trainer import RewardFunc
+from synthetic_data.tasks.writing import score_writing
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -58,8 +60,25 @@ class WritingDPODataModule(SmDataset):
         self.val_dataset = dataset["test"]
 
 
-def llm_judge_func(prompts, completions, **kwargs) -> list[float]:
-    return [0.0] * len(prompts)
+def llm_judge_func(
+    prompts: list,
+    completions: list,
+    generation_wrapper: GenerationWrapper,
+    bench: CreativeWritingBench,
+    **kwargs,
+) -> list[float]:
+    scores = asyncio.run(score_writing(completions, prompts, bench, generation_wrapper))
+    score_sums = [sum(score.values()) for score in scores]
+    return score_sums
+
+
+def _map_writing_grpo(example: dict) -> dict:
+    # TODO maybe compare to existing rewards?
+    return {
+        "prompt": [
+            {"role": "user", "content": example["instruction"]},
+        ],
+    }
 
 
 class WritingGRPODataModule(SmDataset):
@@ -71,12 +90,16 @@ class WritingGRPODataModule(SmDataset):
         )
 
         dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
+        dataset = dataset.map(_map_writing_grpo)
+        dataset.shuffle(seed=42)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
         self.generation_wrapper = get_generation_wrapper("gemini-2.0-flash")
+        self.bench = CreativeWritingBench(self.config.run_mode)
 
-    @classmethod
-    def reward_functions(cls) -> list[RewardFunc]:
-        llm_judge_func_partial = partial(llm_judge_func)
+    def reward_functions(self) -> list[RewardFunc]:
+        llm_judge_func_partial = partial(
+            llm_judge_func, generation_wrapper=self.generation_wrapper, bench=self.bench
+        )
 
         return [llm_judge_func_partial]

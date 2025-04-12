@@ -393,6 +393,34 @@ class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
         return Dataset.from_parquet(os.path.join(dataset_root_path, "epubs.parquet"))  # type: ignore
 
 
+async def score_writing(
+    completions: list[str],
+    prompts: list[str],
+    bench: CreativeWritingBench,
+    judge_generator: GenerationWrapper,
+):
+    judge_convs: list[Conversation] = [
+        [
+            {
+                "role": "user",
+                "content": bench.format_prompt(prompt, completion),
+            }
+        ]
+        for prompt, completion in zip(prompts, completions)
+    ]
+    logger.info(
+        f"Judging {len(judge_convs)} completions with {judge_generator.args.model_id}"
+    )
+    judge_completions = await judge_generator.generate(judge_convs)
+
+    if any([x is None for x in judge_completions]):
+        logger.warning("Some judge completions were None")
+        return []
+
+    scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
+    return scores_formatted
+
+
 async def _generate_and_score(
     generator: GenerationWrapper,
     input_rows: List[Dict],
@@ -406,25 +434,12 @@ async def _generate_and_score(
         f"Generating {len(input_convs)} completions with {generator.args.model_id}"
     )
     completions = await generator.generate(input_convs)
-    judge_convs: list[Conversation] = [
-        [
-            {
-                "role": "user",
-                "content": bench.format_prompt(row["instruction"], completion),
-            }
-        ]
-        for row, completion in zip(input_rows, completions)
-    ]
-    logger.info(
-        f"Judging {len(judge_convs)} completions with {judge_generator.args.model_id}"
+
+    scores_formatted = await score_writing(
+        completions, [row["instruction"] for row in input_rows], bench, judge_generator
     )
-    judge_completions = await judge_generator.generate(judge_convs)
+    assert scores_formatted is not None, "scores_formatted is None"
 
-    if any([x is None for x in judge_completions]):
-        logger.warning("Some judge completions were None")
-        return []
-
-    scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
     return [
         {
             "scores": s,
