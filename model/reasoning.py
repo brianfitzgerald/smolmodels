@@ -171,10 +171,20 @@ def score_connections_soft(
     submitted_sets = [set(group) for group in submitted_groups]
 
     # Get highest match count for each solution group
-    best_match_counts = [
-        max(len(sol_set.intersection(submitted)) for submitted in submitted_sets)
-        for sol_set in solution_sets
-    ]
+    best_match_counts = []
+    if submitted_sets:
+        for sol_set in solution_sets:
+            if submitted_sets:
+                best_match_counts.append(
+                    max(
+                        len(sol_set.intersection(submitted))
+                        for submitted in submitted_sets
+                    )
+                )
+            else:
+                best_match_counts.append(0)
+    else:
+        best_match_counts = [0] * len(solution_sets)
     return float(sum(best_match_counts) / len(solution_groups)) / len(submitted_groups)
 
 
