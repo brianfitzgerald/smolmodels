@@ -176,4 +176,4 @@ def test_group_size_rewards():
                 "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
             )
         )
-    assert out == [[1.0], [0.25], [0.0], [0.0], [0.0]]
+    assert out == [[0.25], [0.125], [0.0], [0.0], [0.0]]

@@ -193,12 +193,19 @@ def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
 def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward whether each group is correct as a whole or not."""
     model_generations = _generations(completions)
+    prompts = [prompt[1]["content"] for prompt in prompts]
+    answers = kwargs["answer"]
     logger.info("Generations:")
-    for g in model_generations:
-        logger.info("-" * 40)
+    for g, p, a in zip(model_generations, prompts, answers):
+        logger.info("=" * 40)
+        logger.info("Prompt: " + "-" * 20)
+        logger.info(p)
+        logger.info("Generation: " + "-" * 20)
         logger.info(g)
+        logger.info("Answer: " + "-" * 20)
+        logger.info(a)
     generation_groups = [parse_groups(r) for r in model_generations]
-    scores = [score_connections_hard(kwargs["answer"], g) for g in generation_groups]
+    scores = [score_connections_hard(answers, g) for g in generation_groups]
     logger.info(f"Hard accuracy scores: {scores}")
     return scores
 
@@ -213,7 +220,10 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
         for group_len in group_lens:
             if group_len == 4:
                 sample_reward += 1.0
-        rewards.append(sample_reward)
+        if len(group_lens) > 0:
+            rewards.append(sample_reward / len(group_lens))
+        else:
+            rewards.append(0.0)
     logger.info(f"Group size rewards: {rewards}")
 
     # scale to be between 0 and 0.25
@@ -248,27 +258,43 @@ Respond in the following format:
 
 # Example
 
-User: apple, orange, banana, pear, corolla, charger,
+User: bird, curry, james, jordan, book, cactus, hedgehog, skeleton, equal, even, fair, just, agency, company, enterprise, firm
 Assistant: <reasoning>
-The first group are all fruits.
-The second group are all cars.
+Okay, here's how I'm thinking about this. I have 16 words and need to group them into four groups. Hmm, I'm seeing that “Bird,” “Curry,” “James,” and “Jordan” are all basketball player nicknames, so that's one group.
+Now, the next group: “Book,” “Agency,” “Company,” “Enterprise,” and “Firm.” These all seem linked with business/agencies, but I need only four. Maybe “Agency,” “Company,” “Enterprise,” and “Firm”?
+Now I just need to figure out the rest of the groupings!
+Okay, let's break this down systematically. For Group 1, the basketball player nicknames: “Bird,” “Curry,” “James,” and “Jordan.” They all fit here.
+For Group 2, it's clear that “Company,” “Enterprise,” “Firm,” and “Agency” are all synonyms for “business.”
+Group 3 seems straightforward: “Equal,” “Even,” “Fair,” and “Just” all reflect synonyms for “fair.”
+Now, Group 4: “Book,” “Cactus,” “Hedgehog,” and “Skeleton.” Hmm, these all connect through “spine” in some way—“book spine,” “cactus spine,” “hedgehog spine,” and “skeleton spine” makes sense!
+Okay, let's go back to the core groupings. Group 1: “Bird,” “Curry,” “James,” “Jordan” — basketball players. Group 2: “Agency,” “Company,” “Enterprise,” “Firm” — business synonyms. Group 3: “Equal,” “Even,” “Fair,” “Just” — synonyms for “fair.” That leaves Group 4, which I'm thinking includes “Book,” “Cactus,” “Hedgehog,” and “Skeleton.” These can all be followed by “spine” when used in certain contexts (e.g., “book spine,” “cactus spine,” “hedgehog spine,” “skeleton spine”). This seems like a solid grouping!
 </reasoning>
 <answer>
-<group>apple, orange, banana, pear</group>
-<group>corolla, charger</group>
+<group>bird, curry, james, jordan</group>
+<group>book, agency, company, enterprise, firm</group>
+<group>equal, even, fair, just</group>
+<group>cactus, hedgehog, skeleton</group>
 </answer>
 
 # Example
 
-User: dog, cat, red, white,
+User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
 Assistant: <reasoning>
-The first group are all animals.
-The second group are all colors.
+Alright, I'm tasked with finding four groups of related words. Let's start by listing the words: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk.
+I wonder if “teeth” could form a group — molar, fang, tusk, canine definitely seem related. Keep going, looking for other links.
+I'll need to keep the groups to four words each. Let me map out these connections now.
+I see “canine”, “fang”, “molar”, and “tusk” are related to teeth, forming one group. Now, I have “candle”, “crayon”, “honeycomb”, and “seal” left. I think these can be linked to “bee” — like “beecandle”, but that doesn't fully work.
+Then there's “raindrops”, “whiskers”, “kettles”, and “mittens”, which seems to fit well with lyrics from “The Sound of Music”.
+Finally, “defense”, “excuse”, “out”, and “reason” could fit with “no” preceding them, like “no defense”.
+I've identified a few clear groups: For “teeth”, the group is “canine”, “fang”, “molar”, “tusk”. For “wax”, it pairs “candle”, “crayon”, “honeycomb”, “seal”. Then, there's the song-inspired group: “raindrops”, “whiskers”, “kettles”, “mittens”. That leaves “defense”, “excuse”, “out”, and “reason”. They all fit with the phrase “no”, like “no defense”, “no excuse”, “no reason”. I'm settling on these four groups, based on straightforward connections and some memorable associations. Great!
 </reasoning>
 <answer>
-<group>dog, cat</group>
-<group>red, white</group>
+<group> candle, crayon, honeycomb, seal</group>
+<group> kettles, mittens, raindrops, whiskers</group>
+<group> canine, fang, molar, tusk</group>
+<group> defense, excuse, out, reason</group>
 </answer>
+
 """
 
 
@@ -313,6 +339,7 @@ class ConnectionsDataModule(SmDataset):
 
         groups_pd = pd.DataFrame(groups)
         groups_dataset = Dataset.from_pandas(groups_pd)
+        groups_dataset.shuffle(seed=42)
         groups_dataset = groups_dataset.map(_connections_map)
         groups_dataset = groups_dataset.train_test_split(test_size=0.1)  # type: ignore
         self.train_dataset = groups_dataset["train"]

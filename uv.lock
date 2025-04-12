@@ -1379,7 +1379,7 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "0.29.0"
+version = "0.30.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -1390,9 +1390,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e2/ac/9f7010c8b050d80b64bfddcc09ef4a4450ae4369940d1b01fa13f5d083de/huggingface_hub-0.29.0.tar.gz", hash = "sha256:64034c852be270cac16c5743fe1f659b14515a9de6342d6f42cbb2ede191fc80", size = 389753 }
+sdist = { url = "https://files.pythonhosted.org/packages/df/22/8eb91736b1dcb83d879bd49050a09df29a57cc5cd9f38e48a4b1c45ee890/huggingface_hub-0.30.2.tar.gz", hash = "sha256:9a7897c5b6fd9dad3168a794a8998d6378210f5b9688d0dfc180b1a228dc2466", size = 400868 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/4d/8092df2cb0cafa9fcaf691db851b2fccfe9cad4048e081436bbbdf56e4e1/huggingface_hub-0.29.0-py3-none-any.whl", hash = "sha256:c02daa0b6bafbdacb1320fdfd1dc7151d0940825c88c4ef89837fdb1f6ea0afe", size = 468012 },
+    { url = "https://files.pythonhosted.org/packages/93/27/1fb384a841e9661faad1c31cbfa62864f59632e876df5d795234da51c395/huggingface_hub-0.30.2-py3-none-any.whl", hash = "sha256:68ff05969927058cfa41df4f2155d4bb48f5f54f719dd0390103eefa9b191e28", size = 481433 },
 ]
 
 [package.optional-dependencies]
@@ -3899,8 +3899,8 @@ torch = [
     { name = "torchaudio", marker = "sys_platform == 'darwin'", specifier = "==2.5.1" },
     { name = "torchvision", marker = "sys_platform != 'darwin'", specifier = "==0.20.1", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchvision", marker = "sys_platform == 'darwin'", specifier = "==0.20.1" },
-    { name = "transformers" },
-    { name = "trl", specifier = "==0.16.0" },
+    { name = "transformers", specifier = "==4.51.2" },
+    { name = "trl", specifier = "==0.16.1" },
 ]
 training = [
     { name = "bitsandbytes", marker = "sys_platform == 'linux'", specifier = ">=0.44.1" },
@@ -4365,7 +4365,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "4.49.0"
+version = "4.51.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock" },
@@ -4379,9 +4379,9 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/79/50/46573150944f46df8ec968eda854023165a84470b42f69f67c7d475dabc5/transformers-4.49.0.tar.gz", hash = "sha256:7e40e640b5b8dc3f48743f5f5adbdce3660c82baafbd3afdfc04143cdbd2089e", size = 8610952 }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/cf/f5b8a3e9e9f9f8290202278d1e1156ee40ef7bca4055f55893e79026d77a/transformers-4.51.2.tar.gz", hash = "sha256:ed221c31581e97127cff5de775b05f05d19698b439d7d638ff445502a7f37331", size = 8925420 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/37/1f29af63e9c30156a3ed6ebc2754077016577c094f31de7b2631e5d379eb/transformers-4.49.0-py3-none-any.whl", hash = "sha256:6b4fded1c5fee04d384b1014495b4235a2b53c87503d7d592423c06128cbbe03", size = 9970275 },
+    { url = "https://files.pythonhosted.org/packages/15/af/a3eb4449c8fdde24413555a66e9c100b669f4428fc829bad4ceb73472f4f/transformers-4.51.2-py3-none-any.whl", hash = "sha256:5cb8259098b75ff4b5dd04533a318f7c4750d5307d9617e6d0593526432c404d", size = 10366692 },
 ]
 
 [[package]]
@@ -4418,7 +4418,7 @@ wheels = [
 
 [[package]]
 name = "trl"
-version = "0.16.0"
+version = "0.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "accelerate" },
@@ -4426,9 +4426,9 @@ dependencies = [
     { name = "rich" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/8c/cd2aae1c77b9180cf589e44def6f40c87e6b31603cdbea84c3d6c6825277/trl-0.16.0.tar.gz", hash = "sha256:0e76c6f697bd93c27fd1221ff18646413cf601ba543afef32c2fd87ecaabce4e", size = 351764 }
+sdist = { url = "https://files.pythonhosted.org/packages/09/de/ba9095a2c5b9150921802727323356d47d755e62ea700dd6788eae734262/trl-0.16.1.tar.gz", hash = "sha256:166acab64811acfbaaa3839688547d78fec806f9b12b99497b168431e13968be", size = 353198 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/ee/1a18222044df9e7377338a3c0d774c7b10e8b076f253006096247e7be095/trl-0.16.0-py3-none-any.whl", hash = "sha256:23752d91f8a53cdecf71b53a1960c9d9b97689f458220c29993f16e3e81f1f60", size = 335718 },
+    { url = "https://files.pythonhosted.org/packages/a5/e0/02e129c156d38a408274276def68524fd080b1242780cc23d7e261571157/trl-0.16.1-py3-none-any.whl", hash = "sha256:2b893bbed77dce79c88d6e864ce1216641f6587f4a28988281befba1d2a13ae9", size = 336439 },
 ]
 
 [[package]]
