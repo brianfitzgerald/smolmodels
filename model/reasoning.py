@@ -170,6 +170,9 @@ def score_connections_soft(
     solution_sets = [set(group) for group in solution_groups]
     submitted_sets = [set(group) for group in submitted_groups]
 
+    if len(submitted_groups) == 0 or len(solution_groups) == 0:
+        return 0.0
+
     # Get highest match count for each solution group
     best_match_counts = []
     if submitted_sets:
@@ -277,38 +280,13 @@ Respond in the following format:
 ...
 </group>
 </answer>
-
-# Example
-
-User: bird, curry, james, jordan, book, cactus, hedgehog, skeleton, equal, even, fair, just, agency, company, enterprise, firm
-Assistant: <reasoning>
-Okay, here's how I'm thinking about this. I have 16 words and need to group them into four groups. Hmm, I'm seeing that “Bird,” “Curry,” “James,” and “Jordan” are all basketball player nicknames, so that's one group.
-Now, the next group: “Book,” “Agency,” “Company,” “Enterprise,” and “Firm.” These all seem linked with business/agencies, but I need only four. Maybe “Agency,” “Company,” “Enterprise,” and “Firm”?
-Now I just need to figure out the rest of the groupings!
-Okay, let's break this down systematically. For Group 1, the basketball player nicknames: “Bird,” “Curry,” “James,” and “Jordan.” They all fit here.
-For Group 2, it's clear that “Company,” “Enterprise,” “Firm,” and “Agency” are all synonyms for “business.”
-Group 3 seems straightforward: “Equal,” “Even,” “Fair,” and “Just” all reflect synonyms for “fair.”
-Now, Group 4: “Book,” “Cactus,” “Hedgehog,” and “Skeleton.” Hmm, these all connect through “spine” in some way—“book spine,” “cactus spine,” “hedgehog spine,” and “skeleton spine” makes sense!
-Okay, let's go back to the core groupings. Group 1: “Bird,” “Curry,” “James,” “Jordan” — basketball players. Group 2: “Agency,” “Company,” “Enterprise,” “Firm” — business synonyms. Group 3: “Equal,” “Even,” “Fair,” “Just” — synonyms for “fair.” That leaves Group 4, which I'm thinking includes “Book,” “Cactus,” “Hedgehog,” and “Skeleton.” These can all be followed by “spine” when used in certain contexts (e.g., “book spine,” “cactus spine,” “hedgehog spine,” “skeleton spine”). This seems like a solid grouping!
-</reasoning>
-<answer>
-<group>bird, curry, james, jordan</group>
-<group>book, agency, company, enterprise, firm</group>
-<group>equal, even, fair, just</group>
-<group>cactus, hedgehog, skeleton</group>
-</answer>
-
 # Example
 
 User: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk
 Assistant: <reasoning>
-Alright, I'm tasked with finding four groups of related words. Let's start by listing the words: candle, crayon, honeycomb, seal, defense, excuse, out, reason, kettles, mittens, raindrops, whiskers, canine, fang, molar, tusk.
-I wonder if “teeth” could form a group — molar, fang, tusk, canine definitely seem related. Keep going, looking for other links.
-I'll need to keep the groups to four words each. Let me map out these connections now.
-I see “canine”, “fang”, “molar”, and “tusk” are related to teeth, forming one group. Now, I have “candle”, “crayon”, “honeycomb”, and “seal” left. I think these can be linked to “bee” — like “beecandle”, but that doesn't fully work.
-Then there's “raindrops”, “whiskers”, “kettles”, and “mittens”, which seems to fit well with lyrics from “The Sound of Music”.
-Finally, “defense”, “excuse”, “out”, and “reason” could fit with “no” preceding them, like “no defense”.
-I've identified a few clear groups: For “teeth”, the group is “canine”, “fang”, “molar”, “tusk”. For “wax”, it pairs “candle”, “crayon”, “honeycomb”, “seal”. Then, there's the song-inspired group: “raindrops”, “whiskers”, “kettles”, “mittens”. That leaves “defense”, “excuse”, “out”, and “reason”. They all fit with the phrase “no”, like “no defense”, “no excuse”, “no reason”. I'm settling on these four groups, based on straightforward connections and some memorable associations. Great!
+I'll start with breaking down the reasoning. For Group 1, the words related to wax: candle, crayon, honeycomb, seal — connecting to wax in various forms, such as crayon and candles being wax-based.
+For Group 2, “My Favorite Things” connects to lyrics mentioning kettles, mittens, raindrops, whiskers.
+Group 3 relates to teeth, covering canine, fang, molar, tusk. Group 4 involves “no” related phrases like “no excuse,” “no defense.”
 </reasoning>
 <answer>
 <group> candle, crayon, honeycomb, seal</group>

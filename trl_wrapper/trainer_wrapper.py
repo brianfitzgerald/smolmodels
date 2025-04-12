@@ -26,7 +26,7 @@ from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
 )
-from dataset.writing import WritingDPODataModule
+from dataset.writing import WritingDPODataModule, WritingGRPODataModule
 from model.utils import (
     DataModuleChoice,
     ensure_directory,
@@ -191,7 +191,7 @@ CONNECTIONS_CONFIG = WrapperConfig(
     train_batch_size=8,
     gradient_accumulation_steps=8,
     data_module_choice="connections",
-    max_prompt_length=1512,
+    max_prompt_length=1024,
     max_completion_length=512,
     max_grad_norm=0.1,
     n_epochs=50,
@@ -205,20 +205,23 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 GRPO_WRITING_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_1_5_B,
-    wandb_project_name="qwen-writing-grpo",
-    train_batch_size=4,
+    model_id_or_path=MINISTRAL_8B,
+    wandb_project_name="writing-grpo",
+    num_generations=4,
+    train_batch_size=8,
     gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
-    max_prompt_length=256,
-    max_completion_length=512,
+    max_prompt_length=512,
+    max_completion_length=1024,
     max_grad_norm=0.1,
-    n_epochs=50,
+    n_epochs=1,
+    warmup_steps=1000,
     eval_batch_size=1,
-    learning_rate=1e-6,
-    lr_scheduler=SchedulerType.COSINE,
+    learning_rate=1e-5,
+    gradient_checkpointing=True,
+    lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
+    optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
-    num_generations=4,
 )
 
 
@@ -251,7 +254,7 @@ CONFIGS = {
     "grpo_math": GRPO_MATH_CONFIG,
     "connections": CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
-    "grpo_writing": GRPO_WRITING_CONFIG,
+    "writing_grpo": GRPO_WRITING_CONFIG,
     "writing_dpo": WRITING_DPO_CONFIG,
 }
 
@@ -259,13 +262,14 @@ LOCAL_RUNS_FOLDER = "./runs"
 MODELS_FOLDER = "/models"
 
 
-DATA_MODULE_MAP: dict[DataModuleChoice, type[SmDataset]] = {
+DATA_MODULE_CHOICES: dict[DataModuleChoice, type[SmDataset]] = {
     "code_contests": CodeContestsDataModule,
     "conversation": ConversationDataModule,
     "gsm8k": GSM8KDataModule,
     "conversation_dpo": ConversationDPODataModule,
     "connections": ConnectionsDataModule,
     "writing_dpo": WritingDPODataModule,
+    "writing_grpo": WritingGRPODataModule,
 }
 
 
@@ -336,11 +340,11 @@ class TrainerWrapper:
                 logger.info(f"Using chat template override: {k}")
                 custom_chat_template = k
 
-        data_module_class = DATA_MODULE_MAP.get(self.config.data_module_choice)
+        data_module_class = DATA_MODULE_CHOICES.get(self.config.data_module_choice)
         if data_module_class is None:
             raise ValueError(
                 f"Invalid data_module_choice: {self.config.data_module_choice}. "
-                f"Must be one of {list(DATA_MODULE_MAP.keys())}"
+                f"Must be one of {list(DATA_MODULE_CHOICES.keys())}"
             )
 
         self.data_module = data_module_class(

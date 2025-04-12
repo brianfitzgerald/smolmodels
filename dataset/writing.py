@@ -1,7 +1,14 @@
+from functools import partial
+from synthetic_data.generation import (
+    GenWrapperArgs,
+    GenerationWrapper,
+    get_generation_wrapper,
+)
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
 from typing import Optional
 import pandas as pd
+from trl.trainer.grpo_trainer import RewardFunc
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -49,3 +56,27 @@ class WritingDPODataModule(SmDataset):
         dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
+
+
+def llm_judge_func(prompts, completions, **kwargs) -> list[float]:
+    return [0.0] * len(prompts)
+
+
+class WritingGRPODataModule(SmDataset):
+    """Online rewarding using generation wrappers."""
+
+    def setup(self, stage: Optional[str] = None):
+        dataset_pd = pd.read_parquet(
+            "../dataset_files/gutenberg_backtranslate_from_txt.parquet"
+        )
+
+        dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
+        self.train_dataset = dataset["train"]
+        self.val_dataset = dataset["test"]
+        self.generation_wrapper = get_generation_wrapper("gemini-2.0-flash")
+
+    @classmethod
+    def reward_functions(cls) -> list[RewardFunc]:
+        llm_judge_func_partial = partial(llm_judge_func)
+
+        return [llm_judge_func_partial]

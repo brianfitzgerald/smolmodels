@@ -250,7 +250,7 @@ class SmDataset(pl.LightningDataModule):
         return DataLoader(
             self.train_dataset,  # type: ignore
             batch_size=self.config.train_batch_size,
-            num_workers=self.num_workers,
+            num_workers=self.num_workers if self.num_workers else 0,
         )  # type: ignore
 
     def val_dataloader(self):
