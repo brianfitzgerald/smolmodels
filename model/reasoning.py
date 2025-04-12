@@ -140,41 +140,40 @@ def parse_groups(input_string) -> list[list[str]]:
     return groups
 
 
-def score_connections_hard(solution_groups, submitted_groups):
+def score_connections_hard(
+    solution_groups: list[list[str]], submitted_groups: list[list[str]]
+):
     """Return the number of correct groups."""
     hard_score = 0
     correct_group_indices = []  # Track indices of correctly solved solution groups.
 
-    solution_sets = [set(group) for group in solution_groups]
+    solution_set = [set(group) for group in solution_groups]
     solved = set()
 
-    for submitted in submitted_groups:
-        submitted_set = set(submitted)
-        for index, correct_set in enumerate(solution_sets):
-            if submitted_set == correct_set and index not in solved:
+    for submitted_group in submitted_groups:
+        for i, correct_set in enumerate(solution_set):
+            if set(submitted_group) == correct_set and i not in solved:
                 hard_score += 1
-                correct_group_indices.append(index)
-                solved.add(index)
+                correct_group_indices.append(i)
+                solved.add(i)
                 break
 
     return float(hard_score)
 
 
-def score_connections_soft(solution_groups, submitted_groups):
+def score_connections_soft(
+    solution_groups: list[list[str]], submitted_groups: list[list[str]]
+):
     """Return the best match count for each solution group."""
-    total_score = 0
     solution_sets = [set(group) for group in solution_groups]
-    group_size = len(solution_sets[0])
+    submitted_sets = [set(group) for group in submitted_groups]
 
-    for sol_set in solution_sets:
-        best_match_count = 0
-        for submitted in submitted_groups:
-            submitted_set = set(submitted)
-            match_count = len(sol_set.intersection(submitted_set))
-            best_match_count = max(best_match_count, match_count)
-        total_score += best_match_count / group_size
-
-    return float(total_score)
+    # Get highest match count for each solution group
+    best_match_counts = [
+        max(len(sol_set.intersection(submitted)) for submitted in submitted_sets)
+        for sol_set in solution_sets
+    ]
+    return float(sum(best_match_counts) / len(solution_groups)) / len(submitted_groups)
 
 
 def _generations(completions: list[dict]) -> list[str]:
@@ -184,14 +183,28 @@ def _generations(completions: list[dict]) -> list[str]:
 def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward the number of correct groups."""
     model_generations = _generations(completions)
-    groups = [parse_groups(r) for r in model_generations]
-    scores = [score_connections_soft(kwargs["answer"], g) for g in groups]
+    generation_groups = [parse_groups(r) for r in model_generations]
+    scores = [
+        score_connections_soft(answers, groups)
+        for answers, groups in zip(kwargs["answer_groups"], generation_groups)
+    ]
     logger.info(f"Soft accuracy scores: {scores}")
     return scores
 
 
 def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward whether each group is correct as a whole or not."""
+    model_generations = _generations(completions)
+    generation_groups = [parse_groups(r) for r in model_generations]
+    scores = [
+        score_connections_hard(answers, groups)
+        for answers, groups in zip(kwargs["answer_groups"], generation_groups)
+    ]
+    logger.info(f"Hard accuracy scores: {scores}")
+    return scores
+
+
+def logger_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     prompts = [prompt[1]["content"] for prompt in prompts]
     answers = kwargs["answer"]
@@ -204,10 +217,7 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
         logger.info(g)
         logger.info("Answer: " + "-" * 20)
         logger.info(a)
-    generation_groups = [parse_groups(r) for r in model_generations]
-    scores = [score_connections_hard(answers, g) for g in generation_groups]
-    logger.info(f"Hard accuracy scores: {scores}")
-    return scores
+    return [0.0] * len(completions)
 
 
 def group_size_reward(prompts, completions, **kwargs) -> list[float]:
@@ -354,6 +364,7 @@ class ConnectionsDataModule(SmDataset):
             group_size_reward,
             hard_group_reward,
             n_groups_reward,
+            logger_reward,
         ]
 
 

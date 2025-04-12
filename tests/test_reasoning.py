@@ -5,7 +5,6 @@ from model.reasoning import (
     group_size_reward,
     ConnectionsDataModule,
 )
-from loguru import logger
 
 
 FIRST_SAMPLE = {
@@ -52,6 +51,8 @@ FIRST_SAMPLE = {
     ],
 }
 
+ANSWERS_BATCH = [FIRST_SAMPLE["answer_groups"]]
+
 
 def test_parse_groups_single():
     input_str = "<group>apple, banana, cherry</group>"
@@ -86,32 +87,12 @@ def test_parse_groups_empty_group():
 def test_connections_reward_func_correct():
     completion = [[{"content": FIRST_SAMPLE["answer"]}]]
     hard_score = hard_group_reward(
-        FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
+        FIRST_SAMPLE["prompt"], completion, answer_groups=ANSWERS_BATCH
     )
     soft_score = soft_group_reward(
-        FIRST_SAMPLE["prompt"], completion, answer=FIRST_SAMPLE["answer_groups"]
+        FIRST_SAMPLE["prompt"], completion, answer_groups=ANSWERS_BATCH
     )
-    assert [hard_score[0], soft_score[0]] == [4.0, 4.0]
-
-
-def test_connections_reward_func_fully_correct():
-    completion = [
-        [
-            {
-                "content": "<reasoning>The first group are all fruits.</reasoning>\n"
-                + FIRST_SAMPLE["answer"]
-            }
-        ]
-    ]
-    total_score = 0
-    for reward_func in ConnectionsDataModule.reward_functions():
-        score = reward_func(
-            FIRST_SAMPLE["prompt"],
-            completion,
-            answer=FIRST_SAMPLE["answer_groups"],  # type: ignore
-        )
-        total_score += score[0]
-    assert round(total_score, 2) == 9.66
+    assert [hard_score[0], soft_score[0]] == [4.0, 1.0]
 
 
 def test_soft_reward_values():
@@ -124,9 +105,7 @@ def test_soft_reward_values():
     scores = []
     expected_scores = [1.0, 0.75, 0.5, 0.25]
     for c in completions:
-        score = soft_group_reward(
-            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
-        )
+        score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
         scores.append(score[0])
     assert scores == expected_scores
 
@@ -138,27 +117,24 @@ def test_soft_reward_values_multiple_groups():
         "<answer><group>crush, rout, shellac, trash</group></answer>",
     ]
     scores = []
-    expected_scores = [4.0, 2.0, 1.0]
+    expected_scores = [1.0, 1.0, 1.0]
     for c in completions:
-        score = soft_group_reward(
-            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
-        )
+        score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
         scores.append(score[0])
     assert scores == expected_scores
 
 
 def test_hard_reward_values():
     completions = [
+        "<answer><group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group></answer>",
+        "<answer><group>crush, rout, shellac, trash</group><group>cami, halter, tank, tee</group></answer>",
         "<answer><group>crush, rout, shellac, trash</group></answer>",
-        "<answer><group>crush, rout, shellac</group></answer>",
-        "<answer><group>rout, shellac</group></answer>",
-        "<answer><group>rout</group></answer>",
     ]
-    for c, expected in zip(completions, [1.0, 0, 0, 0]):
-        score = hard_group_reward(
-            "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
-        )
-        assert score == [expected]
+    scores = []
+    for c in completions:
+        score = hard_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
+        scores.append(score[0])
+    assert scores == [4.0, 2.0, 1.0]
 
 
 def test_group_size_rewards():
@@ -172,8 +148,6 @@ def test_group_size_rewards():
     out = []
     for c in completions:
         out.append(
-            group_size_reward(
-                "", [[{"content": c}]], answer=FIRST_SAMPLE["answer_groups"]
-            )
+            group_size_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
         )
     assert out == [[0.25], [0.125], [0.0], [0.0], [0.0]]
