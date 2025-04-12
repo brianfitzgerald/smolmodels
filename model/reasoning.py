@@ -158,7 +158,9 @@ def score_connections_hard(
                 solved.add(i)
                 break
 
-    return float(hard_score)
+    if len(submitted_groups) == 0:
+        return 0.0
+    return float(hard_score) / len(submitted_groups)
 
 
 def score_connections_soft(
