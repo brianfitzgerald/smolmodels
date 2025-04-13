@@ -28,7 +28,6 @@ MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
 LLAMA_3_2_1B = "meta-llama/Llama-3.2-1B-Instruct"
 LLAMA_3_2_3B = "meta-llama/Llama-3.2-3B-Instruct"
 LLAMA_3_2_3B_BASE = "meta-llama/Llama-3.2-3B"
-QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 LLAMA_3_1_8B = "meta-llama/Llama-3.1-8B-Instruct"
 SMOL_LM_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 # NOTE that mistral doesn't allow using system prompts, so it must be set to None.
@@ -37,6 +36,7 @@ MINISTRAL_8B = "mistralai/Ministral-8B-Instruct-2410"
 
 QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 QWEN_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
+QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 
 DataCollatorChoice = Literal["basic", "chat"]
 ModelFamily = Literal["qwen", "mistral", "other"]

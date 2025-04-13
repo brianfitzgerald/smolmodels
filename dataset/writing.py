@@ -67,7 +67,28 @@ def llm_judge_func(
     bench: CreativeWritingBench,
     **kwargs,
 ) -> list[float]:
-    scores = asyncio.run(score_writing(completions, prompts, bench, generation_wrapper))
+    # https://stackoverflow.com/questions/55409641/asyncio-run-cannot-be-called-from-a-running-event-loop-when-using-jupyter-no
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    scores = []
+
+    if loop and loop.is_running():
+        tsk = loop.create_task(
+            score_writing(completions, prompts, bench, generation_wrapper)
+        )
+        tsk.add_done_callback(
+            lambda t: print(
+                f"Task done with result={t.result()}  << return val of main()"
+            )
+        )
+    else:
+        print("Starting new event loop")
+        scores = asyncio.run(
+            score_writing(completions, prompts, bench, generation_wrapper)
+        )
     score_sums = [sum(score.values()) for score in scores]
     return score_sums
 
@@ -79,6 +100,20 @@ def _map_writing_grpo(example: dict) -> dict:
             {"role": "user", "content": example["instruction"]},
         ],
     }
+
+
+def _wrap_llm_judge_func(
+    generation_wrapper: GenerationWrapper, bench: CreativeWritingBench
+):
+    """Wrapper function that preserves __name__ attribute for the reward function."""
+
+    def wrapped_func(prompts: list, completions: list, **kwargs) -> list[float]:
+        return llm_judge_func(
+            prompts, completions, generation_wrapper=generation_wrapper, bench=bench
+        )
+
+    wrapped_func.__name__ = "llm_judge_func"
+    return wrapped_func
 
 
 class WritingGRPODataModule(SmDataset):
@@ -98,8 +133,4 @@ class WritingGRPODataModule(SmDataset):
         self.bench = CreativeWritingBench(self.config.run_mode)
 
     def reward_functions(self) -> list[RewardFunc]:
-        llm_judge_func_partial = partial(
-            llm_judge_func, generation_wrapper=self.generation_wrapper, bench=self.bench
-        )
-
-        return [llm_judge_func_partial]
+        return [_wrap_llm_judge_func(self.generation_wrapper, self.bench)]

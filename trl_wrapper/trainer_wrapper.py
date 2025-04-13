@@ -34,6 +34,7 @@ from model.utils import (
     save_dataclass_to_json,
     short_hash,
 )
+from synthetic_data.tasks import RunMode
 from synthetic_data.utils import ldictl
 from trl_wrapper.dpo_trainer import CustomDPOTrainer
 from trl_wrapper.sft_trainer import CustomSFTTrainer
@@ -43,6 +44,7 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_3B,
     MINISTRAL_8B,
     QWEN_1_5_B,
+    QWEN_2_5_3B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -185,11 +187,11 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=MINISTRAL_8B,
+    model_id_or_path=QWEN_2_5_3B,
     wandb_project_name="qwen-connections-grpo",
-    num_generations=4,
-    train_batch_size=8,
-    gradient_accumulation_steps=8,
+    num_generations=2,
+    train_batch_size=4,
+    gradient_accumulation_steps=16,
     data_module_choice="connections",
     max_prompt_length=1024,
     max_completion_length=512,
@@ -212,7 +214,7 @@ GRPO_WRITING_CONFIG = WrapperConfig(
     gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
-    max_completion_length=1024,
+    max_completion_length=512,
     max_grad_norm=0.1,
     n_epochs=1,
     warmup_steps=1000,
@@ -277,6 +279,7 @@ class TrainerWrapper:
     def __init__(self, config: WrapperConfig, use_wandb: bool = False) -> None:
         self.config = config
         self.use_wandb = use_wandb
+        self.run_mode: RunMode = "notebook" if config.notebook_mode else "cli"
 
         # Init tokenizer here so we can use it without loading the model
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
@@ -350,6 +353,7 @@ class TrainerWrapper:
         self.data_module = data_module_class(
             self.tokenizer,
             DatasetConfig(
+                run_mode=self.run_mode,
                 chat_template_path=custom_chat_template,
                 **self.config.__dict__,
             ),
@@ -479,7 +483,7 @@ class TrainerWrapper:
 
         elif self.config.tuning_mode == "grpo":
             device = get_available_device()
-            use_vllm = "cuda" in device and os.environ.get("USE_VLLM", "0") == "1"
+            use_vllm = "cuda" in device
             logger.info(f"Using vllm: {use_vllm}")
             training_args = GRPOConfig(
                 output_dir=output_dir,
@@ -504,8 +508,6 @@ class TrainerWrapper:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 use_vllm=use_vllm,
-                vllm_gpu_memory_utilization=0.3,
-                vllm_device=device,
                 temperature=0.4,
                 report_to="wandb" if self.use_wandb else "none",
             )
