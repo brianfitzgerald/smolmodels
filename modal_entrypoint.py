@@ -32,7 +32,9 @@ def training(config: str = "grpo_connections"):
     cfg = CONFIGS[config]
     vllm_process = None
     if cfg.tuning_mode == "grpo":
-        cmd = f"uv run trl vllm-serve --model {cfg.model_id_or_path}"
+        cmd = (
+            f"uv run trl vllm-serve --model {cfg.model_id_or_path} --max_model_len 8192"
+        )
         cmd_list = cmd.split()
         logger.info(f"Starting vLLM server, cmd: {cmd_list}")
         env = os.environ.copy()
@@ -43,6 +45,8 @@ def training(config: str = "grpo_connections"):
             stderr=sys.stdout,
             env=env,
         )
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     def cleanup():
         if vllm_process:
