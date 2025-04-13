@@ -276,10 +276,15 @@ DATA_MODULE_CHOICES: dict[DataModuleChoice, type[SmDataset]] = {
 
 
 class TrainerWrapper:
-    def __init__(self, config: WrapperConfig, use_wandb: bool = False) -> None:
+    def __init__(
+        self,
+        config: WrapperConfig,
+        notebook_mode: bool = False,
+        use_wandb: bool = False,
+    ) -> None:
         self.config = config
         self.use_wandb = use_wandb
-        self.run_mode: RunMode = "notebook" if config.notebook_mode else "cli"
+        self.run_mode: RunMode = "notebook" if notebook_mode else "cli"
 
         # Init tokenizer here so we can use it without loading the model
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
@@ -297,6 +302,10 @@ class TrainerWrapper:
             self.tokenizer.add_special_tokens(
                 {"additional_special_tokens": self.config.special_tokens}  # type: ignore
             )  # type: ignore
+
+    @property
+    def notebook_mode(self) -> bool:
+        return self.run_mode == "notebook"
 
     def init_model(self):
         device = get_available_device()
@@ -429,7 +438,7 @@ class TrainerWrapper:
                 save_steps=self.config.save_steps,
                 save_total_limit=2,
                 eval_strategy="steps",
-                eval_on_start=not self.config.notebook_mode,
+                eval_on_start=not self.notebook_mode,
                 eval_steps=self.config.eval_steps,
                 bf16=True,
                 push_to_hub=False,
@@ -439,7 +448,7 @@ class TrainerWrapper:
                 dataloader_pin_memory=True,
                 run_name=run_name,
                 output_dir=output_dir,
-                disable_tqdm=not self.config.notebook_mode,
+                disable_tqdm=not self.notebook_mode,
                 neftune_noise_alpha=self.config.neftune_noise_alpha,
                 use_liger=True,
                 remove_unused_columns=False,
@@ -483,7 +492,7 @@ class TrainerWrapper:
 
         elif self.config.tuning_mode == "grpo":
             device = get_available_device()
-            use_vllm = "cuda" in device
+            use_vllm = "cuda" in device and self.run_mode != "notebook"
             logger.info(f"Using vllm: {use_vllm}")
             training_args = GRPOConfig(
                 output_dir=output_dir,
@@ -571,8 +580,8 @@ class TrainerWrapper:
                 tf32=False,
                 push_to_hub=False,
                 report_to="wandb" if self.use_wandb else "none",
-                dataloader_num_workers=0 if self.config.notebook_mode else 4,
-                dataset_num_proc=1 if self.config.notebook_mode else None,
+                dataloader_num_workers=0 if self.notebook_mode else 4,
+                dataset_num_proc=1 if self.notebook_mode else None,
                 max_length=self.config.max_sequence_length,
                 max_prompt_length=self.config.max_prompt_length,
                 precompute_ref_log_probs=True,
@@ -583,7 +592,7 @@ class TrainerWrapper:
                 generate_during_eval=True,
                 run_name=run_name,
                 output_dir=output_dir,
-                disable_tqdm=not self.config.notebook_mode,
+                disable_tqdm=not self.notebook_mode,
             )
 
             self.trainer = CustomDPOTrainer(

@@ -57,7 +57,7 @@ def training(config: str = "grpo_connections"):
     signal.signal(signal.SIGINT, lambda signo, frame: cleanup())
 
     try:
-        wrapper = TrainerWrapper(cfg, True)
+        wrapper = TrainerWrapper(cfg, use_wandb=True)
         wrapper.init_model()
         wrapper.init_data_module(dataset_root_path=DATASET_VOLUME_PATH)
         wrapper.init_trainer(config)

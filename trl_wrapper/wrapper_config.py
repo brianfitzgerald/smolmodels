@@ -50,7 +50,6 @@ class WrapperConfig:
     grpo_beta: float = 0.0
 
     # Experiment / Environment Settings
-    notebook_mode: bool = False
     wandb_project_name: str = "codecontests-llama-3b"
     run_suffix: Optional[str] = None
     special_tokens: Optional[List[str]] = None
@@ -134,7 +133,7 @@ class SmDataset(pl.LightningDataModule):
         self.train_dataset: Dataset | None = None
         self.val_dataset: Dataset | None = None
         self.tokenizer = tokenizer
-        self.num_workers = 1 if config.notebook_mode else None
+        self.num_workers = 1 if config.run_mode == "notebook" else None
         current_dir = Path().resolve().name
         self.prefix = "/"
         if current_dir == "notebooks":
@@ -183,7 +182,7 @@ class SmDataset(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None):
         logger.info(f"Loading dataset for stage {stage}")
         ensure_directory(self.cache_dir, clear=False)
-        use_cache = not self.config.notebook_mode
+        use_cache = not self.config.run_mode == "notebook"
         logger.info(
             f"Processing dataset for stage {stage}, workers: {self.num_workers}, cache dir {self.cache_dir}, using cache: {use_cache}"
         )

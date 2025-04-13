@@ -77,6 +77,7 @@ class GenWrapperArgs:
     stop: List[str] | None = None
     is_reasoning_model: bool = False
     seed: Optional[int] = None
+    async_client: bool = False
 
 
 class GenerationWrapper(ABC):
@@ -149,11 +150,23 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             raise ValueError(
                 f"{key_env_var_name} is required for {get_class_name(self)}"
             )
-        self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        if args.async_client:
+            self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        else:
+            self.oai_client = OpenAI(api_key=api_key, base_url=base_url)
         self.model_name = args.model_id or "gpt-4o-mini"
         self.args = args
         self.rps_limiter = RPSLimiter(args.max_rps)
         self.extra_body = {}
+
+    def generate_sync(self, conversations: List[Conversation]) -> List[str]:
+        response: ChatCompletion = self.oai_client.chat.completions.create(
+            model=self.model_name,
+            messages=conversations,
+            temperature=self.args.temperature,
+            max_completion_tokens=self.args.max_tokens,
+        )
+        return [r.message.content for r in response.choices]
 
     @timeout(30)
     async def generate(self, conversations: List[Conversation]) -> List[str]:

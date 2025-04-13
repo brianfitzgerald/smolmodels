@@ -75,21 +75,24 @@ def llm_judge_func(
 
     scores = []
 
+    def _task_done(t):
+        result = t.result()
+        print(f"Result: {result}")
+        scores.extend([sum(score.values()) for score in result])
+
     if loop and loop.is_running():
         tsk = loop.create_task(
             score_writing(completions, prompts, bench, generation_wrapper)
         )
-        tsk.add_done_callback(
-            lambda t: print(
-                f"Task done with result={t.result()}  << return val of main()"
-            )
-        )
+        tsk.add_done_callback(_task_done)
     else:
         print("Starting new event loop")
         scores = asyncio.run(
             score_writing(completions, prompts, bench, generation_wrapper)
         )
+    print(f"Scores: {scores}")
     score_sums = [sum(score.values()) for score in scores]
+    print(f"Score sums: {score_sums}")
     return score_sums
 
 
