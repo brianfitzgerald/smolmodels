@@ -141,7 +141,6 @@ class SmDataset(pl.LightningDataModule):
         self.cache_dir = (
             f"{self.prefix}dataset_caches/{class_name_to_underscore(self.__class__)}"
         )
-        logger.info(f"Cache dir: {self.cache_dir}")
         self.input_column, self.target_column = "context", "fields"
         self.train_dataset: Dataset | None = None
         self.val_dataset: Dataset | None = None

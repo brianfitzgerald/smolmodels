@@ -17,7 +17,6 @@ from loguru import logger
 from openai import NOT_GIVEN, LengthFinishReasonError, NotGiven, AsyncOpenAI, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from pydantic import BaseModel
-from wrapt_timeout_decorator import timeout
 
 from synthetic_data.utils import (
     Conversation,
@@ -168,7 +167,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         )
         return [r.message.content for r in response.choices]
 
-    @timeout(30)
     async def generate(self, conversations: List[Conversation]) -> List[str]:
         self.n_retries = MAX_RETRIES
         while True:
@@ -338,7 +336,6 @@ class GeminiWrapper(GenerationWrapper):
         self.client = genai.Client(api_key=api_key)
         self.args = args
 
-    @timeout(30)
     async def generate(self, conversations: List[Conversation]):
         reqs = []
         for conv in [_openai_conversation_to_gemini(c) for c in conversations]:

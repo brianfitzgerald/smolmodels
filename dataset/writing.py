@@ -11,6 +11,7 @@ from typing import Optional
 import pandas as pd
 from trl.trainer.grpo_trainer import RewardFunc
 from synthetic_data.tasks.writing import score_writing
+import threading
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -60,42 +61,6 @@ class WritingDPODataModule(SmDataset):
         self.val_dataset = dataset["test"]
 
 
-def llm_judge_func(
-    prompts: list,
-    completions: list,
-    generation_wrapper: GenerationWrapper,
-    bench: CreativeWritingBench,
-    **kwargs,
-) -> list[float]:
-    # https://stackoverflow.com/questions/55409641/asyncio-run-cannot-be-called-from-a-running-event-loop-when-using-jupyter-no
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    scores = []
-
-    def _task_done(t):
-        result = t.result()
-        print(f"Result: {result}")
-        scores.extend([sum(score.values()) for score in result])
-
-    if loop and loop.is_running():
-        tsk = loop.create_task(
-            score_writing(completions, prompts, bench, generation_wrapper)
-        )
-        tsk.add_done_callback(_task_done)
-    else:
-        print("Starting new event loop")
-        scores = asyncio.run(
-            score_writing(completions, prompts, bench, generation_wrapper)
-        )
-    print(f"Scores: {scores}")
-    score_sums = [sum(score.values()) for score in scores]
-    print(f"Score sums: {score_sums}")
-    return score_sums
-
-
 def _map_writing_grpo(example: dict) -> dict:
     # TODO maybe compare to existing rewards?
     return {
@@ -105,18 +70,54 @@ def _map_writing_grpo(example: dict) -> dict:
     }
 
 
-def _wrap_llm_judge_func(
-    generation_wrapper: GenerationWrapper, bench: CreativeWritingBench
-):
-    """Wrapper function that preserves __name__ attribute for the reward function."""
+def run_sync(coro):
+    """
+    Run an async coroutine in a synchronous context.
 
-    def wrapped_func(prompts: list, completions: list, **kwargs) -> list[float]:
-        return llm_judge_func(
-            prompts, completions, generation_wrapper=generation_wrapper, bench=bench
-        )
+    If there's no running event loop, use asyncio.run.
+    Otherwise, run the coroutine in a new thread with its own event loop.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
 
-    wrapped_func.__name__ = "llm_judge_func"
-    return wrapped_func
+    print(f"Loop: {loop}")
+    if loop is not None and loop.is_running():
+        # Running in an environment like Jupyter Notebook.
+        result_container = []
+
+        def _run():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            result = new_loop.run_until_complete(coro)
+            new_loop.close()
+            result_container.append(result)
+
+        thread = threading.Thread(target=_run)
+        thread.start()
+        thread.join()
+        return result_container[0]
+    else:
+        # No event loop running; use asyncio.run for a clean execution.
+        return asyncio.run(coro)
+
+
+def llm_judge_func(
+    prompts: list[str],
+    completions: list[str],
+    generation_wrapper: GenerationWrapper = None,
+    bench: CreativeWritingBench = None,
+) -> list[float]:
+    async def run_score():
+        out = await score_writing(completions, prompts, bench, generation_wrapper)
+        print(f"Out: {out}")
+        return out
+
+    scores = run_sync(run_score())
+
+    score_sums = [sum(score.values()) for score in scores]
+    return score_sums
 
 
 class WritingGRPODataModule(SmDataset):
@@ -129,6 +130,7 @@ class WritingGRPODataModule(SmDataset):
 
         dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
         dataset = dataset.map(_map_writing_grpo)
+        dataset = dataset.remove_columns(["completion"])
         dataset.shuffle(seed=42)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
@@ -136,4 +138,10 @@ class WritingGRPODataModule(SmDataset):
         self.bench = CreativeWritingBench(self.config.run_mode)
 
     def reward_functions(self) -> list[RewardFunc]:
-        return [_wrap_llm_judge_func(self.generation_wrapper, self.bench)]
+        return [
+            partial(
+                llm_judge_func,
+                generation_wrapper=self.generation_wrapper,
+                bench=self.bench,
+            )
+        ]
