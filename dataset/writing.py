@@ -7,11 +7,12 @@ from synthetic_data.generation import (
 from synthetic_data.writing_judge import CreativeWritingBench
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
-from typing import Optional
+from typing import Coroutine, Optional
 import pandas as pd
 from trl.trainer.grpo_trainer import RewardFunc
 from synthetic_data.tasks.writing import score_writing
 import threading
+from model.reasoning import logger_reward
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -70,21 +71,14 @@ def _map_writing_grpo(example: dict) -> dict:
     }
 
 
-def run_sync(coro):
-    """
-    Run an async coroutine in a synchronous context.
-
-    If there's no running event loop, use asyncio.run.
-    Otherwise, run the coroutine in a new thread with its own event loop.
-    """
+def run_sync(coro: Coroutine):
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = None
 
-    print(f"Loop: {loop}")
+    # Running in an environment like Jupyter Notebook.
     if loop is not None and loop.is_running():
-        # Running in an environment like Jupyter Notebook.
         result_container = []
 
         def _run():
@@ -98,8 +92,8 @@ def run_sync(coro):
         thread.start()
         thread.join()
         return result_container[0]
+    # No event loop running; use asyncio.run for a clean execution.
     else:
-        # No event loop running; use asyncio.run for a clean execution.
         return asyncio.run(coro)
 
 
@@ -111,13 +105,31 @@ def llm_judge_func(
 ) -> list[float]:
     async def run_score():
         out = await score_writing(completions, prompts, bench, generation_wrapper)
-        print(f"Out: {out}")
         return out
 
     scores = run_sync(run_score())
 
+    print(f"scores: {scores}")
     score_sums = [sum(score.values()) for score in scores]
+    print(f"score_sums: {score_sums}")
     return score_sums
+
+
+def create_llm_judge_func(
+    generation_wrapper: GenerationWrapper, bench: CreativeWritingBench, **kwargs
+) -> RewardFunc:
+    """Create a function for LLM judging with a proper name."""
+
+    def named_llm_judge_func(
+        prompts: list[str], completions: list[str], **kwargs
+    ) -> list[float]:
+        print(f"kwargs: {kwargs}")
+        return llm_judge_func(prompts, completions, generation_wrapper, bench, **kwargs)
+
+    named_llm_judge_func.__name__ = (
+        f"llm_judge_func_{generation_wrapper.__class__.__name__}"
+    )
+    return named_llm_judge_func
 
 
 class WritingGRPODataModule(SmDataset):
@@ -130,7 +142,18 @@ class WritingGRPODataModule(SmDataset):
 
         dataset = Dataset.from_pandas(dataset_pd).train_test_split(test_size=0.1)
         dataset = dataset.map(_map_writing_grpo)
-        dataset = dataset.remove_columns(["completion"])
+        dataset = dataset.remove_columns(
+            [
+                "paragraph",
+                "text",
+                "title",
+                "author",
+                "id",
+                "tags",
+                "instruction",
+                "completion",
+            ]
+        )
         dataset.shuffle(seed=42)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
@@ -139,9 +162,6 @@ class WritingGRPODataModule(SmDataset):
 
     def reward_functions(self) -> list[RewardFunc]:
         return [
-            partial(
-                llm_judge_func,
-                generation_wrapper=self.generation_wrapper,
-                bench=self.bench,
-            )
+            create_llm_judge_func(self.generation_wrapper, self.bench),
+            logger_reward,
         ]
