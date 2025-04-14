@@ -194,6 +194,11 @@ def _generations(completions: list[dict]) -> list[str]:
     return [completion[0]["content"] for completion in completions]
 
 
+def _user_messages(prompts: list[dict]) -> list[str]:
+    idx = 1 if prompts[0][0]["role"] == "system" else 0
+    return [p[idx]["content"] for p in prompts]
+
+
 def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward the number of correct groups."""
     model_generations = _generations(completions)
@@ -220,17 +225,17 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
 
 def logger_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
-    prompts = [prompt[1]["content"] for prompt in prompts]
-    answers = kwargs["answer"]
+    prompts = _user_messages(prompts)
     logger.info("Generations:")
-    for g, p, a in zip(model_generations, prompts, answers):
+    for i, (g, p) in enumerate(zip(model_generations, prompts)):
         logger.info("=" * 40)
-        logger.info("Prompt: " + "-" * 20)
+        logger.info(f"Prompt {i}: " + "-" * 20)
         logger.info(p)
         logger.info("Generation: " + "-" * 20)
         logger.info(g)
-        logger.info("Answer: " + "-" * 20)
-        logger.info(a)
+        if "answer" in kwargs:
+            logger.info("Answer: " + "-" * 20)
+            logger.info(kwargs["answer"][i])
     return [0.0] * len(completions)
 
 

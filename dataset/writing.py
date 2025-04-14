@@ -149,9 +149,7 @@ class WritingGRPODataModule(SmDataset):
                 "title",
                 "author",
                 "id",
-                "tags",
                 "instruction",
-                "completion",
             ]
         )
         dataset.shuffle(seed=42)
