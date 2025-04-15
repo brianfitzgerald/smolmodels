@@ -1,5 +1,7 @@
 import asyncio
 from functools import partial
+import math
+import statistics
 from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
@@ -7,12 +9,13 @@ from synthetic_data.generation import (
 from synthetic_data.writing_judge import CreativeWritingBench
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
-from typing import Coroutine, Optional
+from typing import Coroutine, Optional, TypeVar
 import pandas as pd
 from trl.trainer.grpo_trainer import RewardFunc
 from synthetic_data.tasks.writing import score_writing
 import threading
 from model.reasoning import logger_reward
+from typing import Any
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -71,7 +74,10 @@ def _map_writing_grpo(example: dict) -> dict:
     }
 
 
-def run_sync(coro: Coroutine):
+T = TypeVar("T")
+
+
+def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -97,22 +103,32 @@ def run_sync(coro: Coroutine):
         return asyncio.run(coro)
 
 
+MAX_SCORE = 20
+
+
 def llm_judge_func(
     prompts: list[str],
     completions: list[str],
-    generation_wrapper: GenerationWrapper = None,
-    bench: CreativeWritingBench = None,
+    generation_wrapper: GenerationWrapper | None = None,
+    bench: CreativeWritingBench | None = None,
 ) -> list[float]:
     async def run_score():
+        assert generation_wrapper is not None
+        assert bench is not None
         out = await score_writing(completions, prompts, bench, generation_wrapper)
         return out
 
     scores = run_sync(run_score())
 
-    print(f"scores: {scores}")
-    score_sums = [sum(score.values()) for score in scores]
-    print(f"score_sums: {score_sums}")
-    return score_sums
+    score_vals = []
+    for s in scores:
+        total = 0.0
+        for v in s.values():
+            v = max(min(v, MAX_SCORE), 0.0)
+            total += v / MAX_SCORE
+        avg_score = round(total / len(s), 2)
+        score_vals.append(avg_score)
+    return score_vals
 
 
 def create_llm_judge_func(
@@ -123,7 +139,8 @@ def create_llm_judge_func(
     def named_llm_judge_func(
         prompts: list[str], completions: list[str], **kwargs
     ) -> list[float]:
-        print(f"kwargs: {kwargs}")
+        print(f"prompts: {prompts}")
+        print(f"completions: {completions}")
         return llm_judge_func(prompts, completions, generation_wrapper, bench, **kwargs)
 
     named_llm_judge_func.__name__ = (

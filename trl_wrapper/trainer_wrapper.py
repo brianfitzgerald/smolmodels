@@ -43,8 +43,7 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
     MINISTRAL_8B,
-    QWEN_1_5_B,
-    QWEN_2_5_3B,
+    QWEN_2_1_5_B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -171,7 +170,7 @@ ULTRAFEEDBACK_CONFIG = WrapperConfig(
 
 
 GRPO_MATH_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_1_5_B,
+    model_id_or_path=QWEN_2_1_5_B,
     wandb_project_name="qwen-math-grpo",
     train_batch_size=2,
     gradient_accumulation_steps=8,
@@ -187,7 +186,7 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_2_5_3B,
+    model_id_or_path=QWEN_2_1_5_B,
     wandb_project_name="qwen-connections-grpo",
     num_generations=4,
     train_batch_size=8,

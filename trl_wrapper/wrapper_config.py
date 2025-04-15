@@ -34,8 +34,8 @@ SMOL_LM_135M = "HuggingFaceTB/SmolLM2-135M-Instruct"
 MISTRAL_7B = "mistralai/Mistral-7B-Instruct-v0.3"
 MINISTRAL_8B = "mistralai/Ministral-8B-Instruct-2410"
 
-QWEN_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
-QWEN_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
+QWEN_2_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
+QWEN_2_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
 QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 
 DataCollatorChoice = Literal["basic", "chat"]

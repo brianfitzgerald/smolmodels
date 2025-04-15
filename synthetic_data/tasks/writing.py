@@ -398,7 +398,8 @@ async def score_writing(
     prompts: list[str],
     bench: CreativeWritingBench,
     judge_generator: GenerationWrapper,
-):
+) -> list[dict[str, float]]:
+    """Perform inference with a judge model and return a list of score dictionaries."""
     judge_convs: list[Conversation] = [
         [
             {
@@ -417,8 +418,8 @@ async def score_writing(
         logger.warning("Some judge completions were None")
         return []
 
-    scores_formatted = [bench.parse_judge_scores(score) for score in judge_completions]
-    return scores_formatted
+    score_dicts = [bench.parse_judge_scores(score) for score in judge_completions]
+    return score_dicts
 
 
 async def _generate_and_score(
