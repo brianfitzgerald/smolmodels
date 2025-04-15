@@ -10,7 +10,7 @@ from openai import OpenAI
 
 from loguru import logger
 
-from scripts.modal_definitons import MODEL_WEIGHTS_VOLUME
+from scripts.modal_definitions import MODEL_WEIGHTS_VOLUME
 
 
 def _convert_epub_to_txt(epub_path: str, out_dir: str) -> str:

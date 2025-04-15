@@ -7,7 +7,7 @@ import signal
 import sys
 
 
-from scripts.modal_definitons import (
+from scripts.modal_definitions import (
     SMOLMODELS_IMAGE,
     format_timeout,
     app,
@@ -57,7 +57,7 @@ def training(config: str = "grpo_connections"):
     signal.signal(signal.SIGINT, lambda signo, frame: cleanup())
 
     try:
-        wrapper = TrainerWrapper(cfg, use_wandb=True)
+        wrapper = TrainerWrapper(cfg, use_wandb=True, modal=True)
         wrapper.init_model()
         wrapper.init_data_module(dataset_root_path=DATASET_VOLUME_PATH)
         wrapper.init_trainer(config)

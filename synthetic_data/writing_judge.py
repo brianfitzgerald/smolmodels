@@ -1,11 +1,13 @@
 import os
 import re
 from synthetic_data.tasks import RunMode
+from loguru import logger
 
 
 class CreativeWritingBench:
     def __init__(self, run_mode: RunMode) -> None:
         super().__init__()
+        logger.info(f"run_mode: {run_mode}")
         template_path = (
             "/prompt_templates/"
             if run_mode == "modal"

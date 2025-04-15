@@ -3,7 +3,7 @@ from typing import Optional
 import modal
 from loguru import logger
 import modal.gpu
-from scripts.modal_definitons import MODEL_WEIGHTS_VOLUME
+from scripts.modal_definitions import MODEL_WEIGHTS_VOLUME
 import subprocess
 
 

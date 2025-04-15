@@ -44,6 +44,7 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_3B,
     MINISTRAL_8B,
     QWEN_2_1_5_B,
+    QWEN_2_5_3B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -206,7 +207,7 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 GRPO_WRITING_CONFIG = WrapperConfig(
-    model_id_or_path=MINISTRAL_8B,
+    model_id_or_path=QWEN_2_5_3B,
     wandb_project_name="writing-grpo",
     num_generations=4,
     train_batch_size=8,
@@ -280,10 +281,13 @@ class TrainerWrapper:
         config: WrapperConfig,
         notebook_mode: bool = False,
         use_wandb: bool = False,
+        modal: bool = False,
     ) -> None:
         self.config = config
         self.use_wandb = use_wandb
-        self.run_mode: RunMode = "notebook" if notebook_mode else "cli"
+        self.run_mode: RunMode = (
+            "notebook" if notebook_mode else "modal" if modal else "cli"
+        )
 
         # Init tokenizer here so we can use it without loading the model
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
@@ -499,7 +503,7 @@ class TrainerWrapper:
                 learning_rate=self.config.learning_rate,
                 adam_beta1=0.9,
                 adam_beta2=0.99,
-                weight_decay=0.1,
+                weight_decay=0.05,
                 warmup_steps=self.config.warmup_steps,
                 lr_scheduler_type=self.config.lr_scheduler.value,
                 logging_steps=1,
@@ -516,25 +520,9 @@ class TrainerWrapper:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 use_vllm=use_vllm,
-                temperature=0.4,
+                temperature=0.9,
                 report_to="wandb" if self.use_wandb else "none",
             )
-            peft_config = LoraConfig(
-                r=16,
-                lora_alpha=64,
-                target_modules=[
-                    "q_proj",
-                    "k_proj",
-                    "v_proj",
-                    "o_proj",
-                    "up_proj",
-                    "down_proj",
-                    "gate_proj",
-                ],
-                task_type="CAUSAL_LM",
-                lora_dropout=0.05,
-            )
-
             self.trainer = GRPOTrainer(
                 model=self.model,
                 args=training_args,
@@ -542,11 +530,6 @@ class TrainerWrapper:
                 reward_funcs=self.data_module.reward_functions(),
                 processing_class=self.tokenizer,
             )
-            # self.trainer.add_callback(
-            #     EvalCallback(
-            #         self.model, self.tokenizer, self.data_module.val_dataset, device
-            #     )
-            # )
 
         elif self.config.tuning_mode == "reward":
             config = RewardConfig(optim=self.config.optimizer)

@@ -4,7 +4,6 @@ from trl_wrapper.trainer_wrapper import (
     TrainerWrapper,
     CONFIGS,
 )
-from typing import Optional
 from dotenv import load_dotenv
 
 
@@ -19,9 +18,7 @@ def main(
     load_dotenv(".env")
 
     cfg = CONFIGS[config]
-    if notebook_mode:
-        cfg.notebook_mode = True
-    wrapper = TrainerWrapper(cfg, wandb)
+    wrapper = TrainerWrapper(cfg, notebook_mode, wandb)
     wrapper.init_model()
     wrapper.init_data_module()
     wrapper.init_trainer(config)

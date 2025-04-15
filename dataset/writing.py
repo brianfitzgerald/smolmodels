@@ -2,6 +2,8 @@ import asyncio
 from functools import partial
 import math
 import statistics
+
+from loguru import logger
 from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
@@ -139,8 +141,6 @@ def create_llm_judge_func(
     def named_llm_judge_func(
         prompts: list[str], completions: list[str], **kwargs
     ) -> list[float]:
-        print(f"prompts: {prompts}")
-        print(f"completions: {completions}")
         return llm_judge_func(prompts, completions, generation_wrapper, bench, **kwargs)
 
     named_llm_judge_func.__name__ = (
