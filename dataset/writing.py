@@ -125,11 +125,22 @@ def llm_judge_func(
     score_vals = []
     for s in scores:
         total = 0.0
+        if len(s) == 0:
+            logger.error(
+                f"s not same length as completions: {len(s)} != {len(completions)}"
+            )
+            return [0.0] * len(completions)
         for v in s.values():
             v = max(min(v, MAX_SCORE), 0.0)
             total += v / MAX_SCORE
         avg_score = round(total / len(s), 2)
         score_vals.append(avg_score)
+
+    if len(score_vals) != len(completions):
+        logger.error(
+            f"score_vals not same length as completions: {len(score_vals)} != {len(completions)}"
+        )
+        score_vals = [0.0] * len(completions)
     return score_vals
 
 

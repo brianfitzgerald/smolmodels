@@ -256,7 +256,7 @@ CONFIGS = {
     "grpo_math": GRPO_MATH_CONFIG,
     "connections": CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
-    "writing_grpo": GRPO_WRITING_CONFIG,
+    "writing": GRPO_WRITING_CONFIG,
     "writing_dpo": WRITING_DPO_CONFIG,
 }
 
