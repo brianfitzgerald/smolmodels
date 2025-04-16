@@ -206,10 +206,10 @@ CONNECTIONS_CONFIG = WrapperConfig(
     tuning_mode="grpo",
 )
 
-GRPO_WRITING_CONFIG = WrapperConfig(
+WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_2_5_3B,
     wandb_project_name="writing-grpo",
-    num_generations=4,
+    num_generations=8,
     train_batch_size=8,
     gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
@@ -217,7 +217,7 @@ GRPO_WRITING_CONFIG = WrapperConfig(
     max_completion_length=512,
     max_grad_norm=0.1,
     n_epochs=1,
-    warmup_steps=1000,
+    warmup_steps=50,
     eval_batch_size=1,
     learning_rate=1e-5,
     gradient_checkpointing=True,
@@ -256,7 +256,7 @@ CONFIGS = {
     "grpo_math": GRPO_MATH_CONFIG,
     "connections": CONNECTIONS_CONFIG,
     "txt_bt": TXT_BT_CONFIG,
-    "writing": GRPO_WRITING_CONFIG,
+    "writing": WRITING_GRPO_CONFIG,
     "writing_dpo": WRITING_DPO_CONFIG,
 }
 

@@ -76,7 +76,7 @@ class GenWrapperArgs:
     stop: List[str] | None = None
     is_reasoning_model: bool = False
     seed: Optional[int] = None
-    async_client: bool = False
+    async_client: bool = True
 
 
 class GenerationWrapper(ABC):
@@ -367,6 +367,7 @@ RemoteModel = Literal[
     "mistral-small-3",
     "gpt-4o-mini",
     "gpt-4o",
+    "gpt-4.1-nano",
     "o3-mini",
     "mock",
     "vllm",
@@ -418,6 +419,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "gpt-4o": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4o", max_rps=5000 / 60),
+    ),
+    "gpt-4.1-nano": RemoteModelChoice(
+        OpenAIGenerationWrapper,
+        GenWrapperArgs(model_id="gpt-4.1-nano", max_rps=5000 / 60),
     ),
     "mock": RemoteModelChoice(MockGenerator),
     "vllm": RemoteModelChoice(

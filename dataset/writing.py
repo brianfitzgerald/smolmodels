@@ -123,13 +123,14 @@ def llm_judge_func(
     scores = run_sync(run_score())
 
     score_vals = []
-    for s in scores:
+    for i, s in enumerate(scores):
         total = 0.0
         if len(s) == 0:
             logger.error(
                 f"s not same length as completions: {len(s)} != {len(completions)}"
             )
             return [0.0] * len(completions)
+        logger.info(f"sample {i} score: {s}")
         for v in s.values():
             v = max(min(v, MAX_SCORE), 0.0)
             total += v / MAX_SCORE
@@ -183,7 +184,7 @@ class WritingGRPODataModule(SmDataset):
         dataset.shuffle(seed=42)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
-        self.generation_wrapper = get_generation_wrapper("gemini-2.0-flash")
+        self.generation_wrapper = get_generation_wrapper("gpt-4.1-nano")
         self.bench = CreativeWritingBench(self.config.run_mode)
 
     def reward_functions(self) -> list[RewardFunc]:

@@ -15,7 +15,7 @@ dependencies = [
     "python-dotenv==1.0.1",
     "fsspec==2023.10.0",
     "matplotlib",
-    "openai",
+    "openai==1.74.0",
     "unidecode",
     "anthropic==0.49.0",
     "pillow==10.4.0",
