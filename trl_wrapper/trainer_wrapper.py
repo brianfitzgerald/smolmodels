@@ -207,11 +207,11 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 WRITING_GRPO_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_2_5_3B,
+    model_id_or_path=MINISTRAL_8B,
     wandb_project_name="writing-grpo",
-    num_generations=8,
-    train_batch_size=8,
-    gradient_accumulation_steps=8,
+    num_generations=4,
+    train_batch_size=4,
+    gradient_accumulation_steps=4,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
     max_completion_length=512,

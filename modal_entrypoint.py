@@ -25,7 +25,7 @@ DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files
     gpu="A100:2",
     secrets=[modal.Secret.from_name("smolmodels")],
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
-    timeout=format_timeout(hours=5),
+    timeout=format_timeout(hours=6),
 )
 def training(config: str = "grpo_connections"):
     assert config in CONFIGS, f"Unknown config: {config}"
