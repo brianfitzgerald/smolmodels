@@ -209,9 +209,9 @@ CONNECTIONS_CONFIG = WrapperConfig(
 WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,
     wandb_project_name="writing-grpo",
-    num_generations=4,
-    train_batch_size=4,
-    gradient_accumulation_steps=4,
+    num_generations=2,
+    train_batch_size=2,
+    gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
     max_completion_length=512,
@@ -222,7 +222,7 @@ WRITING_GRPO_CONFIG = WrapperConfig(
     learning_rate=1e-5,
     gradient_checkpointing=True,
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
-    optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
+    optimizer=OptimizerNames.ADAMW_8BIT.value,
     tuning_mode="grpo",
 )
 

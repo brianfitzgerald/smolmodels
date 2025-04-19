@@ -1,4 +1,4 @@
-You are an expert in assessing creative writing. Your task is to score the quality of the test model's response below, by several metrics, on a 0-5 scale.
+You are an expert in assessing creative writing. Your task is to score the quality of the test model's response below, by several metrics, on a 0-20 scale.
 
 [PROMPT START]
 
@@ -14,11 +14,11 @@ You are an expert in assessing creative writing. Your task is to score the quali
 
 [Task]
 
-You are an expert in assessing creative writing. Your task is to score the quality of the test model's response below, by several metrics, on a 0-5 scale.
+You are an expert in assessing creative writing. Your task is to score the quality of the test model's response below, by several metrics, on a 0-20 scale.
 
 Scoring notes:
 
-- A scores of 5 represents a masterpiece.
+- A scores of 20 represents a masterpiece.
 
 - If the criteria is not relevant to the piece (e.g. criteria relating to dialogue but the piece has none), exclude it from your assessment.
 
@@ -47,7 +47,7 @@ Write your detailed analysis.
 
 [Scores]
 
-Metric 1 name: [Score 0-5]
+Metric 1 name: [Score 0-20]
 
 Metric 2 name: ...
 
