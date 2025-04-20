@@ -27,13 +27,14 @@ DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
 )
-def training(config: str = "grpo_connections"):
+def training(config: str, wandb: bool = False):
+    assert config, "Config must be provided with --config"
     assert config in CONFIGS, f"Unknown config: {config}"
     cfg = CONFIGS[config]
     vllm_process = None
     if cfg.tuning_mode == "grpo":
         cmd = (
-            f"uv run trl vllm-serve --model {cfg.model_id_or_path} --max_model_len 8192"
+            f"uv run trl vllm-serve --model {cfg.model_id_or_path} --max_model_len 4096"
         )
         cmd_list = cmd.split()
         logger.info(f"Starting vLLM server, cmd: {cmd_list}")
@@ -57,7 +58,7 @@ def training(config: str = "grpo_connections"):
     signal.signal(signal.SIGINT, lambda signo, frame: cleanup())
 
     try:
-        wrapper = TrainerWrapper(cfg, use_wandb=True, modal=True)
+        wrapper = TrainerWrapper(cfg, use_wandb=wandb, modal=True)
         wrapper.init_model()
         wrapper.init_data_module(dataset_root_path=DATASET_VOLUME_PATH)
         wrapper.init_trainer(config)

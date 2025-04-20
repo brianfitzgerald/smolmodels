@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import copy
 
 import torch
 import torch.nn.utils.rnn
@@ -43,8 +44,8 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
     MINISTRAL_8B,
+    QWEN_2_0_5_B,
     QWEN_2_1_5_B,
-    QWEN_2_5_3B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -190,14 +191,14 @@ CONNECTIONS_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_2_1_5_B,
     wandb_project_name="qwen-connections-grpo",
     num_generations=4,
-    train_batch_size=8,
-    gradient_accumulation_steps=4,
+    train_batch_size=16,
+    gradient_accumulation_steps=2,
     data_module_choice="connections",
     max_prompt_length=1024,
     max_completion_length=512,
     max_grad_norm=0.1,
     n_epochs=1,
-    warmup_steps=1000,
+    warmup_steps=100,
     eval_batch_size=1,
     learning_rate=1e-5,
     gradient_checkpointing=True,
@@ -205,6 +206,10 @@ CONNECTIONS_CONFIG = WrapperConfig(
     optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
 )
+
+CONNECTIONS_CONFIG_05B = copy.deepcopy(CONNECTIONS_CONFIG)
+CONNECTIONS_CONFIG_05B.model_id_or_path = QWEN_2_0_5_B
+
 
 WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,

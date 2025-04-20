@@ -338,7 +338,7 @@ class ConnectionsDataModule(SmDataset):
                 ).to_dict(orient="records"),
                 "words": list(itertools.chain.from_iterable(g["words"].dropna())),
             }
-            for _ in range(100000)
+            for _ in range(10000)
         ]
 
         groups_pd = pd.DataFrame(groups)
