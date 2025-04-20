@@ -158,15 +158,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.rps_limiter = RPSLimiter(args.max_rps)
         self.extra_body = {}
 
-    def generate_sync(self, conversations: List[Conversation]) -> List[str]:
-        response: ChatCompletion = self.oai_client.chat.completions.create(
-            model=self.model_name,
-            messages=conversations,
-            temperature=self.args.temperature,
-            max_completion_tokens=self.args.max_tokens,
-        )
-        return [r.message.content for r in response.choices]
-
     async def generate(self, conversations: List[Conversation]) -> List[str]:
         self.n_retries = MAX_RETRIES
         while True:
@@ -336,7 +327,7 @@ class GeminiWrapper(GenerationWrapper):
         self.client = genai.Client(api_key=api_key)
         self.args = args
 
-    async def generate(self, conversations: List[Conversation]):
+    async def generate(self, conversations: List[Conversation]) -> List[str]:
         reqs = []
         for conv in [_openai_conversation_to_gemini(c) for c in conversations]:
             reqs.append(
@@ -355,7 +346,7 @@ class GeminiWrapper(GenerationWrapper):
         for r in results:
             if r.text is None:
                 logger.error(f"Null text for: {r}")
-        return [result.text for result in results]
+        return [result.text for result in results]  # type: ignore
 
 
 RemoteModel = Literal[

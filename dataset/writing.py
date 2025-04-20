@@ -1,7 +1,5 @@
 import asyncio
-from functools import partial
-import math
-import statistics
+from collections import defaultdict
 
 from loguru import logger
 from synthetic_data.generation import (
@@ -122,19 +120,21 @@ def llm_judge_func(
 
     scores = run_sync(run_score())
 
+    scores_per_category = defaultdict(list)
     score_vals = []
-    for i, s in enumerate(scores):
+    for i, sample_scores in enumerate(scores):
         total = 0.0
-        if len(s) == 0:
+        if len(sample_scores) == 0:
             logger.error(
-                f"s not same length as completions: {len(s)} != {len(completions)}"
+                f"s not same length as completions: {len(sample_scores)} != {len(completions)}"
             )
             return [0.0] * len(completions)
-        logger.info(f"sample {i} score: {s}")
-        for v in s.values():
+        for k, v in sample_scores.items():
             v = max(min(v, MAX_SCORE), 0.0)
             total += v / MAX_SCORE
-        avg_score = round(total / len(s), 2)
+            scores_per_category[k].append(v)
+
+        avg_score = round(total / len(sample_scores), 2)
         score_vals.append(avg_score)
 
     if len(score_vals) != len(completions):
@@ -142,6 +142,9 @@ def llm_judge_func(
             f"score_vals not same length as completions: {len(score_vals)} != {len(completions)}"
         )
         score_vals = [0.0] * len(completions)
+    logger.info(f"Sample scores - totals: {score_vals}")
+    for k, v in scores_per_category.items():
+        logger.info(f"\t{k}: {v}")
     return score_vals
 
 
@@ -184,7 +187,7 @@ class WritingGRPODataModule(SmDataset):
         dataset.shuffle(seed=42)
         self.train_dataset = dataset["train"]
         self.val_dataset = dataset["test"]
-        self.generation_wrapper = get_generation_wrapper("gpt-4.1-nano")
+        self.generation_wrapper = get_generation_wrapper(self.config.judge_model)
         self.bench = CreativeWritingBench(self.config.run_mode)
 
     def reward_functions(self) -> list[RewardFunc]:

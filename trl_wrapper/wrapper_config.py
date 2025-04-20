@@ -23,6 +23,7 @@ from model.utils import (
 )
 from synthetic_data.tasks import RunMode
 from synthetic_data.utils import EvalDataModeChoice
+from synthetic_data.generation import RemoteModel
 
 MOCK_LLAMA = "qgallouedec/tiny-LlamaForCausalLM-3"
 LLAMA_3_2_1B = "meta-llama/Llama-3.2-1B-Instruct"
@@ -96,8 +97,9 @@ class WrapperConfig:
     lora_alpha: int = 128
     logprob_precompute_batch_size: int = 16
 
-    # Generation Parameters
+    # GRPO
     num_generations: int = 1
+    judge_model: RemoteModel = "gpt-4.1-nano"
 
     @property
     def model_family(self) -> ModelFamily:
