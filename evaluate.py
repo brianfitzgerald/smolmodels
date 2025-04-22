@@ -41,10 +41,13 @@ def _save_eval_results_to_md(eval_results: List[EvalResult], out_dir: str):
     md_out_lines = []
     for i, res in enumerate(eval_results):
         md_out_lines.append(f"## Result {i}:")
-        md_out_lines.append(f"**Prompt:** {res.prompt}")
-        md_out_lines.append(f"**Model Response:** {res.model_response}")
-        md_out_lines.append(f"**Scores:** {res.scores}")
-        md_out_lines.append(f"**Error:** {res.error}")
+        md_out_lines.append(f"### Prompt\n {res.prompt}")
+        md_out_lines.append(f"### Model Response\n {res.model_response}")
+        md_out_lines.append("### Scores")
+        for k, v in res.scores.items():
+            md_out_lines.append(f"**{k}:** {v}\n")
+        if res.error:
+            md_out_lines.append(f"### Error\n {res.error}")
 
     with open(f"{out_dir}/eval_results.md", "w") as f:
         f.write("\n".join(md_out_lines))
@@ -60,7 +63,7 @@ EVAL_TASKS: Dict[EvalTaskName, type[EvalTask]] = {
 async def main(
     batch_size: int = 8,
     eval_task_name: EvalTaskName = "eq_bench_writing",
-    gen_source: RemoteModel = "gemini-2.0-flash",
+    gen_source: RemoteModel = "gpt-4.1-nano",
 ):
     console = Console()
 
