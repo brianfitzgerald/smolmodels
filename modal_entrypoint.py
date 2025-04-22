@@ -27,7 +27,7 @@ DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=6),
 )
-def training(config: str, wandb: bool = False):
+def training(config: str, wandb: bool = True):
     assert config, "Config must be provided with --config"
     assert config in CONFIGS, f"Unknown config: {config}"
     cfg = CONFIGS[config]

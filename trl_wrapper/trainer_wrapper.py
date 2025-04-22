@@ -267,7 +267,6 @@ CONFIGS = {
 }
 
 LOCAL_RUNS_FOLDER = "./runs"
-MODELS_FOLDER = "/models"
 
 
 DATA_MODULE_CHOICES: dict[DataModuleChoice, type[SmDataset]] = {
@@ -389,11 +388,11 @@ class TrainerWrapper:
         if self.config.run_suffix is not None:
             run_name += f"-{self.config.run_suffix}"
 
-        runs_folder = LOCAL_RUNS_FOLDER
-
-        if os.path.exists(MODELS_FOLDER):
-            runs_folder = os.path.join(MODELS_FOLDER, "runs")
-            os.makedirs(MODELS_FOLDER, exist_ok=True)
+        if self.run_mode == "modal":
+            runs_folder = "/model-weights/runs"
+            os.makedirs(runs_folder, exist_ok=True)
+        else:
+            runs_folder = LOCAL_RUNS_FOLDER
 
         output_dir = os.path.join(runs_folder, run_name)
         logger.info(f"Saving output to: {output_dir}")

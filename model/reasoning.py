@@ -149,6 +149,9 @@ def score_connections_hard(
     solution_set = [set(group) for group in solution_groups]
     solved = set()
 
+    if len(submitted_groups) > N_GROUPS:
+        return 0.0
+
     for submitted_group in submitted_groups:
         for i, correct_set in enumerate(solution_set):
             if set(submitted_group) == correct_set and i not in solved:
@@ -168,6 +171,9 @@ def score_connections_soft(
     """Return the best match count for each solution group."""
     solution_sets = [set(group) for group in solution_groups]
     submitted_sets = [set(group) for group in submitted_groups]
+
+    if len(submitted_sets) > N_GROUPS:
+        return 0.0
 
     if len(submitted_groups) == 0 or len(solution_groups) == 0:
         return 0.0
@@ -226,7 +232,6 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
 def logger_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     prompts = _user_messages(prompts)
-    logger.info("Generations:")
     for i, (g, p) in enumerate(zip(model_generations, prompts)):
         logger.info("=" * 40)
         logger.info(f"Prompt {i}: " + "-" * 20)
@@ -239,6 +244,9 @@ def logger_reward(prompts, completions, **kwargs) -> list[float]:
     return [0.0] * len(completions)
 
 
+N_GROUPS = 4
+
+
 def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
@@ -247,7 +255,7 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     for group_lens in sizes:
         sample_reward = 0.0
         for group_len in group_lens:
-            if group_len == 4:
+            if group_len == N_GROUPS:
                 sample_reward += 1.0
         if len(group_lens) > 0:
             rewards.append(sample_reward / len(group_lens))
@@ -256,16 +264,16 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
     logger.info(f"Group size rewards: {rewards}")
 
     # scale to be between 0 and 0.25
-    rewards = [r / 4 if r > 0 else 0.0 for r in rewards]
+    rewards = [r / N_GROUPS if r > 0 else 0.0 for r in rewards]
     return rewards
 
 
 def n_groups_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    rew = [0.25 if len(g) == 4 else 0.0 for g in groups]
-    logger.info(f"Number of groups rewards: {rew}")
-    return rew
+    rewards = [0.25 if len(g) == N_GROUPS else 0.0 for g in groups]
+    logger.info(f"Number of groups rewards: {rewards}")
+    return rewards
 
 
 CONNECTIONS_PROMPT = """
@@ -334,7 +342,9 @@ class ConnectionsDataModule(SmDataset):
         groups = [
             {
                 "groups": (
-                    g := df_groups.sample(4, replace=False).reset_index(drop=True)
+                    g := df_groups.sample(N_GROUPS, replace=False).reset_index(
+                        drop=True
+                    )
                 ).to_dict(orient="records"),
                 "words": list(itertools.chain.from_iterable(g["words"].dropna())),
             }
@@ -357,7 +367,6 @@ class ConnectionsDataModule(SmDataset):
             group_size_reward,
             hard_group_reward,
             n_groups_reward,
-            logger_reward,
         ]
 
 
