@@ -63,6 +63,7 @@ class EQBenchWriting(EvalTask):
             writing_convs: list[Conversation] = [
                 [{"role": "user", "content": prompt}] for prompt in modified_prompts
             ]
+            logger.info("Generating samples")
             generated_samples = await generation_wrapper.generate(
                 writing_convs,
             )
@@ -75,6 +76,7 @@ class EQBenchWriting(EvalTask):
                 ]
                 for sample, model_response in zip(writing_prompt, generated_samples)
             ]
+            logger.info("Judging samples")
             judge_samples = await self.judge_model.generate(
                 judge_convs,
             )

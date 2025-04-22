@@ -63,7 +63,7 @@ EVAL_TASKS: Dict[EvalTaskName, type[EvalTask]] = {
 async def main(
     batch_size: int = 8,
     eval_task_name: EvalTaskName = "eq_bench_writing",
-    gen_source: RemoteModel = "gpt-4.1-nano",
+    gen_source: RemoteModel = "mistral-small-3",
 ):
     console = Console()
 
@@ -90,10 +90,6 @@ async def main(
             _save_eval_results_to_md(eval_results, out_dir)
             _save_eval_results_to_csv(eval_results, out_dir)
             progress.advance(prog_task, batch_size)
-
-    summary_dict = {}
-    with open(f"{out_dir}/summary.json", "w") as f:
-        f.write(json.dumps(summary_dict, indent=4))
 
     _save_eval_results_to_csv(eval_results, out_dir)
     _save_eval_results_to_md(eval_results, out_dir)

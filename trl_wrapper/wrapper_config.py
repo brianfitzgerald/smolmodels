@@ -99,7 +99,7 @@ class WrapperConfig:
 
     # GRPO
     num_generations: int = 1
-    judge_model: RemoteModel = "gpt-4.1-nano"
+    judge_model: RemoteModel = "deepseek-v3"
 
     @property
     def model_family(self) -> ModelFamily:

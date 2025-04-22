@@ -1,73 +1,73 @@
 ## Coherent
 
 ### Detailed Criteria
-- **Logical flow**: Ideas connect smoothly; each sentence follows naturally from the last.  
-- **Clear structure**: Paragraphs have a single focus; transitions guide the reader.  
-- **No leaps in logic**: Arguments don’t skip steps or assume unstated premises.  
+- **Deterministic progression**: Every sentence advances the argument or narrative without ambiguity; no pronouns or references without clear antecedents.  
+- **Structured scaffolding**: Paragraphs begin with an explicit topic sentence, include clearly signposted supporting points, and end with a summary or transition.  
+- **No implicit jumps**: Every inference must be explicitly justified; no ideas introduced without preparatory context or rationale.
 
 ### Good Example
-> “Mia packed her bag carefully. She zipped it closed, checked her phone for the bus schedule, and locked the door behind her.”
+> “Mia placed her laptop in the satchel, verified the 8:15 AM bus departure on her transit app, then engaged the door alarm with a single press. Each step followed her pre­defined checklist in sequence.”
 
 ### Bad Example
-> “Mia locked the door. The bus was late. She packed a snack for school.”
+> “Mia packed and locked up. Then she waited for the bus.”
 
 ---
 
 ## Believable Character Actions
 
 ### Detailed Criteria
-- **Motivation alignment**: Actions reflect the character’s goals, past experiences, and personality.  
-- **Emotional consistency**: Behavior matches stated feelings.  
-- **Realistic reactions**: Responses to events feel proportional and plausible.  
+- **Immutable motivation linkage**: Every action must trace back to a stated, concrete motivation—no actions occur without prior setup.  
+- **Consistent emotional register**: Emotional state must be established and maintained; any shift requires an explicit internal or external trigger.  
+- **Proportional response**: Characters’ reactions scale exactly with the stakes; no overreactions or underreactions.
 
 ### Good Example
-> “After her apology fell flat, Jenna’s hands trembled. She avoided his gaze and fiddled with the coffee cup—exactly what she’d done the last time she’d disappointed him.”
+> “Having vowed to never disappoint her mentor again, Jenna’s apology quivered with tension. She avoided his gaze, hands clenched around her coffee cup—a gesture she’d repeated under pressure during her last failure.”
 
 ### Bad Example
-> “Jenna apologized, then immediately laughed and cracked a joke about it, despite saying moments ago she felt devastated.”
+> “Jenna apologized, then immediately cracked a joke, despite earlier saying she felt on the brink of collapse.”
 
 ---
 
 ## Consistent Voice/Tone of Writing
 
 ### Detailed Criteria
-- **Uniform vocabulary level**: Word choice stays at a similar register (formal vs. colloquial).  
-- **Stable narrative distance**: Maintains either close-with-character or distant omniscient consistently.  
-- **Tone alignment**: Humorous, serious, or ironic tone doesn’t flip unexpectedly.  
+- **Single-register vocabulary**: Word choice must remain strictly within one register (e.g., academic, colloquial, archaic) with zero crossover.  
+- **Fixed narrative perspective**: Either first‑person intimate or fully omniscient; perspective shifts are disallowed unless explicitly marked as a new section.  
+- **Unwavering tonal alignment**: Humor, irony, or gravity may never intrude into a segment designated for another tone without clear framing devices.
 
 ### Good Example
-> A cozy mystery remains warm and gently witty from first page to last, never slipping into dark horror or slapstick.
+> A high‑formal historical essay maintains its scholarly register throughout, citing sources and avoiding contractions or slang entirely.
 
 ### Bad Example
-> A formal academic essay suddenly uses street slang in the middle of a paragraph.
+> A solemn historical account suddenly describing a battle as “totally intense” in the same paragraph.
 
 ---
 
 ## Adherence to Instructions
 
 ### Detailed Criteria
-- **Completeness**: All parts of the prompt or brief are addressed.  
-- **Accuracy**: Follows specified format, word count, genre, or viewpoint.  
-- **No extraneous content**: Doesn’t add unrelated scenes or deviate from scope.  
+- **Zero deviation**: Every instruction item must be addressed in order and with exact formatting; word counts and headings must match the prompt precisely.  
+- **Strict compliance**: If a limit is stated (e.g., “150 words”), the response must be exactly that length—no more, no fewer.  
+- **No supplementary content**: Additional background, personal opinion, or tangential examples are prohibited.
 
 ### Good Example
-> **Prompt:** “Write a 150‑word persuasive email asking a boss for remote work.”  
-> **Response:** A 150‑word email with greeting, clear ask, rationale, and polite close.
+> **Prompt:** “Write a 150‑word formal request letter for remote work including salutation, body, and closing.”  
+> **Response:** A letter exactly 150 words long, with a “Dear [Name],” opening, three‑sentence body, and “Sincerely, [Name]” closing—nothing else.
 
 ### Bad Example
-> The email is 300 words long, goes off on personal anecdotes unrelated to remote work, and omits a closing salutation.
+> A 160‑word email with a postscript offering weekend availability.
 
 ---
 
 ## Emotionally Engaging
 
 ### Detailed Criteria
-- **Sensory detail**: Uses vivid imagery and concrete details to evoke feeling.  
-- **Emotional stakes**: Presents clear internal or external conflict that matters to the reader.  
-- **Show, don’t tell**: Demonstrates feelings through action and dialogue rather than stating them.  
+- **Explicit sensory immersion**: Must include at least two sensory modalities (e.g., sound + touch) per emotional beat, described with concrete imagery.  
+- **High‑stakes clarity**: The emotional stakes must be quantified or clearly defined (e.g., “If she fails, she loses her inheritance.”).  
+- **Show‑and‑immerse**: Feelings are conveyed exclusively through character perceptions and reactions; no abstract emotion labels (“sad,” “happy”) may be used.
 
 ### Good Example
-> “Her chest tightened as the letter slipped from her fingers. The words blurred, but the ache in her throat was real.”
+> “Her breath hitched as the envelope’s seal tore—its brittle crack echoing in the silent room. The metallic tang of fear coated her tongue when she read the first line: ‘You have exactly 24 hours.’”
 
 ### Bad Example
-> “She was very sad when she read the letter and cried a lot.”
+> “She felt very scared when she opened the letter and cried.”  

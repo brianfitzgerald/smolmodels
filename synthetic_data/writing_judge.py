@@ -26,9 +26,7 @@ class CreativeWritingBench:
             "r",
             encoding="utf-8",
         ) as f:
-            self.creative_writing_criteria = [
-                line.strip() for line in f if line.strip()
-            ]
+            self.creative_writing_criteria = f.read()
         with open(
             os.path.join(template_path, "creative_writing_judging_prompt.txt"),
             "r",
@@ -40,10 +38,12 @@ class CreativeWritingBench:
         """
         Format the judge prompt with the creative writing criteria and negative criteria.
         """
-        return self.judge_prompt_template.format(
+        prompt = self.judge_prompt_template.format(
             test_model_response=model_response,
             writing_prompt=writing_prompt,
+            creative_writing_criteria=self.creative_writing_criteria,
         )
+        return prompt
 
     def parse_judge_scores(self, judge_model_response: str) -> dict[str, float]:
         scores = {}

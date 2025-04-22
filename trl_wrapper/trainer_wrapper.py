@@ -230,7 +230,6 @@ WRITING_GRPO_CONFIG = WrapperConfig(
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
     optimizer=OptimizerNames.ADAMW_8BIT.value,
     tuning_mode="grpo",
-    judge_model="gemini-2.0-flash",
 )
 
 

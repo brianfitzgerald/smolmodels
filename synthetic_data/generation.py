@@ -359,6 +359,7 @@ RemoteModel = Literal[
     "gpt-4o-mini",
     "gpt-4o",
     "gpt-4.1-nano",
+    "gpt-4.1-mini",
     "o3-mini",
     "mock",
     "vllm",
@@ -410,6 +411,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "gpt-4o": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4o", max_rps=5000 / 60),
+    ),
+    "gpt-4.1-mini": RemoteModelChoice(
+        OpenAIGenerationWrapper,
+        GenWrapperArgs(model_id="gpt-4.1-mini", max_rps=5000 / 60),
     ),
     "gpt-4.1-nano": RemoteModelChoice(
         OpenAIGenerationWrapper,
