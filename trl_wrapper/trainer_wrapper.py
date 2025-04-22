@@ -215,7 +215,7 @@ CONNECTIONS_CONFIG_05B.model_id_or_path = QWEN_2_0_5_B
 WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=QWEN_2_5_3B,
     wandb_project_name="writing-grpo",
-    num_generations=16,
+    num_generations=8,
     train_batch_size=8,
     gradient_accumulation_steps=4,
     data_module_choice="writing_grpo",
@@ -230,7 +230,7 @@ WRITING_GRPO_CONFIG = WrapperConfig(
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
     optimizer=OptimizerNames.ADAMW_8BIT.value,
     tuning_mode="grpo",
-    judge_model="gpt-4.1-nano",
+    judge_model="gemini-2.0-flash",
 )
 
 

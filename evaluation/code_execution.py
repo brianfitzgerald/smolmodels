@@ -321,6 +321,14 @@ CodeTaskFormat = Literal["humaneval", "mbpp"]
 
 
 @dataclass
+class EvalResult:
+    prompt: str
+    model_response: str
+    scores: dict[str, float]
+    error: Optional[str] = None
+
+
+@dataclass
 class EvalTask(ABC):
     name: str = "base_task"
     # only applies to code evals
@@ -330,20 +338,10 @@ class EvalTask(ABC):
     def load_task_data(self) -> Dataset:
         raise NotImplementedError("Subclasses must implement this method")
 
-    def run_eval(self, batch: dict, generation_wrapper: GenerationWrapper):
+    def run_eval(
+        self, batch: dict, generation_wrapper: GenerationWrapper
+    ) -> List[EvalResult]:
         raise NotImplementedError("Subclasses must implement this method")
-
-
-@dataclass
-class EvalResult:
-    prompt: str
-    generated_code: str
-    test: str
-    entry_point: str
-    err: Optional[str]
-    tests_pass: List[bool]
-    task_id: str
-    task: EvalTask
 
 
 def evaluate_codecontests(
@@ -385,18 +383,7 @@ def evaluate_codecontests(
             print_code_snippet(sample.test, console)
             _print_test_results(exec_err, evaluation_results, console)
             console.print("=" * console.size.width)
-            results_batch.append(
-                EvalResult(
-                    prompt,
-                    generated_code,
-                    sample.test,
-                    sample.entry_point,
-                    exec_err,
-                    evaluation_results,
-                    sample.task_id,
-                    eval_task,
-                )
-            )
+            results_batch.append(EvalResult(prompt, generated_code, {}))
     return results_batch
 
 
@@ -409,32 +396,23 @@ def eval_results_to_markdown(evalresults: List[EvalResult]) -> List[str]:
     for i, er in enumerate(evalresults, start=1):
         md_lines.extend(
             [
-                f"## Result {i}: {er.entry_point}",
+                f"## Result {i}:",
                 "",
                 f"**Prompt:** {er.prompt}",
                 "",
                 "**Generated Code:**",
                 "```python",
-                er.generated_code.strip(),
+                er.model_response.strip(),
                 "```",
                 "",
-                "**Test Code:**",
-                "```python",
-                er.test.strip(),
-                "```",
-                "",
-                "**Code Snippet:**",
-                "```python",
-                er.generated_code.strip(),
-                "```",
-                "**Error:**" if er.err else "**Error:** No error",
+                "**Error:**" if er.error else "**Error:** No error",
             ]
         )
-        if er.err:
-            md_lines.extend(["```", er.err.strip(), "```"])
-        md_lines.extend(["", "**Tests Passed:**"])
-        pass_checks = ["✓" if passed else "✗" for passed in er.tests_pass]
-        md_lines.extend(" ".join(pass_checks))
+        if er.error:
+            md_lines.extend(["```", er.error.strip(), "```"])
+        md_lines.extend(["", "**Scores:**"])
+        for k, v in er.scores.items():
+            md_lines.extend([f"**{k}:** {v}"])
         md_lines.extend(["", "---", ""])
 
     return md_lines

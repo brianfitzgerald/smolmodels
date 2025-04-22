@@ -26,15 +26,28 @@ def _save_eval_results_to_csv(eval_results: List[EvalResult], out_dir: str):
     for res in eval_results:
         test_results_dicts.append(
             {
-                "task_id": res.task_id,
-                "err": res.err is not None,
-                "evaluation_results": res.tests_pass,
-                "task": res.task,
+                "prompt": res.prompt,
+                "model_response": res.model_response,
+                "scores": res.scores,
+                "error": res.error,
             }
         )
 
     test_results_pd = pd.DataFrame(test_results_dicts)
     test_results_pd.to_csv(f"{out_dir}/test_results.csv", index=False)
+
+
+def _save_eval_results_to_md(eval_results: List[EvalResult], out_dir: str):
+    md_out_lines = []
+    for i, res in enumerate(eval_results):
+        md_out_lines.append(f"## Result {i}:")
+        md_out_lines.append(f"**Prompt:** {res.prompt}")
+        md_out_lines.append(f"**Model Response:** {res.model_response}")
+        md_out_lines.append(f"**Scores:** {res.scores}")
+        md_out_lines.append(f"**Error:** {res.error}")
+
+    with open(f"{out_dir}/eval_results.md", "w") as f:
+        f.write("\n".join(md_out_lines))
 
 
 EvalTaskName = Literal["eq_bench_writing"]
@@ -47,7 +60,7 @@ EVAL_TASKS: Dict[EvalTaskName, type[EvalTask]] = {
 async def main(
     batch_size: int = 8,
     eval_task_name: EvalTaskName = "eq_bench_writing",
-    gen_source: RemoteModel = "vllm",
+    gen_source: RemoteModel = "gemini-2.0-flash",
 ):
     console = Console()
 
@@ -63,7 +76,6 @@ async def main(
     ensure_directory(out_dir)
 
     eval_results: List[EvalResult] = []
-    md_out_lines = []
     with Progress() as progress:
         dataset = eval_task.load_task_data()
         progress_bar_title = f"Eval task: {eval_task.name}"
@@ -71,9 +83,8 @@ async def main(
         for batch in dataset.iter(batch_size=batch_size):
             batch_results = await eval_task.run_eval(batch, model_wrapper)  # type: ignore
             eval_results.extend(batch_results)
-            with open(f"{out_dir}/eval_results.md", "w") as f:
-                f.write("\n".join(md_out_lines))
 
+            _save_eval_results_to_md(eval_results, out_dir)
             _save_eval_results_to_csv(eval_results, out_dir)
             progress.advance(prog_task, batch_size)
 
@@ -82,6 +93,7 @@ async def main(
         f.write(json.dumps(summary_dict, indent=4))
 
     _save_eval_results_to_csv(eval_results, out_dir)
+    _save_eval_results_to_md(eval_results, out_dir)
 
 
 Fire(main)

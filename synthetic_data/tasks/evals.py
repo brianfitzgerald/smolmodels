@@ -1,12 +1,13 @@
 import asyncio
-from evaluation.code_execution import EvalTask
+from evaluation.code_execution import EvalResult, EvalTask
 from synthetic_data.generation import GenerationWrapper, get_generation_wrapper
-from synthetic_data.tasks.writing import format_eq_bench_scoring_prompt
-from synthetic_data.utils import Conversation, ldictl
+from synthetic_data.utils import Conversation, flatten_list, ldictl
 from datasets import Dataset
 import json
 import re
 from loguru import logger
+
+from synthetic_data.writing_judge import CreativeWritingBench
 
 
 def parse_scores(judge_model_response):
@@ -24,103 +25,6 @@ def parse_scores(judge_model_response):
     return scores
 
 
-neg_criteria = [
-    "melodramatic",
-    "shallow resolution",
-    "unearned resolution",
-    "simplistic moralizing",
-    "shallow optimism",
-    "forced optimism",
-    "trite",
-    "overwrought",
-    "amateurish",
-    "contrived",
-    "uninspiring",
-    "characters are too good",
-    "incongruent ending positivity",
-    "unearned transformations",
-    "profundity over-reach",
-    "amateurish descriptives",
-    "clunky asides and interruptive sentence structures",
-    "stilted dialogue",
-    "tit-for-tat dialogue",
-    "purple prose",
-    "unsurprising or uncreative",
-    "tell-don't-show",
-    "weak dialogue",
-    "meandering",
-]
-
-
-def get_total_score(scores: dict[str, float], RELATIVE_SCORING=False):
-    if not scores:
-        print("! No scores were parseable")
-        return
-    scoresum = 0
-    for criteria, score in scores.items():
-        criteria_lower = criteria.lower().strip()
-        if RELATIVE_SCORING:
-            if any(neg_criterion in criteria_lower for neg_criterion in neg_criteria):
-                scoresum += ((-1 * score) + 10) / 2
-            else:
-                scoresum += (score + 10) / 2
-        else:
-            if any(neg_criterion in criteria_lower for neg_criterion in neg_criteria):
-                scoresum += 10 - score
-            else:
-                scoresum += score
-    score = round(10 * scoresum / len(scores))
-    logger.info(f"This question score: {score}")
-    return score
-
-
-def calculate_creative_writing_score(
-    iterations: list[dict[str, dict]],
-):
-    RELATIVE_SCORING = False
-    prompt_scores = []  # List to hold total scores for each prompt
-    iteration_averages = []  # To hold the average scores of the best half of each iteration
-
-    for run_iter in iterations:
-        for scores in run_iter.values():
-            scoresum = 0
-
-            for criteria, score in scores.items():
-                criteria_lower = criteria.lower().strip()
-                if RELATIVE_SCORING:
-                    if any(
-                        neg_criterion in criteria_lower
-                        for neg_criterion in neg_criteria
-                    ):
-                        scoresum += ((-1 * score) + 10) / 2
-                    else:
-                        scoresum += (score + 10) / 2
-                else:
-                    if any(
-                        neg_criterion in criteria_lower
-                        for neg_criterion in neg_criteria
-                    ):
-                        scoresum += 10 - score
-                    else:
-                        scoresum += score
-            if len(scores):
-                prompt_scores.append(scoresum / len(scores))
-
-        if len(prompt_scores) > 10:
-            iteration_average = sum(prompt_scores) / len(prompt_scores)
-            iteration_averages.append(iteration_average)
-
-    # Average of iteration averages
-    if iteration_averages:
-        creative_writing_averaged_score = sum(iteration_averages) / len(
-            iteration_averages
-        )
-    else:
-        creative_writing_averaged_score = 0
-
-    return round(10 * creative_writing_averaged_score, 2)
-
-
 class EQBenchWriting(EvalTask):
     def __init__(self):
         super().__init__(
@@ -128,11 +32,12 @@ class EQBenchWriting(EvalTask):
         )
         self.judge_model = get_generation_wrapper("gpt-4o")
         self.n_iters = 5
+        self.judge = CreativeWritingBench("cli")
 
     def load_task_data(self) -> Dataset:
         questions: dict = {}
         with open(
-            "../data/creative_writing_prompts_v2.2.json", "r", encoding="utf-8"
+            "./data/creative_writing_prompts_v2.2.json", "r", encoding="utf-8"
         ) as f:
             questions = json.load(f)
 
@@ -140,13 +45,14 @@ class EQBenchWriting(EvalTask):
         questions_items_list = ldictl(questions_items_list)
         return Dataset.from_dict(questions_items_list)
 
-    async def run_eval(self, batch: dict, generation_wrapper: GenerationWrapper):
+    async def run_eval(  # type: ignore
+        self, batch: dict, generation_wrapper: GenerationWrapper
+    ) -> list[EvalResult]:
         # Run inference to get completions
         writing_prompt: list[str] = batch["writing_prompt"]
         seed_modifiers: list[list[str]] = batch["seed_modifiers"]
 
-        async def process_iteration(i: int) -> list[dict[str, float]]:
-            logger.info(f"Iteration {i}")
+        async def process_iteration(i: int) -> list[EvalResult]:
             # TODO check that seed is correct
             modified_prompts = [
                 prompt.replace("<SEED>", seed[j])
@@ -157,24 +63,34 @@ class EQBenchWriting(EvalTask):
             writing_convs: list[Conversation] = [
                 [{"role": "user", "content": prompt}] for prompt in modified_prompts
             ]
-            logger.info(f"writing_convs: {writing_convs}")
             generated_samples = await generation_wrapper.generate(
                 writing_convs,
             )
-            logger.info(f"generated_samples: {generated_samples}")
-            judge_convs = [
-                format_eq_bench_scoring_prompt(sample) for sample in generated_samples
+            judge_convs: list[Conversation] = [
+                [
+                    {
+                        "role": "user",
+                        "content": self.judge.format_prompt(sample, model_response),
+                    }
+                ]
+                for sample, model_response in zip(writing_prompt, generated_samples)
             ]
             judge_samples = await self.judge_model.generate(
                 judge_convs,
             )
             iteration_scores = [parse_scores(sample) for sample in judge_samples]
-            logger.info(f"iteration_scores: {iteration_scores}")
-            return iteration_scores
+            return [
+                EvalResult(
+                    prompt=writing_prompt[i],
+                    model_response=generated_samples[i],
+                    scores=iteration_scores[i],
+                )
+                for i in range(self.n_iters)
+            ]
 
         # Run all iterations in parallel
-        judge_scores = await asyncio.gather(
+        results = await asyncio.gather(
             *(process_iteration(i) for i in range(self.n_iters))
         )
 
-        return judge_scores
+        return flatten_list(results)
