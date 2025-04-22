@@ -22,7 +22,7 @@ class CreativeWritingBench:
         ) as f:
             self.negative_criteria = [line.strip() for line in f if line.strip()]
         with open(
-            os.path.join(template_path, "creative_writing_criteria.txt"),
+            os.path.join(template_path, "creative_writing_criteria_strict.txt"),
             "r",
             encoding="utf-8",
         ) as f:
@@ -41,10 +41,6 @@ class CreativeWritingBench:
         Format the judge prompt with the creative writing criteria and negative criteria.
         """
         return self.judge_prompt_template.format(
-            creative_writing_criteria="\n".join(
-                ["- " + c for c in self.creative_writing_criteria]
-            ),
-            lower_is_better_criteria=", ".join(self.negative_criteria),
             test_model_response=model_response,
             writing_prompt=writing_prompt,
         )

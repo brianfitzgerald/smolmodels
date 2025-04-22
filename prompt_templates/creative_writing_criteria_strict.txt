@@ -1,0 +1,73 @@
+## Coherent
+
+### Detailed Criteria
+- **Logical flow**: Ideas connect smoothly; each sentence follows naturally from the last.  
+- **Clear structure**: Paragraphs have a single focus; transitions guide the reader.  
+- **No leaps in logic**: Arguments don’t skip steps or assume unstated premises.  
+
+### Good Example
+> “Mia packed her bag carefully. She zipped it closed, checked her phone for the bus schedule, and locked the door behind her.”
+
+### Bad Example
+> “Mia locked the door. The bus was late. She packed a snack for school.”
+
+---
+
+## Believable Character Actions
+
+### Detailed Criteria
+- **Motivation alignment**: Actions reflect the character’s goals, past experiences, and personality.  
+- **Emotional consistency**: Behavior matches stated feelings.  
+- **Realistic reactions**: Responses to events feel proportional and plausible.  
+
+### Good Example
+> “After her apology fell flat, Jenna’s hands trembled. She avoided his gaze and fiddled with the coffee cup—exactly what she’d done the last time she’d disappointed him.”
+
+### Bad Example
+> “Jenna apologized, then immediately laughed and cracked a joke about it, despite saying moments ago she felt devastated.”
+
+---
+
+## Consistent Voice/Tone of Writing
+
+### Detailed Criteria
+- **Uniform vocabulary level**: Word choice stays at a similar register (formal vs. colloquial).  
+- **Stable narrative distance**: Maintains either close-with-character or distant omniscient consistently.  
+- **Tone alignment**: Humorous, serious, or ironic tone doesn’t flip unexpectedly.  
+
+### Good Example
+> A cozy mystery remains warm and gently witty from first page to last, never slipping into dark horror or slapstick.
+
+### Bad Example
+> A formal academic essay suddenly uses street slang in the middle of a paragraph.
+
+---
+
+## Adherence to Instructions
+
+### Detailed Criteria
+- **Completeness**: All parts of the prompt or brief are addressed.  
+- **Accuracy**: Follows specified format, word count, genre, or viewpoint.  
+- **No extraneous content**: Doesn’t add unrelated scenes or deviate from scope.  
+
+### Good Example
+> **Prompt:** “Write a 150‑word persuasive email asking a boss for remote work.”  
+> **Response:** A 150‑word email with greeting, clear ask, rationale, and polite close.
+
+### Bad Example
+> The email is 300 words long, goes off on personal anecdotes unrelated to remote work, and omits a closing salutation.
+
+---
+
+## Emotionally Engaging
+
+### Detailed Criteria
+- **Sensory detail**: Uses vivid imagery and concrete details to evoke feeling.  
+- **Emotional stakes**: Presents clear internal or external conflict that matters to the reader.  
+- **Show, don’t tell**: Demonstrates feelings through action and dialogue rather than stating them.  
+
+### Good Example
+> “Her chest tightened as the letter slipped from her fingers. The words blurred, but the ache in her throat was real.”
+
+### Bad Example
+> “She was very sad when she read the letter and cried a lot.”

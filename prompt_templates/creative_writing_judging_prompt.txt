@@ -34,9 +34,6 @@ Scoring notes:
 
 - You are to write a comprehensive analysis of the piece, then give your scores.
 
-- For these criteria, lower is better:
-{lower_is_better_criteria}
-
 - You are a critic, and your job is to be critical, especially of any failings or amateurish elements.
 
 - Output format is:
