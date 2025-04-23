@@ -189,7 +189,7 @@ GRPO_MATH_CONFIG = WrapperConfig(
 )
 
 CONNECTIONS_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_2_1_5_B,
+    model_id_or_path=QWEN_2_0_5_B,
     wandb_project_name="qwen-connections-grpo",
     num_generations=4,
     train_batch_size=16,
@@ -207,9 +207,6 @@ CONNECTIONS_CONFIG = WrapperConfig(
     optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
 )
-
-CONNECTIONS_CONFIG_05B = copy.deepcopy(CONNECTIONS_CONFIG)
-CONNECTIONS_CONFIG_05B.model_id_or_path = QWEN_2_0_5_B
 
 
 WRITING_GRPO_CONFIG = WrapperConfig(

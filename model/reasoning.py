@@ -367,6 +367,7 @@ class ConnectionsDataModule(SmDataset):
             group_size_reward,
             hard_group_reward,
             n_groups_reward,
+            logger_reward,
         ]
 
 

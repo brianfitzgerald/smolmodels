@@ -63,7 +63,7 @@ class WrapperConfig:
     max_samples: Optional[int] = None
     max_eval_dataset_size: Optional[int] = None
     eval_steps: int = 500
-    save_steps: int = 1000
+    save_steps: int = 250
 
     # Prompt & Sequence Lengths
     max_sequence_length: int = 1512  # sequence length for trimming completions
