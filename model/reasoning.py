@@ -170,7 +170,9 @@ def score_connections_soft(
 ):
     """Return the best match count for each solution group."""
     solution_sets = [set(group) for group in solution_groups]
-    submitted_sets = [set(group) for group in submitted_groups]
+    submitted_sets = [
+        set(group) for group in submitted_groups if len(group) == GROUP_SIZE
+    ]
 
     if len(submitted_sets) > N_GROUPS:
         return 0.0
@@ -245,6 +247,7 @@ def logger_reward(prompts, completions, **kwargs) -> list[float]:
 
 
 N_GROUPS = 4
+GROUP_SIZE = 4
 
 
 def group_size_reward(prompts, completions, **kwargs) -> list[float]:

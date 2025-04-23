@@ -128,12 +128,13 @@ def test_hard_reward_values():
         "<answer><group>crush, rout, shellac, trash</group>\n<group>cami, halter, tank, tee</group>\n<group>bottom, buns, seat, tail</group>\n<group>blue, fin, gray, right</group></answer>",
         "<answer><group>crush, rout, shellac, trash</group><group>cami, halter, tank, tee</group></answer>",
         "<answer><group>crush, rout, shellac, trash</group></answer>",
+        "<answer><group>crush, rout, shellac, trash, cami, halter, tank, tee, bottom, buns, seat, tail, blue, fin, gray, right</group></answer>",
     ]
     scores = []
     for c in completions:
         score = hard_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
         scores.append(score[0])
-    assert scores == [1.0, 1.0, 1.0]
+    assert scores == [1.0, 1.0, 1.0, 0.0]
 
 
 def test_group_size_rewards():
@@ -157,9 +158,10 @@ def test_soft_reward_max_groups():
     completions = [
         f"<answer>{groups}</answer>",
         f"<answer>{groups}{groups}</answer>",
+        "<answer><group>crush, rout, shellac, trash, cami, halter, tank, tee, bottom, buns, seat, tail, blue, fin, gray, right</group></answer>",
     ]
     scores = []
-    expected_scores = [1.0, 0.0]
+    expected_scores = [1.0, 0.0, 0.0]
     for c in completions:
         score = soft_group_reward("", [[{"content": c}]], answer_groups=ANSWERS_BATCH)
         scores.append(score[0])
