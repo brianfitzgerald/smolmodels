@@ -312,7 +312,7 @@ def _openai_conversation_to_gemini(conversation: Conversation):
     return [
         google.genai.types.Content(
             role=GEMINI_ROLE_MAP[message["role"]],
-            parts=[google.genai.types.Part(text=message["content"])],  # type: ignore
+            parts=[google.genai.types.Part.from_text(text=message["content"])],  # type: ignore
         )
         for message in conversation
     ]
@@ -364,6 +364,7 @@ RemoteModel = Literal[
     "mock",
     "vllm",
     "gemini-2.0-flash",
+    "gemini-2.5-flash",
 ]
 
 
@@ -432,6 +433,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "gemini-2.0-flash": RemoteModelChoice(
         GeminiWrapper,
         GenWrapperArgs(model_id="gemini-2.0-flash", max_rps=5000 / 60),
+    ),
+    "gemini-2.5-flash": RemoteModelChoice(
+        GeminiWrapper,
+        GenWrapperArgs(model_id="gemini-2.5-flash", max_rps=5000 / 60),
     ),
 }
 

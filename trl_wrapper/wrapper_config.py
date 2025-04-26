@@ -99,7 +99,7 @@ class WrapperConfig:
 
     # GRPO
     num_generations: int = 1
-    judge_model: RemoteModel = "gemini-2.0-flash"
+    judge_model: RemoteModel = "gemini-2.5-flash"
 
     @property
     def model_family(self) -> ModelFamily:

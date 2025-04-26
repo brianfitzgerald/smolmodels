@@ -1141,7 +1141,7 @@ wheels = [
 
 [[package]]
 name = "google-genai"
-version = "1.5.0"
+version = "1.12.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1152,9 +1152,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/23/21/6f164fcb13293f520e016171be92611126d6bd2e9ceb246b32451c4ef51b/google_genai-1.5.0.tar.gz", hash = "sha256:83fcfc4956ad32ecea1fda37d8f3f7cbadbdeebd2310f2a55bc7564a2f1d459f", size = 135903 }
+sdist = { url = "https://files.pythonhosted.org/packages/38/9c/c907dbea921663bb7c41f415337bedd08259d17da8d156396c7237611744/google_genai-1.12.1.tar.gz", hash = "sha256:5c7eda422360643ce602a3f6b23152470ec1039310ef40080cbe4e71237f6391", size = 167752 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/2a/a55da0c959326a7cf3c13398fc93c8e2af624b054ef3fa85b4cb6d0e2c96/google_genai-1.5.0-py3-none-any.whl", hash = "sha256:0ad433836a402957a967ccd57cbab7768325d28966a8556771974ae1c018be59", size = 142404 },
+    { url = "https://files.pythonhosted.org/packages/29/2c/5b454dec837328eb167e78f45a14da502af223f8b94a4824e2fd0df74f19/google_genai-1.12.1-py3-none-any.whl", hash = "sha256:7cbc1bc029712946ce41bcf80c0eaa89eb8c09c308efbbfe30fd491f402c258a", size = 165940 },
 ]
 
 [[package]]
@@ -3849,7 +3849,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.5" },
     { name = "fire" },
     { name = "fsspec", specifier = "==2023.10.0" },
-    { name = "google-genai", specifier = "==1.5.0" },
+    { name = "google-genai", specifier = "==1.12.1" },
     { name = "gradio" },
     { name = "huggingface-hub", extras = ["hf-transfer"] },
     { name = "ipykernel", specifier = ">=6.29.5" },

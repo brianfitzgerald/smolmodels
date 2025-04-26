@@ -468,7 +468,7 @@ class BacktranslateBestOfN(BaseTask):
         super().__init__(run_mode)
         self.bench = None
         self.generators = [
-            get_generation_wrapper("gemini-2.0-flash"),
+            get_generation_wrapper("gemini-2.5-flash"),
             get_generation_wrapper("gpt-4o-mini"),
             get_generation_wrapper("gpt-4o"),
         ]

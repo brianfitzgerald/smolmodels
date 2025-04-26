@@ -144,7 +144,7 @@ def main(
     batch_size: int = 16,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: RemoteModel = "gemini-2.0-flash",
+    model: RemoteModel = "gemini-2.5-flash",
     n_epochs: int = 1,
     run_mode: RunMode = "cli",
     **kwargs,

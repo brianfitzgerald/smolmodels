@@ -266,15 +266,14 @@ def group_size_reward(prompts, completions, **kwargs) -> list[float]:
             rewards.append(0.0)
     logger.info(f"Group size rewards: {rewards}")
 
-    # scale to be between 0 and 0.25
-    rewards = [r / N_GROUPS if r > 0 else 0.0 for r in rewards]
+    rewards = [max(r, 0.0) for r in rewards]
     return rewards
 
 
 def n_groups_reward(prompts, completions, **kwargs) -> list[float]:
     model_generations = _generations(completions)
     groups = [parse_groups(r) for r in model_generations]
-    rewards = [0.25 if len(g) == N_GROUPS else 0.0 for g in groups]
+    rewards = [1 if len(g) == N_GROUPS else 0.0 for g in groups]
     logger.info(f"Number of groups rewards: {rewards}")
     return rewards
 
@@ -351,7 +350,7 @@ class ConnectionsDataModule(SmDataset):
                 ).to_dict(orient="records"),
                 "words": list(itertools.chain.from_iterable(g["words"].dropna())),
             }
-            for _ in range(10000)
+            for _ in range(50000)
         ]
 
         groups_pd = pd.DataFrame(groups)
