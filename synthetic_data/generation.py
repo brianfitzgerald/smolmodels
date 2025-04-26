@@ -328,25 +328,40 @@ class GeminiWrapper(GenerationWrapper):
         self.args = args
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
-        reqs = []
-        for conv in [_openai_conversation_to_gemini(c) for c in conversations]:
-            reqs.append(
-                self.client.aio.models.generate_content(
-                    model=self.model_id,
-                    contents=conv,  # type: ignore
-                )
-            )
-        try:
-            results: List[
-                google.genai.types.GenerateContentResponse
-            ] = await asyncio.gather(*reqs)
-        except Exception as e:
-            logger.error(f"Error while generating: {e}")
-            return []
-        for r in results:
-            if r.text is None:
-                logger.error(f"Null text for: {r}")
-        return [result.text for result in results]  # type: ignore
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Create new requests for each attempt
+                reqs = []
+                for conv in [_openai_conversation_to_gemini(c) for c in conversations]:
+                    reqs.append(
+                        self.client.aio.models.generate_content(
+                            model=self.model_id,
+                            contents=conv,
+                        )
+                    )
+
+                results: List[
+                    google.genai.types.GenerateContentResponse
+                ] = await asyncio.gather(*reqs)
+
+                # Check for null texts
+                null_texts = [r for r in results if r.text is None]
+                if null_texts:
+                    logger.error(
+                        f"Null texts found in attempt {attempt + 1}: {null_texts}"
+                    )
+                    if attempt < max_retries - 1:
+                        continue
+                    return []
+
+                return [result.text for result in results]
+
+            except Exception as e:
+                logger.error(f"Error while generating (attempt {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    continue
+                return []
 
 
 RemoteModel = Literal[

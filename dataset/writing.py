@@ -79,27 +79,65 @@ T = TypeVar("T")
 
 def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     try:
-        loop = asyncio.get_event_loop()
+        # Check for a running loop in the *current* (caller) thread first.
+        # This determines if we need to use the threading approach.
+        caller_loop = asyncio.get_running_loop()
+        needs_thread = True
     except RuntimeError:
-        loop = None
+        caller_loop = None
+        needs_thread = False
 
-    # Running in an environment like Jupyter Notebook.
-    if loop is not None and loop.is_running():
+    if needs_thread:
+        # If called from a thread with a running loop, execute in a separate thread
+        # to avoid blocking the caller's loop and prevent deadlocks.
         result_container = []
+        sync_event = threading.Event()  # Use an event for better synchronization
 
-        def _run():
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            result = new_loop.run_until_complete(coro)
-            new_loop.close()
-            result_container.append(result)
+        def _run_in_thread():
+            try:
+                # Get or create an event loop *for this new thread*
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    logger.info("No loop in thread, creating a new one.")
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
 
-        thread = threading.Thread(target=_run)
+                logger.info(
+                    f"Running coroutine in background thread {threading.get_ident()} using loop {loop}"
+                )
+                result = loop.run_until_complete(coro)
+                result_container.append(result)
+            except Exception as e:
+                # Store exception to re-raise in the main thread
+                logger.error(f"Exception in coroutine thread: {e}", exc_info=True)
+                result_container.append(e)
+            finally:
+                # Signal that the thread has finished.
+                # We are *not* explicitly closing the loop here anymore.
+                # Let it be managed by the thread/asyncio policy.
+                logger.info(
+                    f"Background thread {threading.get_ident()} finished execution."
+                )
+                sync_event.set()
+
+        thread = threading.Thread(target=_run_in_thread)
         thread.start()
-        thread.join()
-        return result_container[0]
-    # No event loop running; use asyncio.run for a clean execution.
+        sync_event.wait()  # Wait for the thread to signal completion
+
+        if not result_container:
+            raise RuntimeError(
+                "Coroutine thread finished without producing a result or exception."
+            )
+
+        result = result_container[0]
+        if isinstance(result, Exception):
+            raise result  # Re-raise exception captured in the thread
+        return result
+
     else:
+        # No event loop running in the caller thread; use asyncio.run for clean execution.
+        logger.info("No running loop found in caller thread, using asyncio.run()")
         return asyncio.run(coro)
 
 

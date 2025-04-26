@@ -207,7 +207,6 @@ CONNECTIONS_CONFIG = WrapperConfig(
     tuning_mode="grpo",
 )
 
-
 WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,
     wandb_project_name="writing-grpo",
@@ -513,6 +512,7 @@ class TrainerWrapper:
                 beta=self.config.grpo_beta,
                 gradient_accumulation_steps=self.config.gradient_accumulation_steps,
                 num_generations=self.config.num_generations,
+                gradient_checkpointing_kwargs={"use_reentrant": False},
                 max_prompt_length=self.config.max_prompt_length,
                 max_completion_length=self.config.max_completion_length,
                 num_train_epochs=self.config.n_epochs,
