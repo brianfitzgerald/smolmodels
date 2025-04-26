@@ -1159,7 +1159,7 @@ wheels = [
 
 [[package]]
 name = "gradio"
-version = "5.16.2"
+version = "5.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -1168,6 +1168,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "ffmpy" },
     { name = "gradio-client" },
+    { name = "groovy" },
     { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "jinja2" },
@@ -1191,13 +1192,14 @@ dependencies = [
     { name = "urllib3", marker = "sys_platform == 'emscripten'" },
     { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/01/41/2e9bb510912cbc1f27eed80d425ca73d9cacd368e2673e959968f53fa8a2/gradio-5.27.0.tar.gz", hash = "sha256:577ee37a94d7d1de8a76c52b1386654d4f9a20694ed9a3ad8238ef90bf5da6e9", size = 63423284 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/1b/bd78e5d128589f28dfe76ddd587702489fabb58bdd3fbc6d09b16e5d948a/gradio-5.16.2-py3-none-any.whl", hash = "sha256:b13180c9a0a7370bdda6a326d85f659768ba97a822a7d5790b52ae4c6bccc343", size = 62206160 },
+    { url = "https://files.pythonhosted.org/packages/a4/3f/1d96594f51d345acc62d8a4abc98d024ca42b62ffae2e8f2fba0b49742df/gradio-5.27.0-py3-none-any.whl", hash = "sha256:68e5873204168c1e0025e1c6dda0adfc7546b2d906a79ad8becfd9864f719cca", size = 54008356 },
 ]
 
 [[package]]
 name = "gradio-client"
-version = "1.7.1"
+version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fsspec" },
@@ -1207,9 +1209,18 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f2/98/434f4eff6eabf625e71ac69a5909864984b53b2f2c9e3a9c772bebbfae84/gradio_client-1.7.1.tar.gz", hash = "sha256:6ecd3a537c6c076cb1b351c2d7ce5906070d2e1b3181163609bfa4a4c4f3040e", size = 320142 }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/7f/b9c1d522fd3c5c8be5012307a17ffb416d21ddb6fae0d86142168bb3a752/gradio_client-1.9.0.tar.gz", hash = "sha256:eeecec06e4509c32eab5841ba31d34146f50e3f8e0d3fcd3700a8a8f204cc989", size = 320689 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/52/4fe9dfc2239e7b748ad8dc3b80ad8755f5c9378432715193586c3ab74bf9/gradio_client-1.7.1-py3-none-any.whl", hash = "sha256:d7737bc473a2093549c06004379c42f0a3510a98095cf7cea9033837e252149f", size = 321994 },
+    { url = "https://files.pythonhosted.org/packages/46/03/0ae800cf5a52c717687db9fc5fb5bfe4fa7cc2d3badf7093b4b4bf9ce931/gradio_client-1.9.0-py3-none-any.whl", hash = "sha256:192a046ed2cff9dfafb40e3b04899ecc1dc16f3ed994119d2b90c6a405c38d3e", size = 322613 },
+]
+
+[[package]]
+name = "groovy"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/36/bbdede67400277bef33d3ec0e6a31750da972c469f75966b4930c753218f/groovy-0.1.2.tar.gz", hash = "sha256:25c1dc09b3f9d7e292458aa762c6beb96ea037071bf5e917fc81fb78d2231083", size = 17325 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/27/3d6dcadc8a3214d8522c1e7f6a19554e33659be44546d44a2f7572ac7d2a/groovy-0.1.2-py3-none-any.whl", hash = "sha256:7f7975bab18c729a257a8b1ae9dcd70b7cafb1720481beae47719af57c35fa64", size = 14090 },
 ]
 
 [[package]]
@@ -3850,7 +3861,7 @@ requires-dist = [
     { name = "fire" },
     { name = "fsspec", specifier = "==2023.10.0" },
     { name = "google-genai", specifier = "==1.12.1" },
-    { name = "gradio" },
+    { name = "gradio", specifier = "==5.27.0" },
     { name = "huggingface-hub", extras = ["hf-transfer"] },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "jsonlines", specifier = ">=4.0.0" },

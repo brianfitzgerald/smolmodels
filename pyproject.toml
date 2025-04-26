@@ -32,7 +32,7 @@ dependencies = [
     "packaging>=24.1",
     "fastapi>=0.115.5",
     "uvicorn>=0.32.1",
-    "gradio",
+    "gradio==5.27.0",
     "scipy",
     "pyright>=1.1.390",
     "google-genai==1.12.1",

@@ -18,13 +18,14 @@ def _get_eos_tokens():
 
 
 def main(
-    host: str = "localhost",
-    port: int = 8001,
-    oai_host: str = "localhost",
+    gui_host: str = "localhost",
+    gui_port: int = 8001,
+    oai_host: str = "https://brianfitzgerald--vllm-server-serve.modal.run/v1",
     oai_port: int = 8000,
     model: Optional[str] = None,
 ):
     def _get_model_id():
+        logger.info(f"Getting model id, base url {client.base_url}")
         all_models = client.models.list()
 
         logger.info(f"Available models: {[x.id for x in all_models.data]}")
@@ -63,9 +64,9 @@ def main(
             partial_message += chunk.choices[0].delta.content or ""
             yield partial_message
 
-    oai_base_url = f"http://{oai_host}:{oai_port}/v1"
+    oai_base_url = oai_host
     logger.info(f"Creating OpenAI client with base url: {oai_base_url}")
-    client = OpenAI(base_url=oai_base_url)
+    client = OpenAI(base_url=oai_base_url, api_key="super-secret-key")
     selected_model_id = _get_model_id()
 
     # Create and launch a chat interface with Gradio
@@ -77,7 +78,7 @@ def main(
             "Write a story about a man and his cat, in a post-apocalyptic world.",
             "How many Rs are there in the word strawberry?",
         ],
-    ).queue().launch(server_name=host, server_port=port)
+    ).queue().launch(server_name=gui_host, server_port=gui_port)
 
 
 if __name__ == "__main__":
