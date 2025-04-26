@@ -46,7 +46,6 @@ from trl_wrapper.wrapper_config import (
     MINISTRAL_8B,
     QWEN_2_0_5_B,
     QWEN_2_1_5_B,
-    QWEN_2_5_3B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -212,8 +211,8 @@ CONNECTIONS_CONFIG = WrapperConfig(
 WRITING_GRPO_CONFIG = WrapperConfig(
     model_id_or_path=MINISTRAL_8B,
     wandb_project_name="writing-grpo",
-    num_generations=2,
-    train_batch_size=2,
+    num_generations=4,
+    train_batch_size=4,
     gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
@@ -222,10 +221,10 @@ WRITING_GRPO_CONFIG = WrapperConfig(
     n_epochs=1,
     warmup_steps=100,
     eval_batch_size=1,
-    learning_rate=1e-5,
+    learning_rate=5e-6,
     gradient_checkpointing=True,
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
-    optimizer=OptimizerNames.ADAMW_8BIT.value,
+    optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
 )
 
