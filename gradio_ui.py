@@ -34,7 +34,7 @@ def main(
         logger.info(f"Selected model: {model_id}")
         return model_id
 
-    def predict(message, history):
+    def predict(message: str, history: list[tuple[str, str]]):
         nonlocal selected_model_id
         if selected_model_id is None:
             selected_model_id = _get_model_id()
