@@ -419,6 +419,9 @@ async def score_writing(
         return []
 
     score_dicts = [bench.parse_judge_scores(score) for score in judge_completions]
+    slop_scores = [bench.calculate_slop_index(completion) for completion in completions]
+    for score_dict, slop_score in zip(score_dicts, slop_scores):
+        score_dict["slop_reward"] = 50 - slop_score
     return score_dicts
 
 

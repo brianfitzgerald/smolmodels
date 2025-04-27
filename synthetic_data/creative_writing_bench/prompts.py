@@ -1,4 +1,4 @@
-CRITERIA_STRICT = """
+CRITERIA_STRICT_DETAILED = """
 ## Coherent
 
 ### Detailed Criteria
@@ -82,6 +82,16 @@ CRITERIA_STRICT = """
 - **Score 20**  
   > “Her breath hitched as the envelope's seal tore—its brittle crack echoing in the silent room. The metallic tang of fear coated her tongue when she read the first line: 'You have exactly 24 hours.’”
 """
+
+CRITERIA_STRICT = """
+Coherent
+Believable Character Actions
+Consistent Voice/Tone of Writing
+Adherence to Instructions
+Emotionally Engaging
+Emotionally Complex
+"""
+
 
 JUDGING_CRITERIA = """
 Adherence to Instructions
