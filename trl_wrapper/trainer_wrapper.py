@@ -44,6 +44,7 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
     MINISTRAL_8B,
+    MINISTRAL_8B_WRITING_GRPO,
     QWEN_2_0_5_B,
     QWEN_2_1_5_B,
     SMOL_LM_135M,
@@ -208,7 +209,7 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 WRITING_GRPO_CONFIG = WrapperConfig(
-    model_id_or_path=MINISTRAL_8B,
+    model_id_or_path=MINISTRAL_8B_WRITING_GRPO,
     wandb_project_name="writing-grpo",
     num_generations=4,
     train_batch_size=4,

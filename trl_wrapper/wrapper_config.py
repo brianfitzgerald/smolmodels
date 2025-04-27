@@ -39,6 +39,10 @@ QWEN_2_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 QWEN_2_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
 QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 
+# Existing checkpoints
+
+MINISTRAL_8B_WRITING_GRPO = "/model-weights/runs/04-26-1-38-728629-ministral-8b-instruct-2410-writing/checkpoint-250/"
+
 DataCollatorChoice = Literal["basic", "chat"]
 ModelFamily = Literal["qwen", "mistral", "other"]
 

@@ -1,7 +1,6 @@
 import re
 from synthetic_data.creative_writing_bench.prompts import (
     CRITERIA_STRICT,
-    JUDGING_CRITERIA,
     JUDGING_PROMPT,
 )
 from synthetic_data.creative_writing_bench.slop_score import (

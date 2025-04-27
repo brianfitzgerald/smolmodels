@@ -68,8 +68,8 @@ VLLM_PORT = 8000
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
-# MODEL_NAME = "04-26-1-38-728629-ministral-8b-instruct-2410-writing"
-MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"
+MODEL_NAME = "04-26-1-38-728629-ministral-8b-instruct-2410-writing"
+# MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"
 
 
 @app.function(
