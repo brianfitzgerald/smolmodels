@@ -6,7 +6,7 @@ from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.writing_judge import CreativeWritingBench
+from synthetic_data.creative_writing_bench import CreativeWritingBench
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
 from typing import Coroutine, Optional, TypeVar

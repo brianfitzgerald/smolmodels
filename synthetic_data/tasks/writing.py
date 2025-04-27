@@ -28,7 +28,7 @@ from synthetic_data.screenplay_parser import ScreenplayParser
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.tasks import RunMode
-from synthetic_data.writing_judge import (
+from synthetic_data.creative_writing_bench import (
     CreativeWritingBench,
 )
 

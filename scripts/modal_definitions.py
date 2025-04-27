@@ -55,7 +55,6 @@ SMOLMODELS_IMAGE = (
     )
     .add_local_dir("dataset_files", "/dataset_files", copy=False)
     .add_local_dir("chat_templates", "/chat_templates", copy=False)
-    .add_local_dir("prompt_templates", "/prompt_templates", copy=False)
     .add_local_file(".env", "/.env", copy=False)
 )
 
