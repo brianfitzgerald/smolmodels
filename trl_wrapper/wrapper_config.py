@@ -39,6 +39,7 @@ QWEN_2_0_5_B = "Qwen/Qwen2.5-0.5B-Instruct"
 QWEN_2_1_5_B = "Qwen/Qwen2.5-1.5B-Instruct"
 QWEN_2_5_3B = "Qwen/Qwen2.5-3B-Instruct"
 QWEN_3_8B = "Qwen/Qwen3-8B"
+QWEN_3_600M = "Qwen/Qwen3-0.6B"
 
 # Existing checkpoints
 

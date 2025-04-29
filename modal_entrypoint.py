@@ -33,9 +33,7 @@ def training(config: str, wandb: bool = True):
     cfg = CONFIGS[config]
     vllm_process = None
     if cfg.tuning_mode == "grpo":
-        cmd = (
-            f"uv run trl vllm-serve --model {cfg.model_id_or_path} --max_model_len 4096"
-        )
+        cmd = f"uv run trl vllm-serve --model {cfg.model_id_or_path} --max_model_len 4096 --enforce_eager true"
         cmd_list = cmd.split()
         logger.info(f"Starting vLLM server, cmd: {cmd_list}")
         env = os.environ.copy()

@@ -210,7 +210,7 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 WRITING_GRPO_CONFIG = WrapperConfig(
-    model_id_or_path=QWEN_3_8B,
+    model_id_or_path=MINISTRAL_8B,
     wandb_project_name="writing-grpo",
     num_generations=4,
     train_batch_size=4,
@@ -502,6 +502,7 @@ class TrainerWrapper:
             training_args = GRPOConfig(
                 output_dir=output_dir,
                 run_name=run_name,
+                mask_truncated_completions=True,
                 learning_rate=self.config.learning_rate,
                 adam_beta1=0.9,
                 adam_beta2=0.99,
@@ -523,6 +524,7 @@ class TrainerWrapper:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 use_vllm=use_vllm,
+                vllm_server_timeout=60 * 10,
                 temperature=0.7,
                 top_k=20,
                 min_p=0,
