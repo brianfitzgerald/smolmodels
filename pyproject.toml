@@ -59,12 +59,10 @@ pythonpath = ["."]
 
 [dependency-groups]
 torch = [
-    "transformers==4.51.2",
-    "torch==2.5.1",
-    "torchaudio==2.5.1",
-    "torchvision==0.20.1",
+    "transformers==4.51.3",
+    "torch==2.6.0",
     "peft>=0.13.2",
-    "trl==0.16.1",
+    "trl==0.17.0",
     "lightning>=2.5.0.post0",
     "nltk",
 ]
@@ -75,7 +73,7 @@ training = [
     "bitsandbytes>=0.44.1; sys_platform == 'linux'",
     "liger-kernel>=0.5.2; sys_platform == 'linux'",
     "flash-attn; sys_platform == 'linux'",
-    "vllm==0.7.3",
+    "vllm==0.8.5",
 ]
 
 [tool.uv]

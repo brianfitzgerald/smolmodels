@@ -47,6 +47,7 @@ from trl_wrapper.wrapper_config import (
     MINISTRAL_8B_WRITING_GRPO,
     QWEN_2_0_5_B,
     QWEN_2_1_5_B,
+    QWEN_3_8B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
@@ -209,19 +210,19 @@ CONNECTIONS_CONFIG = WrapperConfig(
 )
 
 WRITING_GRPO_CONFIG = WrapperConfig(
-    model_id_or_path=MINISTRAL_8B_WRITING_GRPO,
+    model_id_or_path=QWEN_3_8B,
     wandb_project_name="writing-grpo",
     num_generations=4,
     train_batch_size=4,
     gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
-    max_completion_length=512,
+    max_completion_length=1024,
     max_grad_norm=0.1,
     n_epochs=1,
     warmup_steps=100,
     eval_batch_size=1,
-    learning_rate=5e-6,
+    learning_rate=1e-6,
     gradient_checkpointing=True,
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
     optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
@@ -522,7 +523,10 @@ class TrainerWrapper:
                 gradient_checkpointing=self.config.gradient_checkpointing,
                 per_device_eval_batch_size=self.config.eval_batch_size,
                 use_vllm=use_vllm,
-                temperature=0.9,
+                temperature=0.7,
+                top_k=20,
+                min_p=0,
+                top_p=0.8,
                 report_to="wandb" if self.use_wandb else "none",
             )
             self.trainer = GRPOTrainer(
