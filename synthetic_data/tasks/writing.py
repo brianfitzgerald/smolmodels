@@ -386,6 +386,10 @@ class GutenbergBacktranslation(BaseTask):
 
 
 class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
+    """
+    Generate a high quality prompt from a set of ePubs.
+    """
+
     output_dataset_name = "gutenberg_backtranslate_from_txt"
     seed_data_format = DatasetFormat.CUSTOM
 

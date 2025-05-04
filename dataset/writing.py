@@ -1,5 +1,6 @@
 import asyncio
 from collections import defaultdict
+from functools import partial
 
 from loguru import logger
 from synthetic_data.generation import (
@@ -202,6 +203,18 @@ def create_llm_judge_func(
     return named_llm_judge_func
 
 
+def antislop_func(
+    prompts: list[dict[str, str]],
+    completions: list[dict[str, str]],
+    bench: CreativeWritingBench,
+) -> list[float]:
+    completions = [completion[0]["content"] for completion in completions]
+    slop_scores = [bench.calculate_slop_index(completion) for completion in completions]
+    slop_scores = [max(100 - score, 0) for score in slop_scores]
+    logger.info(f"Slop scores - totals: {slop_scores}")
+    return slop_scores
+
+
 class WritingGRPODataModule(SmDataset):
     """Online rewarding using generation wrappers."""
 
@@ -229,7 +242,10 @@ class WritingGRPODataModule(SmDataset):
         self.bench = CreativeWritingBench(self.config.run_mode)
 
     def reward_functions(self) -> list[RewardFunc]:
+        antislop_fn = partial(antislop_func, bench=self.bench)
+        antislop_fn.__name__ = "antislop_func"  # type: ignore
         return [
-            create_llm_judge_func(self.generation_wrapper, self.bench),
+            # create_llm_judge_func(self.generation_wrapper, self.bench),
             logger_reward,
+            antislop_fn,
         ]

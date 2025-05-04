@@ -82,7 +82,9 @@
             "args": [
                 "convert_epubs_to_txt",
                 "--root_dir",
-                "~/Documents/epubs/scifi"
+                "~/Documents/epubs_curated_short_fiction",
+                "--out_dir",
+                "~/Documents/txt_curated_short_fiction"
             ]
         },
         {
