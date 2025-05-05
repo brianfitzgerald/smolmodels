@@ -303,7 +303,8 @@ class GutenbergBacktranslation(BaseTask):
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
-    def __init__(self) -> None:
+    def __init__(self, run_mode: RunMode) -> None:
+        super().__init__(run_mode)
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
@@ -392,6 +393,7 @@ class GutenbergBacktranslationFromTxt(GutenbergBacktranslation):
 
     output_dataset_name = "gutenberg_backtranslate_from_txt"
     seed_data_format = DatasetFormat.CUSTOM
+    seed_data_location = "epubs.parquet"
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         return Dataset.from_parquet(os.path.join(dataset_root_path, "epubs.parquet"))  # type: ignore
@@ -460,7 +462,7 @@ async def _generate_and_score(
     ]
 
 
-class BacktranslateBestOfN(BaseTask):
+class GenerationBestOfN(BaseTask):
     """
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """

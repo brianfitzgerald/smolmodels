@@ -26,25 +26,9 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "backtranslate_best_of_n",
+                "gutenberg_backtranslation_from_txt",
                 "--batch_size",
                 "4"
-            ],
-        },
-        {
-            "name": "Generate - 20 Qs",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "generate.py",
-            "args": [
-                "--environment_name",
-                "twenty_questions",
-                "--n_epochs",
-                "5",
-                "--batch_size",
-                "2",
-                "--save_every_n_batches",
-                "1"
             ],
         },
         {

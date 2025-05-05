@@ -28,7 +28,7 @@ from synthetic_data.tasks.writing import (
     GutenbergExtraction,
     GutenbergBacktranslation,
     ScreenplaySummarize,
-    BacktranslateBestOfN,
+    GenerationBestOfN,
 )
 from synthetic_data.utils import DatasetFormat, print_result_dicts
 from gyms import TwentyQuestionsPolicyEnvironment
@@ -39,14 +39,14 @@ TaskName = Literal[
     "gutenberg_extraction",
     "gutenberg_backtranslation",
     "gutenberg_backtranslation_from_txt",
-    "backtranslate_best_of_n",
+    "generation_best_of_n",
 ]
 ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
     "gutenberg_extraction": GutenbergExtraction,
     "gutenberg_backtranslation": GutenbergBacktranslation,
     "gutenberg_backtranslation_from_txt": GutenbergBacktranslationFromTxt,
-    "backtranslate_best_of_n": BacktranslateBestOfN,
+    "generation_best_of_n": GenerationBestOfN,
 }
 
 
@@ -144,7 +144,7 @@ def main(
     batch_size: int = 16,
     restart: bool = False,
     resume_input_position: bool = True,
-    model: RemoteModel = "gemini-2.5-flash",
+    model: RemoteModel = "gemini-2.0-flash",
     n_epochs: int = 1,
     run_mode: RunMode = "cli",
     **kwargs,

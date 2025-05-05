@@ -30,9 +30,9 @@ class BaseTask(ABC):
 
     gen_wrapper_args_override: Optional[GenWrapperArgs] = None
 
-    run_mode: RunMode = "cli"
+    run_mode: RunMode
 
-    def __init__(self, run_mode: RunMode = "cli") -> None:
+    def __init__(self, run_mode: RunMode) -> None:
         self.run_mode = run_mode
         self.dataset_root_path = (
             "../dataset_files"
