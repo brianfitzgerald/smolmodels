@@ -467,7 +467,7 @@ class GenerationBestOfN(BaseTask):
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """
 
-    output_dataset_name = "backtranslate_best_of_n"
+    output_dataset_name = "generation_best_of_n"
     dataset_columns = ["completion", "instruction", "scores", "model_id"]
     seed_data_format = DatasetFormat.PARQUET
     seed_data_location = "gutenberg_backtranslate_from_txt"

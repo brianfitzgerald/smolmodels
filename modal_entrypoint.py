@@ -15,7 +15,7 @@ from scripts.modal_definitions import (
     MODEL_WEIGHTS_VOLUME,
 )
 from trl_wrapper.trainer_wrapper import CONFIGS, TrainerWrapper
-from generate import main as generate_main
+from generate import TaskName, main as generate_main
 
 DATASET_VOLUME_PATH = os.path.join(MODELS_VOLUME_PATH.as_posix(), "dataset_files")
 
@@ -72,8 +72,8 @@ def training(config: str, wandb: bool = True):
     volumes={MODELS_VOLUME_PATH.as_posix(): MODEL_WEIGHTS_VOLUME},
     timeout=format_timeout(hours=12),
 )
-def generation():
+def generation(config: str):
     logger.info(
         f"Dataset root path: {DATASET_VOLUME_PATH} contents: {os.listdir(DATASET_VOLUME_PATH)}"
     )
-    generate_main(task_name="backtranslate_best_of_n", run_mode="modal")
+    generate_main(task_name=config, run_mode="modal")  # type: ignore
