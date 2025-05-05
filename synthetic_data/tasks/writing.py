@@ -425,7 +425,7 @@ async def score_writing(
     score_dicts = [bench.parse_judge_scores(score) for score in judge_completions]
     slop_scores = [bench.calculate_slop_index(completion) for completion in completions]
     for score_dict, slop_score in zip(score_dicts, slop_scores):
-        score_dict["slop_reward"] = 50 - slop_score
+        score_dict["Slop"] = 50 - slop_score
     return score_dicts
 
 
@@ -475,8 +475,7 @@ class GenerationBestOfN(BaseTask):
         super().__init__(run_mode)
         self.bench = None
         self.generators = [
-            get_generation_wrapper("gemini-2.0-flash"),
-            get_generation_wrapper("gpt-4o-mini"),
+            get_generation_wrapper("mistral-small-3"),
             get_generation_wrapper("gpt-4o"),
         ]
         self.judge_generator = get_generation_wrapper("gemini-2.0-flash")

@@ -1,6 +1,7 @@
 import re
 from synthetic_data.creative_writing_bench.prompts import (
     CRITERIA_STRICT,
+    CRITERIA_STYLE,
     JUDGING_PROMPT,
 )
 from synthetic_data.creative_writing_bench.slop_score import (
@@ -37,7 +38,7 @@ class CreativeWritingBench:
         prompt = JUDGING_PROMPT.format(
             test_model_response=model_response,
             writing_prompt=writing_prompt,
-            creative_writing_criteria=CRITERIA_STRICT,
+            creative_writing_criteria=CRITERIA_STYLE,
         )
         return prompt
 

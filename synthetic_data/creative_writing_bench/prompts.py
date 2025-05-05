@@ -93,6 +93,15 @@ Emotionally Complex
 """
 
 
+CRITERIA_STYLE = """
+Adherence to Instructions - the writing adheres to the instructions given by the user.
+Tone and Voice - the writing is consistent with the tone of the instructions.
+Pacing and Rhythm - the writing flows naturally, with a good pace and rhythm.
+Conciseness and Clarity - the writing is clear and concise, with no unnecessary words.
+
+"""
+
+
 JUDGING_CRITERIA = """
 Adherence to Instructions
 Believable Character Actions
