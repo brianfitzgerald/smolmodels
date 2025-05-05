@@ -7,7 +7,7 @@ import json
 import re
 from loguru import logger
 
-from synthetic_data.creative_writing_bench import CreativeWritingBench
+from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
 
 
 def parse_scores(judge_model_response):

@@ -7,7 +7,7 @@ from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.creative_writing_bench import CreativeWritingBench
+from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
 from trl_wrapper.wrapper_config import SmDataset
 from datasets import Dataset
 from typing import Coroutine, Optional, TypeVar
@@ -82,10 +82,8 @@ def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     try:
         # Check for a running loop in the *current* (caller) thread first.
         # This determines if we need to use the threading approach.
-        caller_loop = asyncio.get_running_loop()
         needs_thread = True
     except RuntimeError:
-        caller_loop = None
         needs_thread = False
 
     if needs_thread:
