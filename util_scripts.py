@@ -88,6 +88,7 @@ def convert_epubs_to_txt(root_dir: str, out_dir: str):
     """
     Convert all epub files in the root_dir to txt.
     Once converted, use the gutenberg_dev.ipynb notebook to split the txt files into chunks.
+    The generated txt files are also saved to epubs.parquet in the dataset_files folder.
     """
     root_dir = os.path.expanduser(root_dir)
     out_dir = os.path.expanduser(out_dir)
