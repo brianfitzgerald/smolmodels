@@ -429,7 +429,7 @@ async def score_writing(
     return score_dicts
 
 
-async def _generate_and_score(
+async def generate_and_score(
     generator: GenerationWrapper,
     input_rows: List[Dict],
     bench: CreativeWritingBench,
@@ -475,7 +475,7 @@ class GenerationBestOfN(BaseTask):
         super().__init__(run_mode)
         self.bench = None
         self.generators = [
-            get_generation_wrapper("gemini-2.5-flash"),
+            get_generation_wrapper("gemini-2.0-flash"),
             get_generation_wrapper("gpt-4o-mini"),
             get_generation_wrapper("gpt-4o"),
         ]
@@ -489,7 +489,7 @@ class GenerationBestOfN(BaseTask):
         # Launch generation and scoring for each generator concurrently
         results = await asyncio.gather(
             *[
-                _generate_and_score(
+                generate_and_score(
                     generator, input_rows, self.bench, self.judge_generator
                 )
                 for generator in self.generators
