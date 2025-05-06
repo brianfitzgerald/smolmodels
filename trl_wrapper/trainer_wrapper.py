@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-import copy
 
 import torch
 import torch.nn.utils.rnn
@@ -8,26 +7,26 @@ from datasets import load_dataset
 from loguru import logger
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.constants import DUMMY_TARGET_MODULES
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM  # type: ignore
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.tokenization_utils import PreTrainedTokenizer
+from transformers.trainer_utils import SchedulerType
+from transformers.training_args import OptimizerNames
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from trl.trainer.dpo_config import DPOConfig
-from trl.trainer.sft_config import SFTConfig
 from trl.trainer.grpo_config import GRPOConfig
 from trl.trainer.grpo_trainer import GRPOTrainer
-from transformers.trainer_utils import SchedulerType
-from trl.trainer.reward_trainer import RewardTrainer
 from trl.trainer.reward_config import RewardConfig
-from transformers.models.auto.modeling_auto import AutoModelForCausalLM  # type: ignore
-from transformers.training_args import OptimizerNames
+from trl.trainer.reward_trainer import RewardTrainer
+from trl.trainer.sft_config import SFTConfig
 
 from dataset.code import CodeContestsDataModule
-from dataset.conversation import ConversationDPODataModule, ConversationDataModule
+from dataset.conversation import ConversationDataModule, ConversationDPODataModule
+from dataset.writing import WritingDPODataModule, WritingGRPODataModule
 from model.reasoning import (
     ConnectionsDataModule,
     GSM8KDataModule,
 )
-from dataset.writing import WritingDPODataModule, WritingGRPODataModule
 from model.utils import (
     DataModuleChoice,
     ensure_directory,
@@ -44,15 +43,13 @@ from trl_wrapper.wrapper_config import (
     LLAMA_3_2_1B,
     LLAMA_3_2_3B,
     MINISTRAL_8B,
-    MINISTRAL_8B_WRITING_GRPO,
+    MISTRAL_7B,
     QWEN_2_0_5_B,
     QWEN_2_1_5_B,
-    QWEN_3_8B,
     SMOL_LM_135M,
     DatasetConfig,
     SmDataset,
     WrapperConfig,
-    MISTRAL_7B,
 )
 
 LLAMA_CONFIG = WrapperConfig(
@@ -214,20 +211,20 @@ WRITING_GRPO_CONFIG = WrapperConfig(
     wandb_project_name="writing-grpo",
     num_generations=2,
     train_batch_size=4,
-    gradient_accumulation_steps=16,
+    gradient_accumulation_steps=8,
     data_module_choice="writing_grpo",
     max_prompt_length=512,
     max_completion_length=1024,
-    max_grad_norm=0.2,
+    max_grad_norm=0.1,
     n_epochs=1,
-    warmup_steps=100,
+    warmup_steps=25,
     eval_batch_size=1,
-    learning_rate=2e-6,
+    learning_rate=1e-6,
     gradient_checkpointing=True,
     lr_scheduler=SchedulerType.CONSTANT_WITH_WARMUP,
     optimizer=OptimizerNames.PAGED_ADAMW_8BIT.value,
     tuning_mode="grpo",
-    run_suffix="antislop-only",
+    run_suffix="style-focus",
 )
 
 

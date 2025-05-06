@@ -198,19 +198,9 @@ def score_connections_soft(
     return float(sum(best_match_counts) / len(solution_groups)) / len(submitted_groups)
 
 
-def _generations(completions: list[dict]) -> list[str]:
-    return [completion[0]["content"] for completion in completions]
-
-
-def _user_messages(prompts: list[dict]) -> list[str]:
-    idx = 1 if prompts[0][0]["role"] == "system" else 0
-    return [p[idx]["content"] for p in prompts]
-
-
 def soft_group_reward(prompts, completions, **kwargs) -> list[float]:
     """Reward the number of correct groups."""
-    model_generations = _generations(completions)
-    generation_groups = [parse_groups(r) for r in model_generations]
+    generation_groups = [parse_groups(r) for r in completions]
     scores = [
         score_connections_soft(answers, groups)
         for answers, groups in zip(kwargs["answer_groups"], generation_groups)
@@ -232,9 +222,7 @@ def hard_group_reward(prompts, completions, **kwargs) -> list[float]:
 
 
 def logger_reward(prompts, completions, **kwargs) -> list[float]:
-    model_generations = _generations(completions)
-    prompts = _user_messages(prompts)
-    for i, (g, p) in enumerate(zip(model_generations, prompts)):
+    for i, (g, p) in enumerate(zip(completions, prompts)):
         logger.info("=" * 40)
         logger.info(f"Prompt {i}: " + "-" * 20)
         logger.info(p)

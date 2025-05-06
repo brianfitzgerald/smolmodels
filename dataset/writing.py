@@ -69,9 +69,7 @@ class WritingDPODataModule(SmDataset):
 def _map_writing_grpo(example: dict) -> dict:
     # TODO maybe compare to existing rewards?
     return {
-        "prompt": [
-            {"role": "user", "content": example["instruction"]},
-        ],
+        "prompt": example["instruction"],
     }
 
 
@@ -148,6 +146,7 @@ def llm_judge_func(
     completions: list[str],
     generation_wrapper: GenerationWrapper | None = None,
     bench: CreativeWritingBench | None = None,
+    **kwargs,
 ) -> list[float]:
     async def run_score():
         assert generation_wrapper is not None
@@ -205,8 +204,8 @@ def antislop_func(
     prompts: list[dict[str, str]],
     completions: list[dict[str, str]],
     bench: CreativeWritingBench,
+    **kwargs,
 ) -> list[float]:
-    completions = [completion[0]["content"] for completion in completions]
     slop_scores = [bench.calculate_slop_index(completion) for completion in completions]
     slop_scores = [max(100 - score, 0) for score in slop_scores]
     logger.info(f"Slop scores - totals: {slop_scores}")
@@ -243,7 +242,7 @@ class WritingGRPODataModule(SmDataset):
         antislop_fn = partial(antislop_func, bench=self.bench)
         antislop_fn.__name__ = "antislop_func"  # type: ignore
         return [
-            # create_llm_judge_func(self.generation_wrapper, self.bench),
+            create_llm_judge_func(self.generation_wrapper, self.bench),
             logger_reward,
             antislop_fn,
         ]
