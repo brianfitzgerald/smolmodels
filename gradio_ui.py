@@ -55,7 +55,7 @@ def main(
             messages=history_openai_format,
             model=selected_model_id,
             stream=True,
-            extra_body={"stop_token_ids": stop_tokens, "skip_special_tokens": False},
+            temperature=0.5,
         )
 
         # Read and return generated text from response stream

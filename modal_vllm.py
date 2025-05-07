@@ -68,7 +68,7 @@ VLLM_PORT = 8000
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
 
-MODEL_NAME = "04-26-1-38-728629-ministral-8b-instruct-2410-writing"
+MODEL_NAME = "05-07-1-18-535337-ministral-8b-instruct-2410-writing-style-focus-low-lr"
 # MODEL_NAME = "mistralai/Ministral-8B-Instruct-2410"
 
 
