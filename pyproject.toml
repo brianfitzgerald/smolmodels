@@ -59,10 +59,10 @@ pythonpath = ["."]
 
 [dependency-groups]
 torch = [
-    "transformers==4.51.3",
+    "transformers==4.55.2",
     "torch==2.6.0",
     "peft>=0.13.2",
-    "trl==0.17.0",
+    "trl==0.21.0",
     "lightning>=2.5.0.post0",
     "nltk",
 ]
