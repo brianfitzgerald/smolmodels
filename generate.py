@@ -1,7 +1,8 @@
 import asyncio
-from collections.abc import AsyncGenerator
 from copy import copy
-from typing import Dict, Optional, cast
+import time
+from statistics import mean
+from typing import Dict, Optional, cast, List
 from huggingface_hub import login
 from typing import Literal
 
@@ -23,6 +24,7 @@ from synthetic_data.generation import (
     save_output_dataset,
 )
 from synthetic_data.tasks import BaseTask, RunMode
+from synthetic_data.tasks.roleplaying import RoleplayingGame
 from synthetic_data.tasks.writing import (
     GutenbergBacktranslationFromTxt,
     GutenbergExtraction,
@@ -40,6 +42,7 @@ TaskName = Literal[
     "gutenberg_backtranslation",
     "gutenberg_backtranslation_from_txt",
     "generation_best_of_n",
+    "roleplaying_game",
 ]
 ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
     "screenplay_summarize": ScreenplaySummarize,
@@ -47,6 +50,7 @@ ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
     "gutenberg_backtranslation": GutenbergBacktranslation,
     "gutenberg_backtranslation_from_txt": GutenbergBacktranslationFromTxt,
     "generation_best_of_n": GenerationBestOfN,
+    "roleplaying_game": RoleplayingGame,
 }
 
 
@@ -55,60 +59,103 @@ ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
 }
 
 
+class PIDController:
+    def __init__(self, kp=1.0, ki=0.1, kd=0.05, setpoint=1.0):
+        self.kp = kp  # Proportional gain
+        self.ki = ki  # Integral gain
+        self.kd = kd  # Derivative gain
+        self.setpoint = setpoint
+        self.previous_error = 0.0
+        self.integral = 0.0
+
+    def update(self, current_value: float, dt: float = 1.0) -> float:
+        error = self.setpoint - current_value
+        self.integral += error * dt
+        derivative = (error - self.previous_error) / dt
+
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+
+        self.previous_error = error
+        return output
+
+
+class SimplePIDBatchController:
+    def __init__(
+        self,
+        initial_batch_size: int = 16,
+        min_batch_size: int = 1,
+        max_batch_size: int = 64,
+        target_throughput: float = 2.0,
+    ):
+        self._current_batch_size = initial_batch_size
+        self.min_batch_size = min_batch_size
+        self.max_batch_size = max_batch_size
+        self.target_throughput = target_throughput
+
+        # PID controller for throughput optimization
+        self.pid_controller = PIDController(
+            kp=2.0, ki=0.1, kd=0.5, setpoint=target_throughput
+        )
+
+        # Simple throughput tracking
+        self.throughput_history: List[float] = []
+        self.history_window = 5
+
+    def record_batch_performance(
+        self, batch_size: int, batch_time: float, num_items: int
+    ):
+        """Record performance and adjust batch size using PID controller"""
+        throughput = num_items / batch_time if batch_time > 0 else 0
+        self.throughput_history.append(throughput)
+
+        # Keep only recent history
+        if len(self.throughput_history) > self.history_window:
+            self.throughput_history = self.throughput_history[-self.history_window :]
+
+        # Only adjust after we have some data
+        if len(self.throughput_history) >= 3:
+            current_throughput = mean(self.throughput_history)
+            pid_output = self.pid_controller.update(current_throughput)
+
+            # Convert PID output to batch size adjustment
+            adjustment = int(pid_output)
+            new_batch_size = self._current_batch_size + adjustment
+
+            # Apply constraints
+            new_batch_size = max(
+                self.min_batch_size, min(self.max_batch_size, new_batch_size)
+            )
+
+            if new_batch_size != self._current_batch_size:
+                logger.info(
+                    f"PID batch size adjustment: {self._current_batch_size} → {new_batch_size} "
+                    f"(throughput: {current_throughput:.2f} vs target: {self.target_throughput})"
+                )
+                self._current_batch_size = new_batch_size
+
+    def get_current_batch_size(self) -> int:
+        return self._current_batch_size
+
+
 async def process_batch(
     task: BaseTask, generation_wrapper, input_rows: list[dict]
-) -> list[dict]:
+) -> tuple[list[dict], float]:
     logger.info(f"Processing batch of {len(input_rows)} rows")
+    start_time = time.time()
     output_rows = await task.generate(generation_wrapper, input_rows)
+    batch_time = time.time() - start_time
+
     if len(output_rows) == 0:
         logger.warning("Skipping empty batch")
-        return []
-    return output_rows
-
-
-async def collect_preprocessed_rows(
-    task: BaseTask, input_dataset: Dataset, batch_size: int, max_input_buffer: int = 10
-) -> AsyncGenerator[list[dict], None]:
-    input_buffer = []
-    current_position = 0
-
-    while current_position < len(input_dataset):
-        # Fill input buffer
-        while len(input_buffer) < max_input_buffer and current_position < len(
-            input_dataset
-        ):
-            input_buffer.append(input_dataset[current_position])
-            current_position += 1
-
-        if not input_buffer:
-            break
-
-        # Process current buffer
-        results = []
-        for row in input_buffer:
-            result = await task.preprocess_row(row)
-            if result:
-                results.extend(result)
-        input_buffer.clear()
-
-        # Yield batches of preprocessed rows
-        while len(results) >= batch_size:
-            batch_to_yield = results[:batch_size]
-            yield batch_to_yield
-            results = results[batch_size:]
-
-        # Yield any remaining rows from this buffer iteration
-        if results:
-            yield results
-
-    logger.info("Finished collecting preprocessed rows.")
+        return [], batch_time
+    return output_rows, batch_time
 
 
 async def process_dataset(
     task: BaseTask,
     generation_wrapper,
     input_dataset: Dataset,
-    batch_size: int,
+    initial_batch_size: int,
     save_every_n_batches: int,
     output_dataset: Dataset,
     out_dir: str,
@@ -116,23 +163,65 @@ async def process_dataset(
     all_new_dataset_rows = []
     batch_count = 0
 
-    preprocessed_batches = collect_preprocessed_rows(task, input_dataset, batch_size)
-    async for preprocessed_batch in preprocessed_batches:
-        # Process whatever number of rows we got, even if less than batch_size
-        output_rows = await process_batch(task, generation_wrapper, preprocessed_batch)
-        if output_rows:
-            print_result_dicts(output_rows)
-            all_new_dataset_rows.extend(output_rows)
+    # Initialize simple PID batch size controller (always enabled)
+    batch_controller = SimplePIDBatchController(
+        initial_batch_size=initial_batch_size,
+        min_batch_size=1,
+        max_batch_size=min(64, initial_batch_size * 4),
+        target_throughput=2.0,
+    )
 
-        batch_count += 1
-        if batch_count % save_every_n_batches == 0:
-            save_output_dataset(
-                output_dataset,
-                task.output_dataset_name,
-                all_new_dataset_rows,
-                task.output_dataset_format,
-                out_dir,
+    i = 0
+    while i < len(input_dataset):
+        current_batch_size = batch_controller.get_current_batch_size()
+        batch = input_dataset[i : i + current_batch_size]
+        if not isinstance(batch, list):
+            batch = [batch]
+
+        preprocessed_rows = []
+        for row in batch:
+            result = await task.preprocess_row(row)
+            if result:
+                preprocessed_rows.extend(result)
+
+        if preprocessed_rows:
+            output_rows, batch_time = await process_batch(
+                task, generation_wrapper, preprocessed_rows
             )
+
+            # Record performance metrics for autoscaling
+            batch_controller.record_batch_performance(
+                current_batch_size, batch_time, len(preprocessed_rows)
+            )
+
+            # Log throughput metrics
+            if batch_time > 0:
+                throughput = len(preprocessed_rows) / batch_time
+                logger.info(
+                    f"Batch throughput: {throughput:.2f} items/sec, "
+                    f"batch_size: {current_batch_size}, time: {batch_time:.1f}s"
+                )
+
+            if output_rows:
+                print_result_dicts(output_rows)
+                all_new_dataset_rows.extend(output_rows)
+
+            batch_count += 1
+            if batch_count % save_every_n_batches == 0:
+                save_output_dataset(
+                    output_dataset,
+                    task.output_dataset_name,
+                    all_new_dataset_rows,
+                    task.output_dataset_format,
+                    out_dir,
+                )
+
+        i += current_batch_size
+
+    if batch_controller.throughput_history:
+        avg_throughput = mean(batch_controller.throughput_history)
+        logger.info(f"Final average throughput: {avg_throughput:.2f} items/sec")
+        logger.info(f"Final batch size: {batch_controller.get_current_batch_size()}")
 
     return all_new_dataset_rows
 

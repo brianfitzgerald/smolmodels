@@ -1,9 +1,6 @@
 from abc import ABC
-from typing import Dict, List, Optional
+from typing import List, Optional
 from loguru import logger
-from evaluation.code_execution import (
-    EvalTask,
-)
 from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
 from synthetic_data.utils import (
     Conversation,
@@ -65,14 +62,6 @@ class BaseTask(ABC):
     ) -> list[dict]:
         """
         Take the completed conversation and format it into the final dataset format.
-        """
-        raise NotImplementedError
-
-    def format_inference_conversation(
-        self, sample: Dict, eval_task: Optional[EvalTask] = None
-    ) -> Conversation:
-        """
-        Prompt template to use for generating initial seed data.
         """
         raise NotImplementedError
 
