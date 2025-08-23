@@ -307,10 +307,11 @@ def main(
 
     output_dataset = cast(Dataset, output_dataset)
 
-    # Load input dataset
-    logger.info(
-        f"Loading input dataset: {task.seed_data_location}, format: {task.seed_data_format.value}"
-    )
+    if task.seed_data_location is not None:
+        # Load input dataset
+        logger.info(
+            f"Loading input dataset from location: {task.seed_data_location}, format: {task.seed_data_format.value}"
+        )
     input_dataset: Dataset = task.load_dataset()
     logger.info(f"Input dataset length: {len(input_dataset)}")
 

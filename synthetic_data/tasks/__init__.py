@@ -18,7 +18,7 @@ class BaseTask(ABC):
     seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
     seed_data_split = "train"
 
-    seed_data_location: str
+    seed_data_location: str | None = None
     output_dataset_name: str
     output_dataset_org: str = "roborovski"
     output_dataset_format: DatasetFormat = DatasetFormat.HF_DATASET
@@ -83,7 +83,9 @@ class BaseTask(ABC):
         """
         Load the seed dataset based on the specified format.
         """
-        if self.seed_data_format == DatasetFormat.CUSTOM:
+        if self.seed_data_location is None:
+            return Dataset.from_dict({k: [] for k in self.dataset_columns})
+        elif self.seed_data_format == DatasetFormat.CUSTOM:
             return self.load_custom(self.dataset_root_path)
         else:
             assert self.seed_data_location, (
