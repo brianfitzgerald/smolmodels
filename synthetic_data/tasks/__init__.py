@@ -111,3 +111,14 @@ class BaseTask(ABC):
                 raise ValueError(
                     f"Unrecognized seed_data_format: {self.seed_data_format}"
                 )
+
+    def new_episode(self, generation_wrapper: GenerationWrapper, seed: int):
+        raise NotImplementedError
+
+    async def step_episode(
+        self, generation_wrapper: GenerationWrapper, episode_state
+    ) -> bool:
+        raise NotImplementedError
+
+    def get_output_row(self, episode_state) -> dict:
+        raise NotImplementedError
