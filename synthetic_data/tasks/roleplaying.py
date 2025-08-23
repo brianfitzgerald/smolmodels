@@ -1,3 +1,4 @@
+from typing import cast
 from loguru import logger
 
 from synthetic_data.generation import (
@@ -74,7 +75,7 @@ class RoleplayingGameMultiStepTask(BaseTask):
 
     def new_episode(self, generation_wrapper: GenerationWrapper, seed: int):
         followup_wrapper = get_generation_wrapper(
-            self.followup_model, args_override=GenWrapperArgs(seed=seed)
+            cast(RemoteModel, self.followup_model), args_override=GenWrapperArgs(seed=seed)
         )
         ep = RoleplayingGameMultiStepTask._Episode(seed, followup_wrapper)
         ep.run_metadata = {
@@ -92,9 +93,9 @@ class RoleplayingGameMultiStepTask(BaseTask):
     async def step_episode(
         self,
         generation_wrapper: GenerationWrapper,
-        ep: "RoleplayingGameMultiStepTask._Episode",
+        episode_state: "RoleplayingGameMultiStepTask._Episode",
     ) -> bool:
-        if ep.step_count == 0:
+        if episode_state.step_count == 0:
             # Step 1: Generate the roleplaying scenario
             scenario_conversation: Conversation = [
                 {
@@ -111,15 +112,15 @@ class RoleplayingGameMultiStepTask(BaseTask):
             scenario_response = await generation_wrapper.generate(
                 [scenario_conversation]
             )
-            ep.scenario = scenario_response[0]
-            ep.conversation.extend(scenario_conversation)
-            ep.conversation.append({"role": "assistant", "content": ep.scenario})
-            ep.run_metadata["scenario_generated"] = True
-            ep.step_count += 1
-            logger.info(f"Generated scenario: {ep.scenario[:100]}...")
+            episode_state.scenario = scenario_response[0]
+            episode_state.conversation.extend(scenario_conversation)
+            episode_state.conversation.append({"role": "assistant", "content": episode_state.scenario})
+            episode_state.run_metadata["scenario_generated"] = True
+            episode_state.step_count += 1
+            logger.info(f"Generated scenario: {episode_state.scenario[:100]}...")
             return False
 
-        elif ep.step_count == 1:
+        elif episode_state.step_count == 1:
             # Step 2: Generate follow-up questions
             followup_conversation: Conversation = [
                 {
@@ -128,26 +129,26 @@ class RoleplayingGameMultiStepTask(BaseTask):
                 },
                 {
                     "role": "user",
-                    "content": f"Scenario: {ep.scenario}\n\nGenerate {self.num_followups} follow-up questions for this scenario.",
+                    "content": f"Scenario: {episode_state.scenario}\n\nGenerate {self.num_followups} follow-up questions for this scenario.",
                 },
             ]
 
             logger.info(f"Generating follow-up questions with {self.followup_model}")
-            followup_response = await ep.followup_wrapper.generate(
+            followup_response = await episode_state.followup_wrapper.generate(
                 [followup_conversation]
             )
-            ep.followups = followup_response[0]
-            ep.conversation.extend(followup_conversation)
-            ep.conversation.append({"role": "assistant", "content": ep.followups})
-            ep.run_metadata["followups_generated"] = True
-            ep.step_count += 1
-            logger.info(f"Generated follow-ups: {ep.followups[:100]}...")
+            episode_state.followups = followup_response[0]
+            episode_state.conversation.extend(followup_conversation)
+            episode_state.conversation.append({"role": "assistant", "content": episode_state.followups})
+            episode_state.run_metadata["followups_generated"] = True
+            episode_state.step_count += 1
+            logger.info(f"Generated follow-ups: {episode_state.followups[:100]}...")
             return True
 
         return True
 
-    def get_output_row(self, ep: "RoleplayingGameMultiStepTask._Episode") -> dict:
-        if ep.scenario is None:
+    def get_output_row(self, episode_state: "RoleplayingGameMultiStepTask._Episode") -> dict:
+        if episode_state.scenario is None:
             return {
                 "scenario": "No scenario generated",
                 "follow_ups": "No follow-ups generated",
@@ -157,9 +158,9 @@ class RoleplayingGameMultiStepTask(BaseTask):
             }
 
         return {
-            "scenario": ep.scenario,
-            "follow_ups": ep.followups
-            if ep.followups is not None
+            "scenario": episode_state.scenario,
+            "follow_ups": episode_state.followups
+            if episode_state.followups is not None
             else "No follow-ups generated",
             "original_input": {"prompt": self.input_prompt},
             "generation_model": self.generation_model,

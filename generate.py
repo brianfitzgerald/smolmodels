@@ -150,15 +150,6 @@ def main(
         else "/model-weights/dataset_files"
     )
 
-    # Determine output directory early (also used by multi-turn path)
-    out_dir = (
-        "../dataset_files"
-        if run_mode == "notebook"
-        else "./dataset_files"
-        if run_mode == "cli"
-        else "/model-weights/dataset_files"
-    )
-
     # Unified run: episodes if implemented, else single-step dataset batching
     asyncio.run(
         run_task(

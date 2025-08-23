@@ -2,7 +2,7 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
 import traceback
-from typing import Dict, List, Optional, cast, Literal
+from typing import Any, Dict, List, Optional, cast, Literal
 from datetime import datetime, timedelta
 import asyncio
 from collections import deque
@@ -337,7 +337,7 @@ class GeminiWrapper(GenerationWrapper):
                     reqs.append(
                         self.client.aio.models.generate_content(
                             model=self.model_id,
-                            contents=conv,
+                            contents=cast(Any, conv),
                         )
                     )
 
@@ -355,13 +355,16 @@ class GeminiWrapper(GenerationWrapper):
                         continue
                     return []
 
-                return [result.text for result in results]
+                return [result.text or "" for result in results]
 
             except Exception as e:
                 logger.error(f"Error while generating (attempt {attempt + 1}): {e}")
                 if attempt < max_retries - 1:
                     continue
                 return []
+        
+        # Return empty list if all retries failed
+        return []
 
 
 RemoteModel = Literal[

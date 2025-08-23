@@ -12,7 +12,6 @@ from loguru import logger
 from synthetic_data.generation import GenerationWrapper, save_output_dataset
 from synthetic_data.tasks import BaseTask
 from synthetic_data.utils import print_result_dicts
-from datasets import Dataset
 
 
 class PIDController:
