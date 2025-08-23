@@ -24,7 +24,7 @@ from synthetic_data.generation import (
     save_output_dataset,
 )
 from synthetic_data.tasks import BaseTask, RunMode
-from synthetic_data.tasks.roleplaying import RoleplayingGame
+from synthetic_data.tasks.roleplaying import RoleplayingGame, RoleplayingGameEnvironment
 from synthetic_data.tasks.writing import (
     GutenbergBacktranslationFromTxt,
     GutenbergExtraction,
@@ -56,6 +56,7 @@ ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
 
 ALL_ENVIRONMENTS: dict[str, type[TextEnv]] = {
     "twenty_questions": TwentyQuestionsPolicyEnvironment,
+    "roleplaying_game": RoleplayingGameEnvironment,
 }
 
 

@@ -200,7 +200,7 @@ class TwentyQuestionsPolicyEnvironment(TextEnv):
         self.step_count = 0
         self.curr_word: Optional[WordVariants] = None
         self.conversation: Conversation = []
-        self.task = TwentyQuestionsTask()
+        self.task = TwentyQuestionsTask(run_mode="modal")
         self.run_metadata: dict = {}
 
     async def step(self) -> bool:
