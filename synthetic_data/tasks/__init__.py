@@ -119,6 +119,7 @@ class BaseTaskV1(ABC):
 
 class BaseTask(ABC, Generic[SampleT, EpisodeT]):
     seed_data_location: str | None = None
+    seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
     output_dataset_name: str
     output_dataset_org: str = "roborovski"
     output_dataset_format: DatasetFormat = DatasetFormat.HF_DATASET
@@ -136,6 +137,50 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
             if run_mode == "cli"
             else "/dataset_files"
         )
+
+    def load_dataset(self) -> Dataset:
+        """
+        Load the seed dataset based on the specified format.
+        """
+        logger.info(
+            f"Loading dataset with seed_data_location={self.seed_data_location}, seed_data_format={self.seed_data_format}"
+        )
+        if self.seed_data_format == DatasetFormat.CUSTOM:
+            logger.info("Using CUSTOM format, calling load_custom")
+            return self.load_custom(self.dataset_root_path)
+        elif self.seed_data_location is None:
+            logger.info("seed_data_location is None, returning empty dataset")
+            return Dataset.from_dict({k: [] for k in self.dataset_columns})
+        else:
+            assert self.seed_data_location, (
+                f"Input dataset location must be provided, but is {self.seed_data_location}"
+            )
+            if self.seed_data_format == DatasetFormat.HF_DATASET:
+                return load_dataset(self.seed_data_location, split="train")  # type: ignore
+            elif self.seed_data_format == DatasetFormat.TSV:
+                seed_data = pd.read_csv(
+                    os.path.join(
+                        self.dataset_root_path, f"{self.seed_data_location}.tsv"
+                    ),
+                    on_bad_lines="skip",
+                )
+                return Dataset.from_pandas(seed_data)
+            elif self.seed_data_format == DatasetFormat.PARQUET:
+                return Dataset.from_parquet(
+                    os.path.join(
+                        self.dataset_root_path, f"{self.seed_data_location}.parquet"
+                    )
+                )  # type: ignore
+            else:
+                raise ValueError(
+                    f"Unrecognized seed_data_format: {self.seed_data_format}"
+                )
+
+    def load_custom(self, dataset_root_path: str) -> Dataset:
+        """
+        Custom dataset loading logic. Only used if seed_data_format is DatasetFormat.CUSTOM.
+        """
+        raise NotImplementedError
 
     async def start_episode(self, sample: SampleT) -> EpisodeT:
         raise NotImplementedError

@@ -1,11 +1,9 @@
+import asyncio
 import os
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-import traceback
-from typing import Any, Dict, List, Optional, cast, Literal
-from datetime import datetime, timedelta
-import asyncio
-from collections import deque
+from typing import Any, Dict, List, Literal, Optional, cast
 
 import google.genai as genai
 import google.genai.types
@@ -14,7 +12,7 @@ from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
-from openai import NOT_GIVEN, LengthFinishReasonError, NotGiven, AsyncOpenAI, OpenAI
+from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, NotGiven, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from pydantic import BaseModel
 
@@ -115,6 +113,8 @@ class MockGenerator(GenerationWrapper):
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
+    provider_name: str = "openai"
+
     def __init__(
         self,
         args: GenWrapperArgs,
@@ -205,7 +205,10 @@ def _get_model_id(base_url: str):
 
 
 class VLLMWrapper(OpenAIGenerationWrapper):
+    provider_name: str = "vllm"
+
     def __init__(self, args: GenWrapperArgs) -> None:
+        super().__init__(args)
         base_url = "http://localhost:8000/v1"
         self.oai_client = AsyncOpenAI(
             base_url=base_url,
@@ -239,7 +242,10 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 
 class AnthropicGenerationWrapper(GenerationWrapper):
+    provider_name = "anthropic"
+
     def __init__(self, args: GenWrapperArgs) -> None:
+        super().__init__(args)
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if api_key is None:
             raise ValueError(
@@ -294,7 +300,10 @@ def _openai_conversation_to_gemini(conversation: Conversation):
 
 
 class GeminiWrapper(GenerationWrapper):
+    provider_name = "gemini"
+
     def __init__(self, args: GenWrapperArgs) -> None:
+        super().__init__(args)
         api_key = os.environ.get("GOOGLE_API_KEY")
         self.model_id = args.model_id or "gemini-2.0-flash"
         if api_key is None:

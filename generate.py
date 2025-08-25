@@ -3,7 +3,7 @@ import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Dict, Literal, cast, List, Any, Optional
+from typing import Any, Dict, List, Literal, Optional, cast
 
 import fire
 from datasets import Dataset, concatenate_datasets, load_dataset
@@ -255,7 +255,7 @@ class AutoscalingGenerationManager:
 
 
 async def run_task(
-    task: BaseTaskV1,
+    task: BaseTask,
     generation_wrapper,
     input_dataset: Dataset,
     output_dataset: Dataset,
@@ -304,7 +304,6 @@ async def run_task(
     logger.info(
         f"Target throughput: {throughput_config.target_tokens_per_second} tokens/sec"
     )
-    logger.info(f"Input dataset size: {len(input_dataset)}")
     logger.info(f"Output dataset size: {len(output_dataset)}")
 
     total_processed = 0
@@ -328,10 +327,14 @@ async def run_task(
                         task, autoscaling_manager, batch_data
                     )
                 else:
-                    # Single-step task
-                    results = await process_single_step_task(
-                        task, autoscaling_manager, batch_data
-                    )
+                    # Single-step task (only for BaseTaskV1 tasks)
+                    if isinstance(task, BaseTaskV1):
+                        results = await process_single_step_task(
+                            task, autoscaling_manager, batch_data
+                        )
+                    else:
+                        logger.warning("Task does not support single-step processing")
+                        results = []
 
                 # Add results to output dataset
                 if results:
@@ -424,19 +427,23 @@ async def process_multi_step_task(
             if not all_wrappers:
                 raise ValueError("No wrappers registered in autoscaling manager")
             main_wrapper = all_wrappers[0]
-            episode = task.new_episode(main_wrapper, seed)
 
-            # Run episode steps
-            completed = False
-            while not completed:
-                completed = await task.step_episode(
-                    main_wrapper,  # Use main wrapper
-                    episode,
-                )
+            # Set the generation wrapper in the episode
+            episode = task.new_episode(main_wrapper, seed)
+            episode.generation_wrapper = main_wrapper
+
+            # Run episode steps until completion
+            step_results = []
+            while True:
+                step_result = await task.step_episode(episode)
+                if (
+                    step_result
+                ):  # If step_episode returns non-empty list, episode is complete
+                    break
 
             # Get output row
-            output_row = task.get_output_row(episode)
-            results.append(output_row)
+            output_rows = task.get_output_row(episode)
+            results.extend(output_rows)
 
         except Exception as e:
             logger.error(f"Error processing episode {i}: {e}")
@@ -452,10 +459,9 @@ TaskName = Literal[
     "gutenberg_backtranslation_from_txt",
     "generation_best_of_n",
     "roleplaying_game",
-    "roleplaying_game_env",
 ]
 ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
-    "roleplaying_game_env": RoleplayingGameMultiStepTask,
+    "roleplaying_game": RoleplayingGameMultiStepTask,
 }
 
 
@@ -533,6 +539,7 @@ def main(
 
     output_dataset = cast(Dataset, output_dataset)
 
+    # Load input dataset
     if task.seed_data_location is not None:
         # Load input dataset
         logger.info(
@@ -541,16 +548,6 @@ def main(
     input_dataset: Dataset = task.load_dataset()
     logger.info(f"Input dataset length: {len(input_dataset)}")
 
-    # Resume from position
-
-    if resume_input_position and len(output_dataset) > 0:
-        # skip first n rows
-        logger.info(f"Resuming from position {len(output_dataset)}")
-        input_dataset = input_dataset.skip(len(output_dataset))
-
-    logger.info(
-        f"Input dataset length: {len(input_dataset)} Output dataset: {len(output_dataset)}"
-    )
     out_dir = (
         "../dataset_files"
         if run_mode == "notebook"

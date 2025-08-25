@@ -15,6 +15,7 @@ from synthetic_data.tasks.roleplaying_prompts import (
     ROLEPLAYING_PROMPT,
 )
 from synthetic_data.utils import Conversation, DatasetFormat
+from datasets import Dataset
 
 
 class RPGEpisode:
@@ -78,6 +79,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     Step 3: Generate simulated user responses
     """
 
+    seed_data_format = DatasetFormat.CUSTOM
+
     def __init__(
         self,
         run_mode: RunMode,
@@ -100,6 +103,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.output_dataset_org = self.task.output_dataset_org
         self.output_dataset_format = self.task.output_dataset_format
         self.dataset_columns = self.task.dataset_columns
+
+    def load_custom(self, dataset_root_path: str) -> Dataset:
+        """
+        Custom dataset loading logic for roleplaying game.
+        Since this is a synthetic task, we create dummy data.
+        """
+        logger.info(
+            f"Loading custom dataset for roleplaying game with prompt: {self.input_prompt}"
+        )
+        # Create dummy data for the roleplaying game
+        dummy_data = [{"prompt": self.input_prompt} for _ in range(10)]  # 10 episodes
+        logger.info(f"Created {len(dummy_data)} dummy episodes")
+        return Dataset.from_list(dummy_data)
 
     def new_episode(self, generation_wrapper: GenerationWrapper, seed: int):
         followup_wrapper = get_generation_wrapper(
