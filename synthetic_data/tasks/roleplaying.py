@@ -1,12 +1,7 @@
 from jinja2 import Template
 from loguru import logger
 
-from synthetic_data.generation import (
-    GenerationWrapper,
-    GenWrapperArgs,
-    RemoteModel,
-    get_generation_wrapper,
-)
+from synthetic_data.generation import GenerationWrapper, RemoteModel
 from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
@@ -80,9 +75,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         input_prompt: str = "A mysterious forest adventure",
     ):
         super().__init__(run_mode)
-        self.generation_model = generation_model
-        self.followup_model: RemoteModel = followup_model
-        self.parameter_model: RemoteModel = parameter_model
         self.num_user_responses = num_user_responses
         self.input_prompt = input_prompt
 
@@ -92,9 +84,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.output_dataset_org = self.task.output_dataset_org
         self.output_dataset_format = self.task.output_dataset_format
         self.dataset_columns = self.task.dataset_columns
-        self.followup_wrapper = get_generation_wrapper(self.followup_model)
-        self.parameter_wrapper = get_generation_wrapper(self.parameter_model)
-        self.generation_wrapper = get_generation_wrapper(self.generation_model)
+
+        self._add_generation_wrapper("generation", generation_model)
+        self._add_generation_wrapper("followup", followup_model)
+        self._add_generation_wrapper("parameter", parameter_model)
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -109,41 +102,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(f"Created {len(dummy_data)} dummy episodes")
         return Dataset.from_list(dummy_data)
 
-    async def new_episode(self, sample: None) -> RPGEpisode:
-        seed = hash(str(sample)) % (2**32)
-        self.followup_wrapper = get_generation_wrapper(
-            self.followup_model,
-            args_override=GenWrapperArgs(seed=seed),
-        )
-        self.parameter_wrapper = get_generation_wrapper(
-            self.parameter_model,
-            args_override=GenWrapperArgs(seed=seed),
-        )
-        ep = RPGEpisode(seed)
-        ep.run_metadata = {
-            "generation_model": self.generation_model,
-            "followup_model": self.followup_model,
-            "parameter_model": self.parameter_model,
-            "num_user_responses": self.num_user_responses,
-            "input_prompt": self.input_prompt,
-            "seed": seed,
-            "parameters_generated": False,
-            "scenario_generated": False,
-            "user_responses_generated": False,
-        }
-        logger.info(f"Start episode with prompt: {self.input_prompt}, seed: {seed}")
-        return ep
-
     async def start_episode(self, sample: None) -> RPGEpisode:
-        # Create a new episode with a deterministic seed
         seed = hash(str(sample)) % (2**32)
-        # We need a generation_wrapper for the main model, but we don't have it here
-        # This will be set later when the episode is used
+        # Update wrappers with seed for deterministic generation
         ep = RPGEpisode(seed)
         ep.run_metadata = {
-            "generation_model": self.generation_model,
-            "followup_model": self.followup_model,
-            "parameter_model": self.parameter_model,
+            "generation_model": self.generation_wrappers["generation"].provider_name,
+            "followup_model": self.generation_wrappers["followup"].provider_name,
+            "parameter_model": self.generation_wrappers["parameter"].provider_name,
             "num_user_responses": self.num_user_responses,
             "input_prompt": self.input_prompt,
             "seed": seed,
@@ -162,13 +128,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             return []
 
         if not episode.run_metadata.get("scenario_generated", False):
-            await self._generate_scenario(episode, self.generation_wrapper)
+            await self._generate_scenario(
+                episode, self.generation_wrappers["generation"]
+            )
             episode.run_metadata["scenario_generated"] = True
             return []
 
         # Step 1+: Generate turn-by-turn conversation
         if episode.step_count < self.num_user_responses:
-            await self._generate_turn(episode, self.followup_wrapper)
+            await self._generate_turn(episode, self.generation_wrappers["followup"])
             episode.step_count += 1
             return []
 
@@ -188,8 +156,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        logger.info(f"Generating game parameters with {self.parameter_model}")
-        parameter_response = await self.parameter_wrapper.generate(
+        logger.info(
+            f"Generating game parameters with {self.generation_model_names['parameter']}"
+        )
+        parameter_response = await self.generation_wrappers["parameter"].generate(
             [parameter_conversation]
         )
 
@@ -248,7 +218,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        logger.info(f"Generating scenario with {self.generation_model}")
+        logger.info(
+            f"Generating scenario with {self.generation_model_names['generation']}"
+        )
         scenario_response = await generation_wrapper.generate([scenario_conversation])
         episode.scenario = scenario_response[0]
         episode.conversation.extend(scenario_conversation)
@@ -272,9 +244,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
 
         logger.info(
-            f"Generating user response {episode.step_count + 1} with {self.followup_model}"
+            f"Generating user response {episode.step_count + 1} with {self.generation_model_names['followup']}"
         )
-        user_response_result = await self.followup_wrapper.generate(
+        user_response_result = await self.generation_wrappers["followup"].generate(
             [user_response_conversation]
         )
         user_response = user_response_result[0]
@@ -295,7 +267,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
 
         logger.info(
-            f"Generating assistant response {episode.step_count + 1} with {self.generation_model}"
+            f"Generating assistant response {episode.step_count + 1} with {self.generation_model_names['generation']}"
         )
         assistant_response_result = await generation_wrapper.generate(
             [assistant_conversation]
@@ -317,33 +289,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
 
     def get_output_row(self, episode: RPGEpisode) -> list[dict]:
-        if episode.scenario is None:
-            return [
-                {
-                    "game_setting": episode.game_setting or "No setting generated",
-                    "player_characters": episode.player_characters
-                    or "No characters generated",
-                    "scenario": "No scenario generated",
-                    "user_responses": "No user responses generated",
-                    "original_input": {"prompt": self.input_prompt},
-                    "generation_model": self.generation_model,
-                    "followup_model": self.followup_model,
-                    "parameter_model": self.parameter_model,
-                }
-            ]
-
+        scenario = episode.scenario or "No scenario generated"
         return [
             {
                 "game_setting": episode.game_setting or "No setting generated",
                 "player_characters": episode.player_characters
                 or "No characters generated",
-                "scenario": episode.scenario,
+                "scenario": scenario,
                 "user_responses": episode.user_responses[0]
                 if episode.user_responses and len(episode.user_responses) > 0
                 else "No user responses generated",
                 "original_input": {"prompt": self.input_prompt},
-                "generation_model": self.generation_model,
-                "followup_model": self.followup_model,
-                "parameter_model": self.parameter_model,
+                "generation_model": self.generation_model_names["generation"],
+                "followup_model": self.generation_model_names["followup"],
+                "parameter_model": self.generation_model_names["parameter"],
             }
         ]

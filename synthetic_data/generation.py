@@ -351,6 +351,8 @@ class GeminiWrapper(GenerationWrapper):
         return []
 
 
+GenerationRole = Literal["generation", "followup", "parameter"]
+
 RemoteModel = Literal[
     "claude-3-7",
     "claude-3-5",

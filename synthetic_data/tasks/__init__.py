@@ -1,7 +1,13 @@
 from abc import ABC
 from typing import List, Optional, TypeVar, Generic
 from loguru import logger
-from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
+from synthetic_data.generation import (
+    GenWrapperArgs,
+    GenerationRole,
+    GenerationWrapper,
+    RemoteModel,
+    get_generation_wrapper,
+)
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
@@ -128,6 +134,9 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
 
     run_mode: RunMode
 
+    generation_wrappers: dict[GenerationRole, GenerationWrapper] = {}
+    generation_model_names: dict[GenerationRole, RemoteModel] = {}
+
     def __init__(self, run_mode: RunMode) -> None:
         self.run_mode = run_mode
         self.dataset_root_path = (
@@ -137,6 +146,10 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
             if run_mode == "cli"
             else "/dataset_files"
         )
+
+    def _add_generation_wrapper(self, role: GenerationRole, model: RemoteModel):
+        self.generation_wrappers[role] = get_generation_wrapper(model)
+        self.generation_model_names[role] = model
 
     def load_dataset(self) -> Dataset:
         """
@@ -182,7 +195,7 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         """
         raise NotImplementedError
 
-    async def new_episode(self, sample: SampleT) -> EpisodeT:
+    async def start_episode(self, sample: SampleT) -> EpisodeT:
         raise NotImplementedError
 
     async def step_episode(self, episode: EpisodeT) -> list[dict]:

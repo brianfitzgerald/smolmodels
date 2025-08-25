@@ -289,16 +289,14 @@ async def run_task(
     model_name = getattr(generation_wrapper, "model_name", "unknown")
     autoscaling_manager.add_wrapper(model_name, generation_wrapper)
 
-    # For multi-step tasks, add additional wrappers
-    if hasattr(task, "followup_model") and hasattr(task, "parameter_model"):
+    # For multi-step tasks, add additional wrappers from the task's generation_wrappers dict
+    if hasattr(task, "generation_wrappers"):
         # This is a multi-step task with multiple models
-        followup_model = getattr(task, "followup_model")
-        parameter_model = getattr(task, "parameter_model")
-        followup_wrapper = get_generation_wrapper(followup_model)
-        parameter_wrapper = get_generation_wrapper(parameter_model)
-
-        autoscaling_manager.add_wrapper(followup_model, followup_wrapper)
-        autoscaling_manager.add_wrapper(parameter_model, parameter_wrapper)
+        for model_name, wrapper in task.generation_wrappers.items():
+            if (
+                model_name != "generation"
+            ):  # Skip the main generation wrapper as it's already added
+                autoscaling_manager.add_wrapper(model_name, wrapper)
 
     logger.info("Starting task with autoscaling throughput control")
     logger.info(
@@ -429,11 +427,10 @@ async def process_multi_step_task(
             main_wrapper = all_wrappers[0]
 
             # Set the generation wrapper in the episode
-            episode = await task.new_episode(row)
+            episode = await task.start_episode(row)
             episode.generation_wrapper = main_wrapper
 
             # Run episode steps until completion
-            step_results = []
             while True:
                 step_result = await task.step_episode(episode)
                 if (
