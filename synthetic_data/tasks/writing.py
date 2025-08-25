@@ -25,7 +25,7 @@ from synthetic_data.prompts import (
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTask
+from synthetic_data.tasks import BaseTaskV1
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.tasks import RunMode
 from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
@@ -37,7 +37,7 @@ class SceneRow:
     text_summary: str
 
 
-class ScreenplaySummarize(BaseTask):
+class ScreenplaySummarize(BaseTaskV1):
     output_dataset_name = "screenplay_scenes_summarized_full"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.CUSTOM
@@ -165,7 +165,7 @@ class Output(BaseModel):
     items: List[SceneElement]
 
 
-class GutenbergExtraction(BaseTask):
+class GutenbergExtraction(BaseTaskV1):
     """
     Extract dialogue and actions from Gutenberg snippets.
     """
@@ -291,7 +291,7 @@ def extract_tags_from_instruction(text):
     return extracted
 
 
-class GutenbergBacktranslation(BaseTask):
+class GutenbergBacktranslation(BaseTaskV1):
     """
     Generate a high quality prompt from a Gutenberg chunk.
     """
@@ -460,7 +460,7 @@ async def generate_and_score(
     ]
 
 
-class GenerationBestOfN(BaseTask):
+class GenerationBestOfN(BaseTaskV1):
     """
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """

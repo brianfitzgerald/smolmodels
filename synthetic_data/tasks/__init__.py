@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import List, Optional
+from typing import List, Optional, TypeVar, Generic
 from loguru import logger
 from synthetic_data.generation import GenWrapperArgs, GenerationWrapper
 from synthetic_data.utils import (
@@ -13,8 +13,12 @@ from typing import Literal
 
 RunMode = Literal["modal", "cli", "notebook"]
 
+# Generic type for sample dataclasses
+SampleT = TypeVar("SampleT")
+EpisodeT = TypeVar("EpisodeT")
 
-class BaseTask(ABC):
+
+class BaseTaskV1(ABC):
     seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
     seed_data_split = "train"
 
@@ -112,13 +116,32 @@ class BaseTask(ABC):
                     f"Unrecognized seed_data_format: {self.seed_data_format}"
                 )
 
-    def new_episode(self, generation_wrapper: GenerationWrapper, seed: int):
+
+class BaseTask(ABC, Generic[SampleT, EpisodeT]):
+    seed_data_location: str | None = None
+    output_dataset_name: str
+    output_dataset_org: str = "roborovski"
+    output_dataset_format: DatasetFormat = DatasetFormat.HF_DATASET
+
+    dataset_columns: List[str] = []
+
+    run_mode: RunMode
+
+    def __init__(self, run_mode: RunMode) -> None:
+        self.run_mode = run_mode
+        self.dataset_root_path = (
+            "../dataset_files"
+            if run_mode == "notebook"
+            else "./dataset_files"
+            if run_mode == "cli"
+            else "/dataset_files"
+        )
+
+    async def start_episode(self, sample: SampleT) -> EpisodeT:
         raise NotImplementedError
 
-    async def step_episode(
-        self, generation_wrapper: GenerationWrapper, episode_state
-    ) -> bool:
+    async def step_episode(self, episode: EpisodeT) -> list[dict]:
         raise NotImplementedError
 
-    def get_output_row(self, episode_state) -> dict:
+    def get_output_row(self, episode: EpisodeT) -> list[dict]:
         raise NotImplementedError

@@ -7,7 +7,7 @@ from loguru import logger
 from pydantic import ValidationError
 from rich.console import Console
 from rich.markdown import Markdown
-from synthetic_data.tasks import BaseTask
+from synthetic_data.tasks import BaseTaskV1
 from evaluation.code_execution import (
     CodeContestsProblem,
     CodeExecutionMode,
@@ -47,11 +47,11 @@ from synthetic_data.utils import (
 )
 
 
-class DPOTask(BaseTask):
+class DPOTask(BaseTaskV1):
     n_dpo_completions: int = 2
 
 
-class PromptUpsample(BaseTask):
+class PromptUpsample(BaseTaskV1):
     seed_data_format = DatasetFormat.TSV
     seed_data_location = "gs://openai-datasets/prompt-upsample/seed-data.tsv"
     output_dataset_name = "prompt-upsample"
@@ -166,7 +166,7 @@ class Toolformer(DPOTask):
         return new_rows_batch
 
 
-class SquadExtractiveQA(BaseTask):
+class SquadExtractiveQA(BaseTaskV1):
     """
     Performs the following steps:
     - Generate JSON struct from the prompt.
@@ -227,7 +227,7 @@ class SquadExtractiveQA(BaseTask):
         return out_rows
 
 
-class Goody2(BaseTask):
+class Goody2(BaseTaskV1):
     seed_data_format = DatasetFormat.HF_DATASET
     seed_data_location = "yahma/alpaca-cleaned"
     dataset_columns = ["instruction", "response"]

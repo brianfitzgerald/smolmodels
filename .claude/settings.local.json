@@ -5,7 +5,8 @@
       "Bash(pytest:*)",
       "Bash(uv pip install:*)",
       "Bash(ruff check:*)",
-      "Bash(pyright:*)"
+      "Bash(pyright:*)",
+      "Bash(ruff format:*)"
     ],
     "deny": [],
     "ask": []

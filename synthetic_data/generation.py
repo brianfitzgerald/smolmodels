@@ -84,6 +84,8 @@ class GenerationWrapper(ABC):
     Abstract method for various ways of generating data.
     """
 
+    provider_name: str
+
     def __init__(self, args: GenWrapperArgs) -> None:
         super().__init__()
         self.args = args
@@ -112,30 +114,6 @@ class MockGenerator(GenerationWrapper):
         return [MOCK_SNIPPET] * len(conversations)
 
 
-class RPSLimiter:
-    def __init__(self, max_rps: float):
-        self.max_rps = max_rps
-        self.request_times = deque()
-
-    async def acquire(self):
-        now = datetime.now()
-
-        # Remove old requests outside the 1 second window
-        while self.request_times and (now - self.request_times[0]) > timedelta(
-            seconds=1
-        ):
-            self.request_times.popleft()
-
-        # If at RPS limit, wait until we can make another request
-        if len(self.request_times) >= self.max_rps:
-            wait_time = 1.0 - (now - self.request_times[0]).total_seconds()
-            if wait_time > 0:
-                logger.info(f"Waiting {wait_time} seconds to not exceed RPS limit")
-                await asyncio.sleep(wait_time)
-
-        self.request_times.append(now)
-
-
 class OpenAIGenerationWrapper(GenerationWrapper):
     def __init__(
         self,
@@ -155,7 +133,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             self.oai_client = OpenAI(api_key=api_key, base_url=base_url)
         self.model_name = args.model_id or "gpt-4o-mini"
         self.args = args
-        self.rps_limiter = RPSLimiter(args.max_rps)
         self.extra_body = {}
 
     async def generate(self, conversations: List[Conversation]) -> List[str]:
@@ -163,8 +140,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         while True:
             completion_requests = []
             for conversation in conversations:
-                await self.rps_limiter.acquire()
-
                 temperature = self.args.temperature
                 if self.args.is_reasoning_model:
                     temperature = NOT_GIVEN
@@ -362,7 +337,7 @@ class GeminiWrapper(GenerationWrapper):
                 if attempt < max_retries - 1:
                     continue
                 return []
-        
+
         # Return empty list if all retries failed
         return []
 
