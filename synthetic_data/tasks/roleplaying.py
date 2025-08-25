@@ -1,5 +1,3 @@
-from typing import cast
-
 from jinja2 import Template
 from loguru import logger
 
@@ -27,16 +25,10 @@ class RPGEpisode:
     conversation: Conversation
     run_metadata: dict
     seed: int
-    followup_wrapper: GenerationWrapper
-    parameter_wrapper: GenerationWrapper
-    generation_wrapper: GenerationWrapper | None
 
     def __init__(
         self,
         seed: int,
-        followup_wrapper: GenerationWrapper,
-        parameter_wrapper: GenerationWrapper,
-        generation_wrapper: GenerationWrapper | None = None,
     ):
         self.step_count = 0
         self.game_setting = None
@@ -46,9 +38,6 @@ class RPGEpisode:
         self.conversation = []
         self.run_metadata = {}
         self.seed = seed
-        self.followup_wrapper = followup_wrapper
-        self.parameter_wrapper = parameter_wrapper
-        self.generation_wrapper = generation_wrapper
 
 
 class RoleplayingGame(BaseTaskV1):
@@ -92,8 +81,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     ):
         super().__init__(run_mode)
         self.generation_model = generation_model
-        self.followup_model = followup_model
-        self.parameter_model = parameter_model
+        self.followup_model: RemoteModel = followup_model
+        self.parameter_model: RemoteModel = parameter_model
         self.num_user_responses = num_user_responses
         self.input_prompt = input_prompt
 
@@ -103,6 +92,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.output_dataset_org = self.task.output_dataset_org
         self.output_dataset_format = self.task.output_dataset_format
         self.dataset_columns = self.task.dataset_columns
+        self.followup_wrapper = get_generation_wrapper(self.followup_model)
+        self.parameter_wrapper = get_generation_wrapper(self.parameter_model)
+        self.generation_wrapper = get_generation_wrapper(self.generation_model)
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -117,16 +109,17 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(f"Created {len(dummy_data)} dummy episodes")
         return Dataset.from_list(dummy_data)
 
-    def new_episode(self, generation_wrapper: GenerationWrapper, seed: int):
-        followup_wrapper = get_generation_wrapper(
-            cast(RemoteModel, self.followup_model),
+    async def new_episode(self, sample: None) -> RPGEpisode:
+        seed = hash(str(sample)) % (2**32)
+        self.followup_wrapper = get_generation_wrapper(
+            self.followup_model,
             args_override=GenWrapperArgs(seed=seed),
         )
-        parameter_wrapper = get_generation_wrapper(
-            cast(RemoteModel, self.parameter_model),
+        self.parameter_wrapper = get_generation_wrapper(
+            self.parameter_model,
             args_override=GenWrapperArgs(seed=seed),
         )
-        ep = RPGEpisode(seed, followup_wrapper, parameter_wrapper, generation_wrapper)
+        ep = RPGEpisode(seed)
         ep.run_metadata = {
             "generation_model": self.generation_model,
             "followup_model": self.followup_model,
@@ -144,17 +137,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     async def start_episode(self, sample: None) -> RPGEpisode:
         # Create a new episode with a deterministic seed
         seed = hash(str(sample)) % (2**32)
-        followup_wrapper = get_generation_wrapper(
-            cast(RemoteModel, self.followup_model),
-            args_override=GenWrapperArgs(seed=seed),
-        )
-        parameter_wrapper = get_generation_wrapper(
-            cast(RemoteModel, self.parameter_model),
-            args_override=GenWrapperArgs(seed=seed),
-        )
         # We need a generation_wrapper for the main model, but we don't have it here
         # This will be set later when the episode is used
-        ep = RPGEpisode(seed, followup_wrapper, parameter_wrapper, None)
+        ep = RPGEpisode(seed)
         ep.run_metadata = {
             "generation_model": self.generation_model,
             "followup_model": self.followup_model,
@@ -170,11 +155,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> list[dict]:
-        if episode.generation_wrapper is None:
-            raise ValueError("Episode must have a generation_wrapper attribute")
-
-        generation_wrapper = episode.generation_wrapper
-
         # Step 0: Generate game parameters and scenario if not done yet
         if not episode.run_metadata.get("parameters_generated", False):
             await self._generate_parameters(episode)
@@ -182,13 +162,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             return []
 
         if not episode.run_metadata.get("scenario_generated", False):
-            await self._generate_scenario(episode, generation_wrapper)
+            await self._generate_scenario(episode, self.generation_wrapper)
             episode.run_metadata["scenario_generated"] = True
             return []
 
         # Step 1+: Generate turn-by-turn conversation
         if episode.step_count < self.num_user_responses:
-            await self._generate_turn(episode, generation_wrapper)
+            await self._generate_turn(episode, self.followup_wrapper)
             episode.step_count += 1
             return []
 
@@ -209,7 +189,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
 
         logger.info(f"Generating game parameters with {self.parameter_model}")
-        parameter_response = await episode.parameter_wrapper.generate(
+        parameter_response = await self.parameter_wrapper.generate(
             [parameter_conversation]
         )
 
@@ -283,7 +263,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         user_response_conversation: Conversation = [
             {
                 "role": "system",
-                "content": f"You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
+                "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
             },
             {
                 "role": "user",
@@ -294,7 +274,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(
             f"Generating user response {episode.step_count + 1} with {self.followup_model}"
         )
-        user_response_result = await episode.followup_wrapper.generate(
+        user_response_result = await self.followup_wrapper.generate(
             [user_response_conversation]
         )
         user_response = user_response_result[0]

@@ -412,7 +412,7 @@ async def process_single_step_task(
 
 
 async def process_multi_step_task(
-    task: Any,
+    task: BaseTask,
     autoscaling_manager: AutoscalingGenerationManager,
     batch_data: Any,
 ) -> List[Dict[str, Any]]:
@@ -429,7 +429,7 @@ async def process_multi_step_task(
             main_wrapper = all_wrappers[0]
 
             # Set the generation wrapper in the episode
-            episode = task.new_episode(main_wrapper, seed)
+            episode = await task.new_episode(row)
             episode.generation_wrapper = main_wrapper
 
             # Run episode steps until completion

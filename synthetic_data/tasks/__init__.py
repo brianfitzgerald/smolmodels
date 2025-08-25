@@ -182,7 +182,7 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         """
         raise NotImplementedError
 
-    async def start_episode(self, sample: SampleT) -> EpisodeT:
+    async def new_episode(self, sample: SampleT) -> EpisodeT:
         raise NotImplementedError
 
     async def step_episode(self, episode: EpisodeT) -> list[dict]:
