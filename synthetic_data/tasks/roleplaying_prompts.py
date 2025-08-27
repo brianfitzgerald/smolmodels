@@ -8,7 +8,7 @@ Here is the game setting:
 
 Here is the information about the player character:
 <player_character>
-{{PLAYER_CHARACTERS}}
+{{PLAYER_CHARACTER}}
 </player_character>
 
 Before starting the game, in <game_design> tags, outline your plan for the adventure, which should include:
@@ -87,15 +87,15 @@ The goal of the user who created this prompt template is to set up an AI dungeon
 GAME_SETTING:
 This variable would likely be written by a human end user or game master. It should provide comprehensive information about the game world, including its genre, time period, and specific details about the setting. The length could range from a paragraph to several paragraphs, depending on the complexity of the world. The tone should be descriptive and informative, setting the stage for the adventure.
 
-PLAYER_CHARACTERS:
-This information would typically be provided by the human players or extracted from character sheets. It should include details about each player character, such as their names, classes, abilities, and relevant background information. The format might be a list or short paragraphs for each character. The tone should be factual and concise, focusing on the key attributes and backstory elements that will inform gameplay.
+PLAYER_CHARACTER:
+This information would typically be provided by the human players or extracted from character sheets. It should include details about the player character, such as their name, class, abilities, and relevant background information. The tone should be factual and concise, focusing on the key attributes and backstory elements that will inform gameplay.
 
 Wrap the generated variables in <variable> tags, like:
 <game_setting>
 ...
 </game_setting>
 
-<player_characters>
+<player_character>
 ...
-</player_characters>
+</player_character>
 """

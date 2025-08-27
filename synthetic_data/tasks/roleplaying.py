@@ -14,7 +14,7 @@ from datasets import Dataset
 class RPGEpisode:
     step_count: int
     game_setting: str | None
-    player_characters: str | None
+    player_character: str | None
     scenario: str | None
     user_responses: list[str] | None
     conversation: Conversation
@@ -27,7 +27,7 @@ class RPGEpisode:
     ):
         self.step_count = 0
         self.game_setting = None
-        self.player_characters = None
+        self.player_character = None
         self.scenario = None
         self.user_responses = None
         self.conversation = []
@@ -43,7 +43,7 @@ class RoleplayingGame(BaseTaskV1):
     output_dataset_name = "roleplaying_scenarios"
     dataset_columns = [
         "game_setting",
-        "player_characters",
+        "player_character",
         "scenario",
         "user_responses",
         "original_input",
@@ -152,7 +152,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             {
                 "role": "user",
-                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {self.input_prompt}\n\nPlease provide:\n1. A detailed GAME_SETTING (2-3 paragraphs)\n2. PLAYER_CHARACTERS information (1-2 paragraphs describing the main character)",
+                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {self.input_prompt}\n\nPlease provide:\n1. A detailed GAME_SETTING (2-3 paragraphs)\n2. PLAYER_CHARACTER information (1-2 paragraphs describing the main character)",
             },
         ]
 
@@ -183,7 +183,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "<player_character>"
             )
             end = response_text.lower().find("</player_character>")
-            episode.player_characters = response_text[start:end].strip()
+            episode.player_character = response_text[start:end].strip()
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
@@ -192,8 +192,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         template = Template(ROLEPLAYING_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
-            PLAYER_CHARACTERS=episode.player_characters
-            or "A brave adventurer with unknown abilities",
+            PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
         )
 
         scenario_conversation: Conversation = [
@@ -228,7 +227,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             {
                 "role": "user",
-                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_characters}\nDungeon Master Response: {episode.scenario}\n\nGenerate a realistic player response:",
+                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nDungeon Master Response: {episode.scenario}\n\nGenerate a realistic player response:",
             },
         ]
 
@@ -251,7 +250,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             {
                 "role": "user",
-                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_characters}\nPlayer Response: {user_response}\n\nRespond as the dungeon master:",
+                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nPlayer Response: {user_response}\n\nRespond as the dungeon master:",
             },
         ]
 
@@ -282,7 +281,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return [
             {
                 "game_setting": episode.game_setting or "No setting generated",
-                "player_characters": episode.player_characters
+                "player_character": episode.player_character
                 or "No characters generated",
                 "scenario": scenario,
                 "user_responses": episode.user_responses[0]
