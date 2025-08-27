@@ -68,14 +68,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     def __init__(
         self,
         run_mode: RunMode,
-        generation_model: RemoteModel = "gpt-4o-mini",
-        followup_model: RemoteModel = "gpt-4.1-nano",
-        parameter_model: RemoteModel = "gpt-4o-mini",
-        num_user_responses: int = 3,
+        generation_model: RemoteModel = "claude-4-sonnet",
+        followup_model: RemoteModel = "claude-4-sonnet",
+        parameter_model: RemoteModel = "claude-3-5-haiku",
+        max_user_responses: int = 10,
         input_prompt: str = "A mysterious forest adventure",
     ):
         super().__init__(run_mode)
-        self.num_user_responses = num_user_responses
+        self.max_user_responses = max_user_responses
         self.input_prompt = input_prompt
 
         # adopt dataset config from RoleplayingGame single-step task
@@ -110,7 +110,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "generation_model": self.generation_wrappers["generation"].provider_name,
             "followup_model": self.generation_wrappers["followup"].provider_name,
             "parameter_model": self.generation_wrappers["parameter"].provider_name,
-            "num_user_responses": self.num_user_responses,
+            "max_user_responses": self.max_user_responses,
             "input_prompt": self.input_prompt,
             "seed": seed,
             "parameters_generated": False,
@@ -135,7 +135,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             return []
 
         # Step 1+: Generate turn-by-turn conversation
-        if episode.step_count < self.num_user_responses:
+        if episode.step_count < self.max_user_responses:
             await self._generate_turn(episode, self.generation_wrappers["followup"])
             episode.step_count += 1
             return []
@@ -165,6 +165,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Parse the response to extract game_setting and player_characters
         response_text = parameter_response[0]
+        logger.info(f"Generated game parameters: {response_text}")
         # Simple parsing - look for sections
         if (
             "<game_setting>" in response_text.lower()
@@ -173,12 +174,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             start = response_text.lower().find("<game_setting>") + len("<game_setting>")
             end = response_text.lower().find("</game_setting>")
             episode.game_setting = response_text[start:end].strip()
-        else:
-            # Fallback: assume first half is setting, second half is characters
-            lines = response_text.split("\n")
-            mid_point = len(lines) // 2
-            episode.game_setting = "\n".join(lines[:mid_point]).strip()
-            episode.player_characters = "\n".join(lines[mid_point:]).strip()
 
         if (
             "<player_character>" in response_text.lower()
@@ -189,12 +184,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             )
             end = response_text.lower().find("</player_character>")
             episode.player_characters = response_text[start:end].strip()
-
-        episode.conversation.extend(parameter_conversation)
-        episode.conversation.append({"role": "assistant", "content": response_text})
-        logger.info(
-            f"Generated game parameters: Setting={episode.game_setting[:50]}..., Characters={episode.player_characters[:50] if episode.player_characters else 'None'}..."
-        )
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper

@@ -89,4 +89,13 @@ This variable would likely be written by a human end user or game master. It sho
 
 PLAYER_CHARACTERS:
 This information would typically be provided by the human players or extracted from character sheets. It should include details about each player character, such as their names, classes, abilities, and relevant background information. The format might be a list or short paragraphs for each character. The tone should be factual and concise, focusing on the key attributes and backstory elements that will inform gameplay.
+
+Wrap the generated variables in <variable> tags, like:
+<game_setting>
+...
+</game_setting>
+
+<player_characters>
+...
+</player_characters>
 """
