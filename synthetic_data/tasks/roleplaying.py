@@ -185,20 +185,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             end = response_text.lower().find("</player_character>")
             episode.player_character = response_text[start:end].strip()
 
-    async def _generate_scenario(
-        self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
-    ):
-        """Generate the initial roleplaying scenario"""
+    def _assistant_system_prompt(self, episode: RPGEpisode) -> str:
         template = Template(ROLEPLAYING_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
             PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
         )
+        return formatted_prompt
+
+    async def _generate_scenario(
+        self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
+    ):
+        """Generate the initial roleplaying scenario"""
 
         scenario_conversation: Conversation = [
             {
                 "role": "system",
-                "content": formatted_prompt,
+                "content": self._assistant_system_prompt(episode),
             },
             {
                 "role": "user",
@@ -211,8 +214,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         scenario_response = await generation_wrapper.generate([scenario_conversation])
         episode.scenario = scenario_response[0]
-        episode.conversation.extend(scenario_conversation)
-        episode.conversation.append({"role": "assistant", "content": episode.scenario})
         logger.info(f"Generated scenario: {episode.scenario[:100]}...")
 
     async def _generate_turn(
@@ -229,6 +230,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "role": "user",
                 "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nDungeon Master Response: {episode.scenario}\n\nGenerate a realistic player response:",
             },
+            *episode.conversation,
         ]
 
         logger.info(
@@ -239,14 +241,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         user_response = user_response_result[0]
 
-        episode.conversation.extend(user_response_conversation)
         episode.conversation.append({"role": "assistant", "content": user_response})
 
         # Generate assistant response
         assistant_conversation: Conversation = [
             {
                 "role": "system",
-                "content": "You are a dungeon master in a roleplaying game. Respond to the player's action in character, advancing the story and maintaining the game's atmosphere.",
+                "content": self._assistant_system_prompt(episode),
             },
             {
                 "role": "user",
@@ -262,7 +263,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         assistant_response = assistant_response_result[0]
 
-        episode.conversation.extend(assistant_conversation)
         episode.conversation.append(
             {"role": "assistant", "content": assistant_response}
         )

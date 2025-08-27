@@ -11,6 +11,11 @@ Here is the information about the player character:
 {{PLAYER_CHARACTER}}
 </player_character>
 
+Here is the initial scenario:
+<scenario>
+{{SCENARIO}}
+</scenario>
+
 Before starting the game, in <game_design> tags, outline your plan for the adventure, which should include:
 1. An overarching plot or quest
 2. Key locations the player will visit
