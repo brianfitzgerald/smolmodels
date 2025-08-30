@@ -207,7 +207,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         scenario_response = await generation_wrapper.generate([scenario_conversation])
         episode.scenario = scenario_response[0]
-        parsed_tags = parse_xml_tags(episode.scenario)
+        parsed_tags = parse_xml_tags(
+            episode.scenario,
+            required_tags=[
+                "game_design",
+                "dm_narration",
+                "npc_dialogue",
+                "dm_response",
+            ],
+        )
         logger.debug(f"Scenario:\n{episode.scenario}")
 
     async def _generate_turn(
