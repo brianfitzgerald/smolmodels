@@ -61,21 +61,31 @@ def save_output_dataset(
 MAX_RETRIES = 10
 
 
-@dataclass
-class GenWrapperArgs:
-    model_id: Optional[str] = None
-    lora_name: Optional[str] = None
-    max_concurrent: int = 8
-    max_rps: float = 8.0
+class GenerationArgs(BaseModel):
+    """
+    Arguments that can be overridden on a per-generation basis.
+    """
+
     max_tokens: int = 4096
     temperature: float = 0.4
-    response_format: type[BaseModel] | NotGiven = NOT_GIVEN
-    n_retries: int = MAX_RETRIES
-    providers: list[str] | None = None
     stop: list[str] | None = None
-    is_reasoning_model: bool = False
     seed: Optional[int] = None
-    async_client: bool = True
+    n_retries: int = MAX_RETRIES
+
+
+class GenWrapperArgs(BaseModel):
+    """
+    Properties of a specific model.
+    """
+
+    model_id: Optional[str] = None
+    lora_name: Optional[str] = None
+    default_generation_args: GenerationArgs = GenerationArgs()
+    max_concurrent: int = 8
+    max_rps: float = 8.0
+    providers: list[str] | None = None
+    is_reasoning_model: bool = False
+    use_async_client: bool = True
 
 
 class GenerationWrapper(ABC):
@@ -85,12 +95,18 @@ class GenerationWrapper(ABC):
 
     provider_name: str
 
-    def __init__(self, args: GenWrapperArgs) -> None:
+    def __init__(self, default_args: GenWrapperArgs) -> None:
         super().__init__()
-        self.args = args
+        self.gen_wrapper_args = default_args
 
     @abstractmethod
-    async def generate(self, conversations: list[Conversation]) -> list[str]:
+    async def generate(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[str]:
+        """
+        Generate completions for the given conversations.
+        If args is provided, it will override the args in the wrapper.
+        """
         pass
 
 
@@ -107,7 +123,9 @@ class MockGenerator(GenerationWrapper):
     def set_mock_completions(self, completions: list[str]) -> None:
         self.mock_completions = completions
 
-    async def generate(self, conversations: list[Conversation]) -> list[str]:
+    async def generate(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[str]:
         if self.mock_completions:
             return self.mock_completions
         return [MOCK_SNIPPET] * len(conversations)
@@ -118,53 +136,44 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
     def __init__(
         self,
-        args: GenWrapperArgs,
+        default_args: GenWrapperArgs,
         key_env_var_name: str = "OPENAI_API_KEY",
         base_url: Optional[str] = None,
     ) -> None:
-        super().__init__(args)
+        super().__init__(default_args)
         api_key = os.environ.get(key_env_var_name)
         if api_key is None:
             raise ValueError(
                 f"{key_env_var_name} is required for {get_class_name(self)}"
             )
-        if args.async_client:
+        if default_args.use_async_client:
             self.oai_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         else:
             self.oai_client = OpenAI(api_key=api_key, base_url=base_url)
-        self.model_name = args.model_id or "gpt-4o-mini"
-        self.args = args
+        self.model_name = default_args.model_id or "gpt-4o-mini"
         self.extra_body = {}
 
-    async def generate(self, conversations: list[Conversation]) -> list[str]:
+    async def generate(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[str]:
         self.n_retries = MAX_RETRIES
+        args = args or self.gen_wrapper_args.default_generation_args
         while True:
             completion_requests = []
             for conversation in conversations:
-                temperature = self.args.temperature
-                if self.args.is_reasoning_model:
+                temperature = args.temperature
+                if self.gen_wrapper_args.is_reasoning_model:
                     temperature = NOT_GIVEN
 
-                if self.args.response_format:
-                    # have to use the beta provider
-                    request = self.oai_client.beta.chat.completions.parse(
-                        model=self.model_name,
-                        messages=conversation,
-                        temperature=temperature,
-                        max_completion_tokens=self.args.max_tokens,
-                        response_format=self.args.response_format,  # type: ignore
-                        extra_body=self.extra_body,
-                        seed=self.args.seed,
-                    )
-                else:
-                    request = self.oai_client.chat.completions.create(
-                        model=self.model_name,
-                        messages=conversation,
-                        temperature=temperature,
-                        max_completion_tokens=self.args.max_tokens,
-                        extra_body=self.extra_body,
-                        seed=self.args.seed,
-                    )
+                # TODO re add structured output support
+                request = self.oai_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=conversation,
+                    temperature=temperature,
+                    max_completion_tokens=args.max_tokens,
+                    extra_body=self.extra_body,
+                    seed=args.seed,
+                )
                 completion_requests.append(request)
             try:
                 results: list[ChatCompletion] = await asyncio.gather(
@@ -256,11 +265,14 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             api_key=api_key,
         )
 
-    async def generate(self, conversations: list[Conversation]) -> list[str]:
+    async def generate(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[str]:
+        args = args or self.gen_wrapper_args.default_generation_args
         try:
             completion_requests = []
             for conversation in conversations:
-                assert self.args.model_id is not None, (
+                assert self.gen_wrapper_args.model_id is not None, (
                     "model_id is required for AnthropicGenerationWrapper"
                 )
                 system_msg: str | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
@@ -269,11 +281,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     system_msg = conversation[0]["content"]  # type: ignore
                     conversation = conversation[1:]
                 request = self.client.messages.create(
-                    model=self.args.model_id,
+                    model=self.gen_wrapper_args.model_id,
                     messages=conversation,
-                    system=system_msg,  # type: ignore
-                    temperature=0,
-                    max_tokens=2048,
+                    system=system_msg,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
                 )
                 completion_requests.append(request)
             results: list[Message] = await asyncio.gather(*completion_requests)
@@ -317,7 +329,9 @@ class GeminiWrapper(GenerationWrapper):
         self.client = genai.Client(api_key=api_key)
         self.args = args
 
-    async def generate(self, conversations: list[Conversation]) -> list[str]:
+    async def generate(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[str]:
         max_retries = 3
         for attempt in range(max_retries):
             try:

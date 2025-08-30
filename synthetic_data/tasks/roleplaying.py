@@ -2,7 +2,7 @@ import random
 from jinja2 import Template
 from loguru import logger
 
-from synthetic_data.generation import GenerationWrapper, RemoteModel
+from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
 from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
@@ -16,17 +16,18 @@ from synthetic_data.utils import (
 )
 from datasets import Dataset
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from typing import Dict
 
 
 class RPGEpisode(BaseModel):
     step_count: int = 0
-    game_setting: Optional[str] = None
-    player_character: Optional[str] = None
-    scenario: Optional[str] = None
+    game_setting: str | None = None
+    player_character: str | None = None
+    scenario: str | None = None
+    scenario_tags: dict[str, str] | None = None
     parameters_generated: bool = False
     scenario_generated: bool = False
-    user_responses: Optional[List[str]] = None
+    user_responses: list[str] | None = None
     conversation: Conversation = Field(default_factory=list)
     run_metadata: Dict = Field(default_factory=dict)
     seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
@@ -205,18 +206,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(
             f"Generating scenario with {self.generation_model_names['generation']}"
         )
-        scenario_response = await generation_wrapper.generate([scenario_conversation])
-        episode.scenario = scenario_response[0]
+        scenario_response = await generation_wrapper.generate(
+            [scenario_conversation], GenerationArgs(max_tokens=8192, temperature=1)
+        )
+        # readd prefix
+        scenario_response_text = "<game_design>" + scenario_response[0]
         parsed_tags = parse_xml_tags(
-            episode.scenario,
+            scenario_response_text,
             required_tags=[
                 "game_design",
                 "dm_narration",
-                "npc_dialogue",
                 "dm_response",
             ],
         )
-        logger.debug(f"Scenario:\n{episode.scenario}")
+        # TODO add NPC dialogue to the story
+        episode.scenario_tags = parsed_tags
+        logger.debug(f"Scenario:\n{episode.scenario_tags}")
 
     async def _generate_turn(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
