@@ -34,7 +34,7 @@ dependencies = [
     "uvicorn>=0.32.1",
     "gradio==5.27.0",
     "scipy",
-    "pyright>=1.1.390",
+    "pyright>=1.1.404",
     "google-genai==1.12.1",
     "sentencepiece",
     "einops",
@@ -59,10 +59,10 @@ pythonpath = ["."]
 
 [dependency-groups]
 torch = [
-    "transformers==4.55.2",
+    "transformers==4.56.0",
     "torch==2.6.0",
     "peft>=0.13.2",
-    "trl==0.21.0",
+    "trl==0.22.0",
     "lightning>=2.5.0.post0",
     "nltk",
 ]

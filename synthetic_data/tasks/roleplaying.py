@@ -1,3 +1,4 @@
+import random
 from jinja2 import Template
 from loguru import logger
 
@@ -9,30 +10,21 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.utils import Conversation, DatasetFormat
 from datasets import Dataset
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
 
 
-class RPGEpisode:
-    step_count: int
-    game_setting: str | None
-    player_character: str | None
-    scenario: str | None
-    user_responses: list[str] | None
-    conversation: Conversation
-    run_metadata: dict
-    seed: int
-
-    def __init__(
-        self,
-        seed: int,
-    ):
-        self.step_count = 0
-        self.game_setting = None
-        self.player_character = None
-        self.scenario = None
-        self.user_responses = None
-        self.conversation = []
-        self.run_metadata = {}
-        self.seed = seed
+class RPGEpisode(BaseModel):
+    step_count: int = 0
+    game_setting: Optional[str] = None
+    player_character: Optional[str] = None
+    scenario: Optional[str] = None
+    parameters_generated: bool = False
+    scenario_generated: bool = False
+    user_responses: Optional[List[str]] = None
+    conversation: Conversation = Field(default_factory=list)
+    run_metadata: Dict = Field(default_factory=dict)
+    seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
 
 
 class RoleplayingGame(BaseTaskV1):
@@ -105,7 +97,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     async def start_episode(self, sample: None) -> RPGEpisode:
         seed = hash(str(sample)) % (2**32)
         # Update wrappers with seed for deterministic generation
-        ep = RPGEpisode(seed)
+        ep = RPGEpisode()
         ep.run_metadata = {
             "generation_model": self.generation_wrappers["generation"].provider_name,
             "followup_model": self.generation_wrappers["followup"].provider_name,
@@ -122,16 +114,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def step_episode(self, episode: RPGEpisode) -> list[dict]:
         # Step 0: Generate game parameters and scenario if not done yet
-        if not episode.run_metadata.get("parameters_generated", False):
+        if not episode.parameters_generated:
             await self._generate_parameters(episode)
-            episode.run_metadata["parameters_generated"] = True
+            episode.parameters_generated = True
             return []
 
-        if not episode.run_metadata.get("scenario_generated", False):
+        if not episode.scenario_generated:
             await self._generate_scenario(
                 episode, self.generation_wrappers["generation"]
             )
-            episode.run_metadata["scenario_generated"] = True
+            episode.scenario_generated = True
             return []
 
         # Step 1+: Generate turn-by-turn conversation
@@ -220,8 +212,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ):
         """Generate a single turn of conversation (user response + assistant response)"""
-        # Generate user response
-        user_response_conversation: Conversation = [
+
+        user_action_conversation: Conversation = [
             {
                 "role": "system",
                 "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
@@ -237,7 +229,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             f"Generating user response {episode.step_count + 1} with {self.generation_model_names['followup']}"
         )
         user_response_result = await self.generation_wrappers["followup"].generate(
-            [user_response_conversation]
+            [user_action_conversation]
         )
         user_response = user_response_result[0]
 

@@ -317,45 +317,27 @@ async def run_task(
 
             logger.info(f"Processing batch {batch_count + 1}: rows {i}-{batch_end - 1}")
 
-            try:
-                # Handle different task types
-                if hasattr(task, "step_episode"):
-                    # Multi-step task (like roleplaying)
-                    results = await process_multi_step_task(
-                        task, autoscaling_manager, batch_data
-                    )
-                else:
-                    # Single-step task (only for BaseTaskV1 tasks)
-                    if isinstance(task, BaseTaskV1):
-                        results = await process_single_step_task(
-                            task, autoscaling_manager, batch_data
-                        )
-                    else:
-                        logger.warning("Task does not support single-step processing")
-                        results = []
+            results = await process_multi_step_task(
+                task, autoscaling_manager, batch_data
+            )
+            # Add results to output dataset
+            if results:
+                new_dataset = Dataset.from_list(results)
+                output_dataset = concatenate_datasets([output_dataset, new_dataset])
+                total_processed += len(results)
 
-                # Add results to output dataset
-                if results:
-                    new_dataset = Dataset.from_list(results)
-                    output_dataset = concatenate_datasets([output_dataset, new_dataset])
-                    total_processed += len(results)
+            batch_count += 1
 
-                batch_count += 1
-
-                # Save periodically
-                if batch_count % save_every_n_batches == 0:
-                    logger.info(f"Saving checkpoint after {batch_count} batches")
-                    save_output_dataset(
-                        output_dataset,
-                        task.output_dataset_name,
-                        [],  # No new rows to add, just save current state
-                        task.output_dataset_format,
-                        out_dir,
-                    )
-
-            except Exception as e:
-                logger.error(f"Error processing batch {batch_count}: {e}")
-                continue
+            # Save periodically
+            if batch_count % save_every_n_batches == 0:
+                logger.info(f"Saving checkpoint after {batch_count} batches")
+                save_output_dataset(
+                    output_dataset,
+                    task.output_dataset_name,
+                    [],  # No new rows to add, just save current state
+                    task.output_dataset_format,
+                    out_dir,
+                )
 
     logger.info(f"Task completed. Total processed: {total_processed}")
 
@@ -418,33 +400,25 @@ async def process_multi_step_task(
     results = []
 
     for i, row in enumerate(batch_data):
-        try:
-            # Create new episode - use the main generation wrapper
-            seed = hash(f"{row}_{i}") % (2**32)  # Deterministic seed
-            all_wrappers = autoscaling_manager.get_all_wrappers()
-            if not all_wrappers:
-                raise ValueError("No wrappers registered in autoscaling manager")
-            main_wrapper = all_wrappers[0]
+        # Create new episode - use the main generation wrapper
+        all_wrappers = autoscaling_manager.get_all_wrappers()
+        if not all_wrappers:
+            raise ValueError("No wrappers registered in autoscaling manager")
 
-            # Set the generation wrapper in the episode
-            episode = await task.start_episode(row)
-            episode.generation_wrapper = main_wrapper
+        # Set the generation wrapper in the episode
+        episode = await task.start_episode(row)
 
-            # Run episode steps until completion
-            while True:
-                step_result = await task.step_episode(episode)
-                if (
-                    step_result
-                ):  # If step_episode returns non-empty list, episode is complete
-                    break
+        # Run episode steps until completion
+        while True:
+            step_result = await task.step_episode(episode)
+            if (
+                step_result
+            ):  # If step_episode returns non-empty list, episode is complete
+                break
 
-            # Get output row
-            output_rows = task.get_output_row(episode)
-            results.extend(output_rows)
-
-        except Exception as e:
-            logger.error(f"Error processing episode {i}: {e}")
-            continue
+        # Get output row
+        output_rows = task.get_output_row(episode)
+        results.extend(output_rows)
 
     return results
 
