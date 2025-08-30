@@ -8,7 +8,12 @@ from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
     ROLEPLAYING_PROMPT,
 )
-from synthetic_data.utils import Conversation, DatasetFormat
+from synthetic_data.utils import (
+    Conversation,
+    DatasetFormat,
+    log_conversation,
+    parse_xml_tags,
+)
 from datasets import Dataset
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
@@ -151,33 +156,28 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(
             f"Generating game parameters with {self.generation_model_names['parameter']}"
         )
+        log_conversation(parameter_conversation)
         parameter_response = await self.generation_wrappers["parameter"].generate(
             [parameter_conversation]
         )
 
         # Parse the response to extract game_setting and player_characters
         response_text = parameter_response[0]
-        logger.info(f"Generated game parameters: {response_text}")
-        # Simple parsing - look for sections
-        if (
-            "<game_setting>" in response_text.lower()
-            and "</game_setting>" in response_text.lower()
-        ):
-            start = response_text.lower().find("<game_setting>") + len("<game_setting>")
-            end = response_text.lower().find("</game_setting>")
-            episode.game_setting = response_text[start:end].strip()
 
-        if (
-            "<player_character>" in response_text.lower()
-            and "</player_character>" in response_text.lower()
-        ):
-            start = response_text.lower().find("<player_character>") + len(
-                "<player_character>"
+        try:
+            parsed_tags = parse_xml_tags(
+                response_text, required_tags=["game_setting", "player_character"]
             )
-            end = response_text.lower().find("</player_character>")
-            episode.player_character = response_text[start:end].strip()
+            episode.game_setting = parsed_tags["game_setting"]
+            episode.player_character = parsed_tags["player_character"]
+        except ValueError as e:
+            logger.error(f"Failed to parse required XML tags: {e}")
+            raise
 
-    def _assistant_system_prompt(self, episode: RPGEpisode) -> str:
+        logger.debug(f"\nGame setting:\n{episode.game_setting}")
+        logger.debug(f"\nPlayer character:\n{episode.player_character}")
+
+    def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
         template = Template(ROLEPLAYING_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
@@ -192,21 +192,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         scenario_conversation: Conversation = [
             {
-                "role": "system",
-                "content": self._assistant_system_prompt(episode),
+                "role": "user",
+                "content": self._game_master_system_prompt(episode),
             },
             {
-                "role": "user",
-                "content": "Begin the roleplaying game. Introduce the world and the player's current situation.",
+                "role": "assistant",
+                "content": "<game_design>",
             },
         ]
+        log_conversation(scenario_conversation)
 
         logger.info(
             f"Generating scenario with {self.generation_model_names['generation']}"
         )
         scenario_response = await generation_wrapper.generate([scenario_conversation])
         episode.scenario = scenario_response[0]
-        logger.info(f"Generated scenario: {episode.scenario[:100]}...")
+        parsed_tags = parse_xml_tags(episode.scenario)
+        logger.debug(f"Scenario:\n{episode.scenario}")
 
     async def _generate_turn(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
@@ -224,6 +226,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             *episode.conversation,
         ]
+        log_conversation(user_action_conversation)
 
         logger.info(
             f"Generating user response {episode.step_count + 1} with {self.generation_model_names['followup']}"
@@ -232,20 +235,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             [user_action_conversation]
         )
         user_response = user_response_result[0]
+        logger.debug(f"User response:\n{user_response}")
 
-        episode.conversation.append({"role": "assistant", "content": user_response})
+        episode.conversation.append({"role": "user", "content": user_response})
 
         # Generate assistant response
         assistant_conversation: Conversation = [
             {
                 "role": "system",
-                "content": self._assistant_system_prompt(episode),
+                "content": self._game_master_system_prompt(episode),
             },
             {
                 "role": "user",
                 "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nPlayer Response: {user_response}\n\nRespond as the dungeon master:",
             },
         ]
+        log_conversation(assistant_conversation)
 
         logger.info(
             f"Generating assistant response {episode.step_count + 1} with {self.generation_model_names['generation']}"
