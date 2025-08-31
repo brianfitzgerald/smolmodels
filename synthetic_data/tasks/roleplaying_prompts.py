@@ -114,15 +114,14 @@ Here is the information about the player character:
 {{PLAYER_CHARACTER}}
 </player_character>
 
-Here is the scenario:
-<scenario>
-{{SCENARIO}}
-</scenario>
-
-Here is the dungeon master's response:
-<dm_response>
-{{DM_RESPONSE}}
-</dm_response>
-
 Generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.
+
+Your response should be in the following format:
+<user_action>
+[Your response]
+</user_action>
+
+Do not use any emoji or special characters in your response.
+Do not generate any other text than the <user_action> tags.
+Do not use any markdown formatting.
 """

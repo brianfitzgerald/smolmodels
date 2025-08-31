@@ -229,12 +229,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             f"Generating scenario with {self.generation_model_names['generation']}"
         )
         scenario_response = await generation_wrapper.generate(
-            [scenario_conversation], GenerationArgs(max_tokens=8192, temperature=1)
+            [scenario_conversation],
+            GenerationArgs(max_tokens=8192, temperature=1, prefill="<game_design>"),
         )
         # readd prefix
-        scenario_response_text = "<game_design>" + scenario_response[0]
         parsed_tags = parse_xml_tags(
-            scenario_response_text,
+            scenario_response[0],
             required_tags=[
                 "game_design",
                 "dm_narration",
@@ -265,10 +265,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Flip roles in the conversation: user becomes assistant and vice versa
         flipped_conversation = self._flip_conversation_roles(episode.conversation)
 
+        template = Template(USER_ACTION_PROMPT)
+        formatted_user_action_prompt = template.render(
+            GAME_SETTING=episode.game_setting,
+            PLAYER_CHARACTER=episode.player_character,
+        )
+
         user_action_conversation: Conversation = [
             {
                 "role": "system",
-                "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
+                "content": formatted_user_action_prompt,
             },
             *flipped_conversation,
         ]

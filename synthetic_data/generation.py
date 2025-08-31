@@ -303,6 +303,8 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 for result in results
                 if result.content is not None
             ]
+            if args.prefill:
+                completions = [args.prefill + completion for completion in completions]
             return completions
         except AnthropicError as e:
             logger.error(f"Error while generating: {e}")
