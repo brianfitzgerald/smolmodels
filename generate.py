@@ -197,7 +197,7 @@ class AutoscalingGenerationManager:
 
         # Override max_concurrent if specified
         if max_concurrent is not None:
-            wrapper.args.max_concurrent = max_concurrent
+            wrapper.set_max_concurrent(max_concurrent)
 
     def get_wrapper_info(self, wrapper: GenerationWrapper) -> WrapperInfo:
         """Get information about a registered wrapper"""
@@ -227,31 +227,24 @@ class AutoscalingGenerationManager:
         # Get optimal concurrency
         optimal_concurrency = self.throughput_monitor.get_optimal_concurrency(provider)
 
-        # Update wrapper's max_concurrent
-        original_max_concurrent = wrapper.args.max_concurrent
-        wrapper.args.max_concurrent = optimal_concurrency
+        wrapper.set_max_concurrent(optimal_concurrency)
 
-        try:
-            # Execute generation with timing
-            start_time = time.time()
-            results = await wrapper.generate(conversations, **kwargs)
-            end_time = time.time()
+        # Execute generation with timing
+        start_time = time.time()
+        results = await wrapper.generate(conversations, **kwargs)
+        end_time = time.time()
 
-            # Calculate tokens (rough estimate)
-            total_tokens = sum(
-                len(str(conv)) // 4 for conv in conversations
-            )  # Rough token estimation
-            total_tokens += sum(len(str(result)) // 4 for result in results)
+        # Calculate tokens (rough estimate)
+        total_tokens = sum(
+            len(str(conv)) // 4 for conv in conversations
+        )  # Rough token estimation
+        total_tokens += sum(len(str(result)) // 4 for result in results)
 
-            # Record throughput
-            duration = end_time - start_time
-            self.throughput_monitor.record_request(provider, total_tokens, duration)
+        # Record throughput
+        duration = end_time - start_time
+        self.throughput_monitor.record_request(provider, total_tokens, duration)
 
-            return results
-
-        finally:
-            # Restore original max_concurrent
-            wrapper.args.max_concurrent = original_max_concurrent
+        return results
 
 
 async def run_task(

@@ -71,6 +71,7 @@ class GenerationArgs(BaseModel):
     stop: list[str] | None = None
     seed: Optional[int] = None
     n_retries: int = MAX_RETRIES
+    prefill: str | None = None
 
 
 class GenWrapperArgs(BaseModel):
@@ -108,6 +109,9 @@ class GenerationWrapper(ABC):
         If args is provided, it will override the args in the wrapper.
         """
         pass
+
+    def set_max_concurrent(self, max_concurrent: int) -> None:
+        self.gen_wrapper_args.max_concurrent = max_concurrent
 
 
 MOCK_SNIPPET = """
@@ -280,6 +284,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 if conversation[0]["role"] == "system":
                     system_msg = conversation[0]["content"]  # type: ignore
                     conversation = conversation[1:]
+                if args.prefill:
+                    conversation = [
+                        *conversation,
+                        {"role": "assistant", "content": args.prefill},
+                    ]
                 request = self.client.messages.create(
                     model=self.gen_wrapper_args.model_id,
                     messages=conversation,

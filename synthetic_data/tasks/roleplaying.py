@@ -74,9 +74,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     def __init__(
         self,
         run_mode: RunMode,
-        generation_model: RemoteModel = "claude-4-sonnet",
-        followup_model: RemoteModel = "claude-4-sonnet",
-        parameter_model: RemoteModel = "claude-3-5-haiku",
         max_user_responses: int = 10,
         input_prompt: str = "A mysterious forest adventure",
     ):
@@ -91,9 +88,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.output_dataset_format = self.task.output_dataset_format
         self.dataset_columns = self.task.dataset_columns
 
-        self._add_generation_wrapper("generation", generation_model)
-        self._add_generation_wrapper("followup", followup_model)
-        self._add_generation_wrapper("parameter", parameter_model)
+        self._add_generation_wrapper("generation", "claude-4-sonnet")
+        self._add_generation_wrapper("followup", "claude-3-5-haiku")
+        self._add_generation_wrapper("parameter", "claude-3-5-haiku")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -194,6 +191,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         return formatted_prompt
 
+    def _flip_conversation_roles(self, conversation: Conversation) -> Conversation:
+        """Flip user and assistant roles in a conversation while preserving system messages."""
+        flipped_conversation = []
+        for message in conversation:
+            if message["role"] == "user":
+                flipped_conversation.append(
+                    {"role": "assistant", "content": message["content"]}  # type: ignore
+                )
+            elif message["role"] == "assistant":
+                flipped_conversation.append(
+                    {"role": "user", "content": message["content"]}  # type: ignore
+                )
+            else:
+                # Keep system messages as-is
+                flipped_conversation.append(message)
+        return flipped_conversation
+
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ):
@@ -248,12 +262,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         assert episode.scenario_tags is not None
 
+        # Flip roles in the conversation: user becomes assistant and vice versa
+        flipped_conversation = self._flip_conversation_roles(episode.conversation)
+
         user_action_conversation: Conversation = [
             {
                 "role": "system",
                 "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
             },
-            *episode.conversation,
+            *flipped_conversation,
         ]
         log_conversation(user_action_conversation)
 
@@ -261,7 +278,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             f"Generating user response {episode.step_count + 1} with {self.generation_model_names['followup']}"
         )
         user_response_result = await self.generation_wrappers["followup"].generate(
-            [user_action_conversation]
+            [user_action_conversation], GenerationArgs(prefill="<user_action>")
         )
         user_response = user_response_result[0]
         logger.debug(f"User response:\n{user_response}")
