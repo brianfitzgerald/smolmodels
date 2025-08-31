@@ -348,13 +348,10 @@ def log_conversation(conversation: Conversation) -> None:
         "unknown": "\033[31m",  # Red
     }
     reset_color = "\033[0m"
-    white_color = "\033[37m"
 
     # Build the complete log message
     log_lines = []
     log_lines.append(f"\n{'=' * 60}")
-    log_lines.append(f" {white_color}CONVERSATION LOG{reset_color} ")
-    log_lines.append(f"{'=' * 60}")
 
     for i, message in enumerate(conversation, 1):
         role = message.get("role", "unknown")

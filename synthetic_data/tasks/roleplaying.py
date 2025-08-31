@@ -20,11 +20,11 @@ from pydantic import BaseModel, Field
 from typing import TypedDict
 
 
-class ScenarioTags(TypedDict):
+class ScenarioTags(TypedDict, total=False):
     game_design: str
     dm_narration: str
     dm_response: str
-    npc_dialogue: str
+    npc_dialogue: str | None
 
 
 class RPGEpisode(BaseModel):
@@ -224,11 +224,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             required_tags=[
                 "game_design",
                 "dm_narration",
-                "dm_response",
             ],
         )
         # TODO add NPC dialogue to the story
         episode.scenario_tags = ScenarioTags(**parsed_tags)
+        episode.conversation.append(
+            {
+                "role": "assistant",
+                "content": parsed_tags["dm_response"],
+            }
+        )
+        if parsed_tags["npc_dialogue"]:
+            episode.conversation.append(
+                {
+                    "role": "assistant",
+                    "content": parsed_tags["npc_dialogue"],
+                }
+            )
         logger.debug(f"Scenario:\n{episode.scenario_tags}")
 
     async def _generate_turn(
@@ -244,15 +256,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
             },
             *episode.conversation,
-            {
-                "role": "user",
-                "content": USER_ACTION_PROMPT.format(
-                    GAME_SETTING=episode.game_setting,
-                    PLAYER_CHARACTER=episode.player_character,
-                    SCENARIO=episode.scenario,
-                    DM_RESPONSE=episode.scenario_tags["dm_response"],
-                ),
-            },
         ]
         log_conversation(user_action_conversation)
 
