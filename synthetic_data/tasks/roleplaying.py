@@ -226,21 +226,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "dm_narration",
             ],
         )
-        # TODO add NPC dialogue to the story
+
+        # Now that we have metadata, format the conversation with it
+
         episode.scenario_tags = ScenarioTags(**parsed_tags)
+        opening_message = parsed_tags["dm_narration"]
+        if "npc_dialogue" in parsed_tags:
+            opening_message += f"\n\n{parsed_tags['npc_dialogue']}"
         episode.conversation.append(
             {
                 "role": "assistant",
-                "content": parsed_tags["dm_response"],
+                "content": opening_message,
             }
         )
-        if parsed_tags["npc_dialogue"]:
-            episode.conversation.append(
-                {
-                    "role": "assistant",
-                    "content": parsed_tags["npc_dialogue"],
-                }
-            )
         logger.debug(f"Scenario:\n{episode.scenario_tags}")
 
     async def _generate_turn(
