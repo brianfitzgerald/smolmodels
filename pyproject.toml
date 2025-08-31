@@ -3,7 +3,7 @@ name = "smolmodels"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "datasets",
     "evaluate",
@@ -75,9 +75,6 @@ training = [
     "flash-attn; sys_platform == 'linux'",
     "vllm==0.8.5",
 ]
-
-[tool.uv]
-default-groups = ["torch"]
 
 
 [tool.uv.sources]

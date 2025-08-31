@@ -99,3 +99,30 @@ Wrap the generated variables in <variable> tags, like:
 ...
 </player_character>
 """
+
+
+USER_ACTION_PROMPT = """
+You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.
+
+Here is the game setting:
+<game_setting>
+{{GAME_SETTING}}
+</game_setting>
+
+Here is the information about the player character:
+<player_character>
+{{PLAYER_CHARACTER}}
+</player_character>
+
+Here is the scenario:
+<scenario>
+{{SCENARIO}}
+</scenario>
+
+Here is the dungeon master's response:
+<dm_response>
+{{DM_RESPONSE}}
+</dm_response>
+
+Generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.
+"""

@@ -353,7 +353,7 @@ def log_conversation(conversation: Conversation) -> None:
     # Build the complete log message
     log_lines = []
     log_lines.append(f"\n{'=' * 60}")
-    log_lines.append(f"{white_color}CONVERSATION LOG{reset_color}")
+    log_lines.append(f" {white_color}CONVERSATION LOG{reset_color} ")
     log_lines.append(f"{'=' * 60}")
 
     for i, message in enumerate(conversation, 1):

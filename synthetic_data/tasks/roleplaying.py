@@ -7,6 +7,7 @@ from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
     ROLEPLAYING_PROMPT,
+    USER_ACTION_PROMPT,
 )
 from synthetic_data.utils import (
     Conversation,
@@ -16,7 +17,14 @@ from synthetic_data.utils import (
 )
 from datasets import Dataset
 from pydantic import BaseModel, Field
-from typing import Dict
+from typing import TypedDict
+
+
+class ScenarioTags(TypedDict):
+    game_design: str
+    dm_narration: str
+    dm_response: str
+    npc_dialogue: str
 
 
 class RPGEpisode(BaseModel):
@@ -24,12 +32,12 @@ class RPGEpisode(BaseModel):
     game_setting: str | None = None
     player_character: str | None = None
     scenario: str | None = None
-    scenario_tags: dict[str, str] | None = None
+    scenario_tags: ScenarioTags | None = None
     parameters_generated: bool = False
     scenario_generated: bool = False
     user_responses: list[str] | None = None
     conversation: Conversation = Field(default_factory=list)
-    run_metadata: Dict = Field(default_factory=dict)
+    run_metadata: dict = Field(default_factory=dict)
     seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
 
 
@@ -220,7 +228,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             ],
         )
         # TODO add NPC dialogue to the story
-        episode.scenario_tags = parsed_tags
+        episode.scenario_tags = ScenarioTags(**parsed_tags)
         logger.debug(f"Scenario:\n{episode.scenario_tags}")
 
     async def _generate_turn(
@@ -228,16 +236,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     ):
         """Generate a single turn of conversation (user response + assistant response)"""
 
+        assert episode.scenario_tags is not None
+
         user_action_conversation: Conversation = [
             {
                 "role": "system",
                 "content": "You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.",
             },
+            *episode.conversation,
             {
                 "role": "user",
-                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nDungeon Master Response: {episode.scenario}\n\nGenerate a realistic player response:",
+                "content": USER_ACTION_PROMPT.format(
+                    GAME_SETTING=episode.game_setting,
+                    PLAYER_CHARACTER=episode.player_character,
+                    SCENARIO=episode.scenario,
+                    DM_RESPONSE=episode.scenario_tags["dm_response"],
+                ),
             },
-            *episode.conversation,
         ]
         log_conversation(user_action_conversation)
 
