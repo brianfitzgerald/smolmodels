@@ -1,0 +1,13 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "adapter": "Debugpy",
+    "label": "Generate",
+    "request": "launch",
+    "program": "generate.py",
+    "args": ["--task_name", "roleplaying_game", "--batch_size", "4"]
+  }
+]
