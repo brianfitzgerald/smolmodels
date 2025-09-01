@@ -61,6 +61,9 @@ class RoleplayingGame(BaseTaskV1):
     output_dataset_format = DatasetFormat.PARQUET
 
 
+USE_DEV_MODELS = True
+
+
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     """
     Multi-step variant:
@@ -88,8 +91,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.output_dataset_format = self.task.output_dataset_format
         self.dataset_columns = self.task.dataset_columns
 
-        self._add_generation_wrapper("generation", "claude-4-sonnet")
-        self._add_generation_wrapper("followup", "claude-3-5-haiku")
+        gen_model: RemoteModel = "gpt-4.1-nano" if USE_DEV_MODELS else "claude-4-sonnet"
+
+        self._add_generation_wrapper("generation", gen_model)
+        self._add_generation_wrapper("followup", gen_model)
         self._add_generation_wrapper("parameter", "claude-3-5-haiku")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
@@ -123,7 +128,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(f"Start episode with prompt: {self.input_prompt}, seed: {seed}")
         return ep
 
-    async def step_episode(self, episode: RPGEpisode) -> list[dict]:
+    async def step_episode(self, episode: RPGEpisode) -> RPGEpisode:
         # Step 0: Generate game parameters and scenario if not done yet
         if not episode.parameters_generated:
             await self._generate_parameters(episode)
@@ -143,7 +148,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             episode.step_count += 1
             return []
 
-        return []
+        return episode
 
     async def _generate_parameters(self, episode: RPGEpisode):
         """Generate game parameters (setting and characters)"""
@@ -162,7 +167,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(
             f"Generating game parameters with {self.generation_model_names['parameter']}"
         )
-        log_conversation(parameter_conversation)
         parameter_response = await self.generation_wrappers["parameter"].generate(
             [parameter_conversation]
         )
@@ -223,7 +227,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": "<game_design>",
             },
         ]
-        log_conversation(scenario_conversation)
 
         logger.info(
             f"Generating scenario with {self.generation_model_names['generation']}"

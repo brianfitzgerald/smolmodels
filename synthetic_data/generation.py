@@ -72,6 +72,7 @@ class GenerationArgs(BaseModel):
     seed: Optional[int] = None
     n_retries: int = MAX_RETRIES
     prefill: str | None = None
+    thinking_budget: int | None = None
 
 
 class GenWrapperArgs(BaseModel):
@@ -352,7 +353,7 @@ class GeminiWrapper(GenerationWrapper):
                     reqs.append(
                         self.client.aio.models.generate_content(
                             model=self.model_id,
-                            contents=cast(Any, conv),
+                            contents=[conv]
                         )
                     )
 
