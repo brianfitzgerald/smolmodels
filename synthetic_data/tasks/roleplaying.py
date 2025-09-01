@@ -2,7 +2,7 @@ import random
 from jinja2 import Template
 from loguru import logger
 
-from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
+from synthetic_data.generation import GenerationArgs, GenerationWrapper
 from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
@@ -131,20 +131,20 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         if not episode.parameters_generated:
             await self._generate_parameters(episode)
             episode.parameters_generated = True
-            return []
+            return episode
 
         if not episode.scenario_generated:
             await self._generate_scenario(
                 episode, self.generation_wrappers["generation"]
             )
             episode.scenario_generated = True
-            return []
+            return episode
 
         # Step 1+: Generate turn-by-turn conversation
         if episode.step_count < self.max_user_responses:
             await self._generate_turn(episode, self.generation_wrappers["followup"])
             episode.step_count += 1
-            return []
+            return episode
 
         return episode
 
@@ -307,7 +307,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "role": "user",
                 "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nPlayer Response: {user_response}\n\nRespond as the dungeon master:",
             },
+            *episode.conversation,
         ]
+
         log_conversation(assistant_conversation)
 
         logger.info(
