@@ -285,9 +285,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             [user_action_conversation], GenerationArgs(prefill="<user_action>")
         )
         user_response = user_response_result[0]
+        user_response_tags = parse_xml_tags(
+            user_response, required_tags=["user_action"]
+        )
         logger.debug(f"User response:\n{user_response}")
 
-        episode.conversation.append({"role": "user", "content": user_response})
+        episode.conversation.append(
+            {"role": "user", "content": user_response_tags["user_action"]}
+        )
 
         # Generate assistant response
         assistant_conversation: Conversation = [
