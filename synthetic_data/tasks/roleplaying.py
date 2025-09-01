@@ -35,7 +35,6 @@ class RPGEpisode(BaseModel):
     scenario_tags: ScenarioTags | None = None
     parameters_generated: bool = False
     scenario_generated: bool = False
-    user_responses: list[str] | None = None
     conversation: Conversation = Field(default_factory=list)
     run_metadata: dict = Field(default_factory=dict)
     seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
@@ -51,7 +50,6 @@ class RoleplayingGame(BaseTaskV1):
         "game_setting",
         "player_character",
         "scenario",
-        "user_responses",
         "original_input",
         "generation_model",
         "followup_model",
@@ -290,9 +288,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             [user_action_conversation], GenerationArgs(prefill="<user_action>")
         )
         user_response = user_response_result[0]
+        user_response_tags = parse_xml_tags(
+            user_response, required_tags=["user_action"]
+        )
         logger.debug(f"User response:\n{user_response}")
 
-        episode.conversation.append({"role": "user", "content": user_response})
+        episode.conversation.append(
+            {"role": "user", "content": user_response_tags["user_action"]}
+        )
 
         # Generate assistant response
         assistant_conversation: Conversation = [
@@ -315,14 +318,20 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         assistant_response = assistant_response_result[0]
 
-        episode.conversation.append(
-            {"role": "assistant", "content": assistant_response}
+        parsed_tags = parse_xml_tags(
+            assistant_response,
+            required_tags=[
+                "dm_response",
+                "dm_narration",
+            ],
         )
 
-        # Store the latest responses
-        if episode.user_responses is None:
-            episode.user_responses = []
-        episode.user_responses.append(user_response)
+        # TODO handle rolls with a tool call
+        formatted_dm_response = parsed_tags["dm_narration"]
+
+        episode.conversation.append(
+            {"role": "assistant", "content": formatted_dm_response}
+        )
 
         logger.info(
             f"Generated turn {episode.step_count + 1}: User={user_response[:50]}..., Assistant={assistant_response[:50]}..."
@@ -336,9 +345,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "player_character": episode.player_character
                 or "No characters generated",
                 "scenario": scenario,
-                "user_responses": episode.user_responses[0]
-                if episode.user_responses and len(episode.user_responses) > 0
-                else "No user responses generated",
                 "original_input": {"prompt": self.input_prompt},
                 "generation_model": self.generation_model_names["generation"],
                 "followup_model": self.generation_model_names["followup"],
