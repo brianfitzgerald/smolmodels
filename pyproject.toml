@@ -3,7 +3,7 @@ name = "smolmodels"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "datasets",
     "evaluate",
@@ -15,9 +15,9 @@ dependencies = [
     "python-dotenv==1.0.1",
     "fsspec==2023.10.0",
     "matplotlib",
-    "openai==1.74.0",
+    "openai==1.101.0",
     "unidecode",
-    "anthropic==0.49.0",
+    "anthropic==0.64.0",
     "pillow==10.4.0",
     "loguru",
     "webdataset",
@@ -34,8 +34,8 @@ dependencies = [
     "uvicorn>=0.32.1",
     "gradio==5.27.0",
     "scipy",
-    "pyright>=1.1.390",
-    "google-genai==1.12.1",
+    "pyright>=1.1.404",
+    "google-genai==1.32.0",
     "sentencepiece",
     "einops",
     "mistune>=3.1.0",
@@ -59,10 +59,10 @@ pythonpath = ["."]
 
 [dependency-groups]
 torch = [
-    "transformers==4.55.2",
+    "transformers==4.56.0",
     "torch==2.6.0",
     "peft>=0.13.2",
-    "trl==0.21.0",
+    "trl==0.22.0",
     "lightning>=2.5.0.post0",
     "nltk",
 ]
@@ -75,9 +75,6 @@ training = [
     "flash-attn; sys_platform == 'linux'",
     "vllm==0.8.5",
 ]
-
-[tool.uv]
-default-groups = ["torch"]
 
 
 [tool.uv.sources]

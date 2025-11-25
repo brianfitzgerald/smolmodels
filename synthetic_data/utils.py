@@ -329,3 +329,94 @@ def log_to_file(
         f.write(tabulate_str)
 
     logger.info("Saved eval samples.")
+
+
+def log_conversation(conversation: Conversation) -> None:
+    """
+    Log a Conversation to the console using loguru with colored output based on roles.
+
+    Args:
+        conversation: The conversation to log
+    """
+    # Color mapping for different roles using ANSI color codes
+    role_colors = {
+        "system": "\033[36m",  # Cyan
+        "user": "\033[32m",  # Green
+        "assistant": "\033[34m",  # Blue
+        "function": "\033[33m",  # Yellow
+        "tool": "\033[35m",  # Magenta
+        "unknown": "\033[31m",  # Red
+    }
+    reset_color = "\033[0m"
+
+    # Build the complete log message
+    log_lines = []
+    log_lines.append(f"\n{'=' * 60}")
+
+    for i, message in enumerate(conversation, 1):
+        role = message.get("role", "unknown")
+        content = message.get("content", "")
+
+        if isinstance(content, str):
+            content_str = content
+        elif content is None:
+            content_str = ""
+        else:
+            content_str = str(content)
+
+        # Get color for role, default to red for unknown roles
+        color = role_colors.get(role, role_colors["unknown"])
+
+        # Add the message with color and clear separation
+        log_lines.append(f"\n{color}[{i}] {role.upper()}{reset_color}\n")
+        log_lines.append(f"{color}{content_str}{reset_color}\n")
+
+    logger.info("".join(log_lines))
+    print("".join(log_lines))
+
+
+def parse_xml_tags(text: str, required_tags: List[str] = []) -> Dict[str, str]:
+    result = {}
+    missing_tags = []
+
+    # First, find all XML tags in the text
+    import re
+
+    tag_pattern = r"<([^>]+)>"
+    all_tags: set[str] = set(re.findall(tag_pattern, text))
+
+    # Filter out closing tags and self-closing tags
+    opening_tags = set()
+    for tag in all_tags:
+        if not tag.startswith("/") and not tag.endswith("/"):
+            opening_tags.add(tag)
+
+    # Parse all found tags
+    for tag in opening_tags:
+        opening_tag = f"<{tag}>"
+        closing_tag = f"</{tag}>"
+
+        # Find the tags (case-insensitive search)
+        text_lower = text.lower()
+        opening_tag_lower = opening_tag.lower()
+        closing_tag_lower = closing_tag.lower()
+
+        start_idx = text_lower.find(opening_tag_lower)
+        end_idx = text_lower.find(closing_tag_lower)
+
+        if start_idx != -1 and end_idx != -1:
+            # Extract content using original case text
+            content_start = start_idx + len(opening_tag)
+            content_end = end_idx
+            content = text[content_start:content_end].strip()
+            result[tag] = content
+
+    # Check for missing required tags
+    for tag in required_tags:
+        if tag not in result:
+            missing_tags.append(tag)
+
+    if missing_tags:
+        raise ValueError(f"Required XML tags not found: {', '.join(missing_tags)}")
+
+    return result

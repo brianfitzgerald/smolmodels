@@ -26,7 +26,7 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "gutenberg_backtranslation_from_txt",
+                "roleplaying_game",
                 "--batch_size",
                 "4"
             ],

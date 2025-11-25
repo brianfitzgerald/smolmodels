@@ -1,5 +1,5 @@
 import pytest
-from gyms.twenty_questions.env import parse_guesser_output, parse_oracle_output
+from synthetic_data.tasks.twenty_questions import parse_guesser_output, parse_oracle_output
 
 
 class TestParsers:

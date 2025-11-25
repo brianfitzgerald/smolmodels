@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(pytest:*)",
+      "Bash(uv pip install:*)",
+      "Bash(ruff check:*)",
+      "Bash(pyright:*)",
+      "Bash(ruff format:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

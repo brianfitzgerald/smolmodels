@@ -8,5 +8,6 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "cursorpyright.analysis.typeCheckingMode": "standard"
 }

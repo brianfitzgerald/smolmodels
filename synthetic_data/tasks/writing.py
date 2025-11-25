@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from synthetic_data.generation import (
     GenWrapperArgs,
+    GenerationArgs,
     GenerationWrapper,
     get_generation_wrapper,
 )
@@ -25,7 +26,7 @@ from synthetic_data.prompts import (
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTask
+from synthetic_data.tasks import BaseTaskV1
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.tasks import RunMode
 from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
@@ -37,7 +38,7 @@ class SceneRow:
     text_summary: str
 
 
-class ScreenplaySummarize(BaseTask):
+class ScreenplaySummarize(BaseTaskV1):
     output_dataset_name = "screenplay_scenes_summarized_full"
     dataset_columns = ["completions", "test_results", "name"]
     seed_data_format = DatasetFormat.CUSTOM
@@ -165,7 +166,7 @@ class Output(BaseModel):
     items: List[SceneElement]
 
 
-class GutenbergExtraction(BaseTask):
+class GutenbergExtraction(BaseTaskV1):
     """
     Extract dialogue and actions from Gutenberg snippets.
     """
@@ -177,8 +178,6 @@ class GutenbergExtraction(BaseTask):
     seed_data_location = (
         "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
     )
-
-    gen_wrapper_args_override = GenWrapperArgs(response_format=Output)
 
     def __init__(self) -> None:
         self.in_rows_batch = []
@@ -291,7 +290,7 @@ def extract_tags_from_instruction(text):
     return extracted
 
 
-class GutenbergBacktranslation(BaseTask):
+class GutenbergBacktranslation(BaseTaskV1):
     """
     Generate a high quality prompt from a Gutenberg chunk.
     """
@@ -414,7 +413,7 @@ async def score_writing(
         for prompt, completion in zip(prompts, completions)
     ]
     logger.info(
-        f"Judging {len(judge_convs)} completions with {judge_generator.args.model_id}"
+        f"Judging {len(judge_convs)} completions with {judge_generator.gen_wrapper_args.model_id}"
     )
     judge_completions = await judge_generator.generate(judge_convs)
 
@@ -439,7 +438,7 @@ async def generate_and_score(
         [{"role": "user", "content": row["instruction"]}] for row in input_rows
     ]
     logger.info(
-        f"Generating {len(input_convs)} completions with {generator.args.model_id}"
+        f"Generating {len(input_convs)} completions with {generator.gen_wrapper_args.model_id}"
     )
     completions = await generator.generate(input_convs)
 
@@ -453,14 +452,14 @@ async def generate_and_score(
             "scores": s,
             "completion": c,
             "instruction": r["instruction"],
-            "model_id": generator.args.model_id,
+            "model_id": generator.gen_wrapper_args.model_id,
             "prompt_id": i,
         }
         for i, (r, s, c) in enumerate(zip(input_rows, scores_formatted, completions))
     ]
 
 
-class GenerationBestOfN(BaseTask):
+class GenerationBestOfN(BaseTaskV1):
     """
     Take backtranslated snippets, generate completions, and score them. Return a set of N completions with scores.
     """
