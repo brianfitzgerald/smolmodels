@@ -24,6 +24,9 @@ from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying import (
     RoleplayingGameMultiStepTask,
 )
+from synthetic_data.tasks.writing import (
+    GutenbergSummaryContinuation,
+)
 from synthetic_data.utils import DatasetFormat
 
 
@@ -310,9 +313,15 @@ async def run_task(
 
             logger.info(f"Processing batch {batch_count + 1}: rows {i}-{batch_end - 1}")
 
-            results = await process_multi_step_task(
-                task, autoscaling_manager, batch_data
-            )
+            # Check if this is a single-step or multi-step task
+            if isinstance(task, BaseTaskV1):
+                results = await process_single_step_task(
+                    task, autoscaling_manager, batch_data
+                )
+            else:
+                results = await process_multi_step_task(
+                    task, autoscaling_manager, batch_data
+                )
             # Add results to output dataset
             if results:
                 new_dataset = Dataset.from_list(results)
@@ -354,9 +363,23 @@ async def process_single_step_task(
     """Process a single-step task"""
     # Preprocess batch
     processed_batches = []
-    for row in batch_data:
+
+    # Convert batch_data to list of dicts
+    if isinstance(batch_data, dict):
+        # If batch_data is a dict with column names as keys and lists as values
+        # Convert to list of row dicts
+        keys = list(batch_data.keys())
+        n_rows = len(batch_data[keys[0]])
+        rows = [{k: batch_data[k][i] for k in keys} for i in range(n_rows)]
+    else:
+        rows = batch_data
+
+    for row in rows:
         # Convert row to dict if it's not already
-        row_dict = dict(row) if not isinstance(row, dict) else row
+        if not isinstance(row, dict):
+            row_dict = {k: v for k, v in zip(batch_data.keys(), row)}
+        else:
+            row_dict = row
         processed = await task.preprocess_row(row_dict)
         processed_batches.extend(processed)
 
@@ -369,13 +392,24 @@ async def process_single_step_task(
     if not conversations:
         return []
 
-    # Generate with autoscaling
     # Use the main generation wrapper (first registered wrapper)
     all_wrappers = autoscaling_manager.get_all_wrappers()
     if not all_wrappers:
         raise ValueError("No wrappers registered in autoscaling manager")
     main_wrapper = all_wrappers[0]
 
+    # Check if the task has a custom generate() method
+    # If it does, use it. Otherwise, use the default generation + format_output_rows
+    if hasattr(task, "generate") and callable(task.generate):
+        # Check if this is a custom generate method (not inherited from BaseTaskV1)
+        task_class_generate = task.__class__.generate
+        base_class_generate = BaseTaskV1.generate
+
+        if task_class_generate is not base_class_generate:
+            # Task has a custom generate method - use it
+            return await task.generate(main_wrapper, processed_batches)
+
+    # Default path: generate completions and format
     completions = await autoscaling_manager.generate_with_autoscaling(
         main_wrapper, conversations
     )
@@ -421,11 +455,13 @@ TaskName = Literal[
     "gutenberg_extraction",
     "gutenberg_backtranslation",
     "gutenberg_backtranslation_from_txt",
+    "gutenberg_summary_continuation",
     "generation_best_of_n",
     "roleplaying_game",
 ]
-ALL_TASKS: Dict[TaskName, type[BaseTask]] = {
+ALL_TASKS: Dict[TaskName, type[BaseTask | BaseTaskV1]] = {
     "roleplaying_game": RoleplayingGameMultiStepTask,
+    "gutenberg_summary_continuation": GutenbergSummaryContinuation,
 }
 
 
@@ -434,8 +470,7 @@ def main(
     save_every_n_batches: int = 5,
     batch_size: int = 16,
     restart: bool = False,
-    resume_input_position: bool = True,
-    model: RemoteModel = "gemini-2.0-flash",
+    model: RemoteModel = "gpt-5-mini",
     n_epochs: int = 1,
     run_mode: RunMode = "cli",
     **kwargs,
@@ -522,7 +557,7 @@ def main(
 
     asyncio.run(
         run_task(
-            task,
+            task,  # pyright: ignore[reportArgumentType]
             generation_wrapper,
             input_dataset,
             output_dataset,

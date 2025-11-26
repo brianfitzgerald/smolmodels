@@ -2,7 +2,7 @@ import random
 from jinja2 import Template
 from loguru import logger
 
-from synthetic_data.generation import GenerationArgs, GenerationWrapper
+from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
 from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
@@ -40,25 +40,6 @@ class RPGEpisode(BaseModel):
     seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
 
 
-class RoleplayingGame(BaseTaskV1):
-    """
-    Generate roleplaying scenarios with follow-up questions using different models.
-    """
-
-    output_dataset_name = "roleplaying_scenarios"
-    dataset_columns = [
-        "game_setting",
-        "player_character",
-        "scenario",
-        "original_input",
-        "generation_model",
-        "followup_model",
-        "parameter_model",
-    ]
-    seed_data_format = DatasetFormat.CUSTOM
-    output_dataset_format = DatasetFormat.PARQUET
-
-
 USE_DEV_MODELS = True
 
 
@@ -81,13 +62,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         super().__init__(run_mode)
         self.max_user_responses = max_user_responses
         self.input_prompt = input_prompt
-
-        # adopt dataset config from RoleplayingGame single-step task
-        self.task = RoleplayingGame(run_mode)
-        self.output_dataset_name = self.task.output_dataset_name
-        self.output_dataset_org = self.task.output_dataset_org
-        self.output_dataset_format = self.task.output_dataset_format
-        self.dataset_columns = self.task.dataset_columns
 
         gen_model: RemoteModel = "gpt-4.1-nano" if USE_DEV_MODELS else "claude-4-sonnet"
 

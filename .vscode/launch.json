@@ -26,7 +26,7 @@
             "program": "generate.py",
             "args": [
                 "--task_name",
-                "roleplaying_game",
+                "gutenberg_summary_continuation",
                 "--batch_size",
                 "4"
             ],
@@ -88,7 +88,7 @@
             "program": "util_scripts.py",
             "args": [
                 "download_dataset",
-                "backtranslate_best_of_n"
+                "epubs"
             ]
         }
     ]

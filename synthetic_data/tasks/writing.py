@@ -14,8 +14,6 @@ from loguru import logger
 from pydantic import BaseModel
 
 from synthetic_data.generation import (
-    GenWrapperArgs,
-    GenerationArgs,
     GenerationWrapper,
     get_generation_wrapper,
 )
@@ -26,7 +24,7 @@ from synthetic_data.prompts import (
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTaskV1
+from synthetic_data.tasks import BaseTask, BaseTaskV1
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.tasks import RunMode
 from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
@@ -44,7 +42,8 @@ class ScreenplaySummarize(BaseTaskV1):
     seed_data_format = DatasetFormat.CUSTOM
     output_dataset_format = DatasetFormat.PARQUET
 
-    def __init__(self) -> None:
+    def __init__(self, run_mode: RunMode = "cli") -> None:
+        super().__init__(run_mode)
         self.in_rows_batch = []
         self.max_samples = 50000
 
@@ -179,7 +178,8 @@ class GutenbergExtraction(BaseTaskV1):
         "sam-paech/gutenberg3-generalfiction-scifi-fantasy-romance-adventure-dpo"
     )
 
-    def __init__(self) -> None:
+    def __init__(self, run_mode: RunMode = "cli") -> None:
+        super().__init__(run_mode)
         self.in_rows_batch = []
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
@@ -375,6 +375,99 @@ class GutenbergBacktranslation(BaseTaskV1):
             ]
             completions = await generation_wrapper.generate(bt_convs)
             return self.format_output_rows(completions, valid_rows)
+        except TimeoutError:
+            logger.error("Timeout error processing batch")
+            return []
+        except Exception as e:
+            logger.error(f"Error processing batch: {str(e)}")
+            return []
+
+
+class GutenbergSummaryContinuation(BaseTaskV1):
+    output_dataset_name = "gutenberg_summary_continuation"
+    dataset_columns = ["text", "title", "author", "category", "type", "id"]
+    seed_data_format = DatasetFormat.CUSTOM
+    seed_data_location = "gutenberg"  # Dummy value for CUSTOM format
+    output_dataset_format = DatasetFormat.PARQUET
+
+    def __init__(self, run_mode: RunMode) -> None:
+        super().__init__(run_mode)
+        self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
+
+    def load_custom(self, dataset_root_path: str) -> Dataset:
+        shards_pl = _get_gutenberg_subset(2)
+        logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
+        return Dataset.from_polars(shards_pl)
+
+    async def preprocess_row(self, row: Dict) -> list[dict]:
+        all_chunks: List[List[str]] = [
+            _get_paragraph_chunks(row, self.tiktoken_encoder)
+        ]
+
+        metadata = {
+            "title": row.get("title", ""),
+            "author": row.get("author", ""),
+            "id": row.get("id", ""),
+        }
+
+        rows_out = []
+        for chunks in all_chunks:
+            if len(chunks) < 2:
+                logger.warning(f"Not enough chunks found for {metadata['title']}")
+                continue
+
+            # Iterate through chunks, pairing each chunk with its next chunk
+            for i in range(len(chunks) - 1):
+                prefix = "\n\n".join(chunks[i])
+                next_chunk = "\n\n".join(chunks[i + 1])
+
+                rows_out.append(
+                    {
+                        "prefix": prefix,
+                        "next_chunk": next_chunk,
+                        **metadata,
+                    }
+                )
+        return rows_out
+
+    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
+        """Format the prefix text for summarization."""
+        conv_out = []
+        for sample in batch:
+            conv: Conversation = [
+                {
+                    "role": "system",
+                    "content": "You are an expert at creating concise, informative summaries. Summarize the following narrative passage, capturing key events, character actions, themes, and important details. Keep the summary focused and under 200 words.",
+                },
+                {"role": "user", "content": sample["prefix"]},
+            ]
+            conv_out.append(conv)
+        return conv_out
+
+    def format_output_rows(
+        self, completions: List[str], input_rows: list[dict]
+    ) -> List:
+        out_rows = []
+        for completion, row in zip(completions, input_rows):
+            out_rows.append(
+                {
+                    "prefix": row["prefix"],
+                    "summary": completion,
+                    "next_chunk": row["next_chunk"],
+                    "title": row.get("title", ""),
+                    "author": row.get("author", ""),
+                    "id": row.get("id", ""),
+                }
+            )
+        return out_rows
+
+    async def generate(
+        self, generation_wrapper: GenerationWrapper, input_rows: list[dict]
+    ) -> list[dict]:
+        try:
+            summary_convs = self.format_input_conversation(input_rows)
+            completions = await generation_wrapper.generate(summary_convs)
+            return self.format_output_rows(completions, input_rows)
         except TimeoutError:
             logger.error("Timeout error processing batch")
             return []

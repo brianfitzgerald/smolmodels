@@ -67,7 +67,7 @@ class GenerationArgs(BaseModel):
     """
 
     max_tokens: int = 4096
-    temperature: float = 0.4
+    temperature: float | None = None
     stop: list[str] | None = None
     seed: Optional[int] = None
     n_retries: int = MAX_RETRIES
@@ -353,7 +353,7 @@ class GeminiWrapper(GenerationWrapper):
                     reqs.append(
                         self.client.aio.models.generate_content(
                             model=self.model_id,
-                            contents=[conv]
+                            contents=[conv],  # pyright: ignore[reportArgumentType]
                         )
                     )
 
@@ -401,6 +401,7 @@ RemoteModel = Literal[
     "vllm",
     "gemini-2.0-flash",
     "gemini-2.5-flash",
+    "gpt-5-mini",
 ]
 
 
@@ -465,6 +466,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "o3-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="o3-mini", max_rps=5000 / 60, is_reasoning_model=True),
+    ),
+    "gpt-5-mini": RemoteModelChoice(
+        OpenAIGenerationWrapper,
+        GenWrapperArgs(model_id="gpt-5-mini", max_rps=5000 / 60),
     ),
     "gemini-2.0-flash": RemoteModelChoice(
         GeminiWrapper,
