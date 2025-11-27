@@ -1,4 +1,5 @@
 from typing import Iterator
+from io import BytesIO
 import fire
 import os
 import shutil
@@ -76,12 +77,23 @@ def upload_dataset(dataset_name: str):
     Upload a dataset to the modal datasets folder.
     """
     volume = MODEL_WEIGHTS_VOLUME
-    path = f"dataset_files/{dataset_name}.parquet"
-    logger.info(f"Uploading dataset to {path}")
+    local_path = f"dataset_files/{dataset_name}.parquet"
+    remote_path = f"dataset_files/{dataset_name}.parquet"
+
+    file_size = os.path.getsize(local_path)
+    logger.info(
+        f"Uploading {local_path} ({file_size / (1024**3):.2f} GB) to {remote_path}"
+    )
+
+    # Read file into BytesIO to work around Modal's multipart upload bug
+    # where BufferedReader doesn't have getbuffer() method
+    with open(local_path, "rb") as f:
+        file_data = BytesIO(f.read())
+
     with volume.batch_upload(force=True) as upload:
-        logger.info(f"Uploading {path}")
-        upload.put_file(path, path)
-    logger.info(f"Uploaded dataset to {path}")
+        upload.put_file(file_data, remote_path)
+
+    logger.info(f"Uploaded dataset to {remote_path}")
 
 
 def convert_epubs_to_txt(root_dir: str, out_dir: str):

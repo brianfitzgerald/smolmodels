@@ -2,6 +2,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Process Gutenberg",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "synthetic_data/gutenberg_process.py",
+            "justMyCode": false,
+            "args": []
+        },
+        {
             "name": "Train - TRL",
             "type": "debugpy",
             "request": "launch",
@@ -78,7 +86,7 @@
             "program": "util_scripts.py",
             "args": [
                 "upload_dataset",
-                "gutenberg_backtranslate_from_txt_conversations"
+                "gutenberg_books"
             ]
         },
         {
