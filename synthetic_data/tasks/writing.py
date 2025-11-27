@@ -4,12 +4,10 @@ import os
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Tuple, TypedDict
+from typing import TypedDict
 
-import polars as pl
 import tiktoken
 from datasets import Dataset
-from huggingface_hub import snapshot_download
 from loguru import logger
 from pydantic import BaseModel
 
@@ -24,7 +22,7 @@ from synthetic_data.prompts import (
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTask, BaseTaskV1
+from synthetic_data.tasks import BaseTaskV1, get_gutenberg_subset
 from synthetic_data.utils import Conversation, DatasetFormat
 from synthetic_data.tasks import RunMode
 from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
@@ -80,8 +78,8 @@ class ScreenplaySummarize(BaseTaskV1):
         return conv_out
 
     def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
+        self, completions: list[str], input_rows: list[dict]
+    ) -> list:
         out_rows = []
         for completion, row in zip(completions, input_rows):
             row["summary"] = completion
@@ -162,7 +160,7 @@ class SceneElement(BaseModel):
 
 
 class Output(BaseModel):
-    items: List[SceneElement]
+    items: list[SceneElement]
 
 
 class GutenbergExtraction(BaseTaskV1):
@@ -192,8 +190,8 @@ class GutenbergExtraction(BaseTaskV1):
         return [_format_gutenberg_conv(sample) for sample in samples_in]
 
     def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
+        self, completions: list[str], input_rows: list[dict]
+    ) -> list:
         out_rows = []
         for completion, row in zip(completions, input_rows):
             json_str = Output.model_validate(json.loads(completion)).model_dump_json()
@@ -228,7 +226,7 @@ def find_valid_paragraph_chunks(
     return chunks
 
 
-def _get_paragraph_chunks(row: dict, encoder: tiktoken.Encoding):
+def get_paragraph_chunks(row: dict, encoder: tiktoken.Encoding):
     text = row["text"]
 
     # clean and extract paragraphs
@@ -244,22 +242,6 @@ def _get_paragraph_chunks(row: dict, encoder: tiktoken.Encoding):
         if len(tokens) < 10000:
             out.append(chunk)
     return out
-
-
-def _get_gutenberg_subset(n_shards: int = 1) -> pl.DataFrame:
-    gutenberg_location = snapshot_download("SaylorTwift/Gutenberg", repo_type="dataset")
-    files = os.listdir(os.path.join(gutenberg_location, "data"))
-    files.sort()
-    out_pl = None
-    for shard_idx in range(n_shards):
-        file = files[shard_idx]
-        df = pl.read_parquet(os.path.join(gutenberg_location, "data", file))
-        if out_pl is None:
-            out_pl = df
-        else:
-            out_pl = out_pl.vstack(df)
-    assert out_pl is not None, "could not find any shards"
-    return out_pl
 
 
 def extract_fiction_label(text):
@@ -305,14 +287,14 @@ class GutenbergBacktranslation(BaseTaskV1):
         self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
-        shards_pl = _get_gutenberg_subset(2)
+        shards_pl = get_gutenberg_subset(2)
         logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
         return Dataset.from_polars(shards_pl)
 
-    async def preprocess_row(self, row: Dict) -> list[dict]:
-        all_chunks: List[Tuple[List[str], Dict]] = [
+    async def preprocess_row(self, row: dict) -> list[dict]:
+        all_chunks: list[tuple[list[str], dict]] = [
             (
-                _get_paragraph_chunks(row, self.tiktoken_encoder),
+                get_paragraph_chunks(row, self.tiktoken_encoder),
                 {
                     "title": row.get("title", ""),
                     "author": row.get("author", ""),
@@ -320,7 +302,7 @@ class GutenbergBacktranslation(BaseTaskV1):
                 },
             )
         ]
-        paragraphs: List[Tuple[str, Dict]] = []
+        paragraphs: list[tuple[str, dict]] = []
         for chunks, metadata in all_chunks:
             if len(chunks) == 0:
                 logger.warning(f"No chunks found for {metadata['title']}")
@@ -338,8 +320,8 @@ class GutenbergBacktranslation(BaseTaskV1):
         return rows_out
 
     def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
+        self, completions: list[str], input_rows: list[dict]
+    ) -> list:
         out_rows = []
         for completion, row in zip(completions, input_rows):
             tags = extract_tags_from_instruction(completion)
@@ -375,99 +357,6 @@ class GutenbergBacktranslation(BaseTaskV1):
             ]
             completions = await generation_wrapper.generate(bt_convs)
             return self.format_output_rows(completions, valid_rows)
-        except TimeoutError:
-            logger.error("Timeout error processing batch")
-            return []
-        except Exception as e:
-            logger.error(f"Error processing batch: {str(e)}")
-            return []
-
-
-class GutenbergSummaryContinuation(BaseTaskV1):
-    output_dataset_name = "gutenberg_summary_continuation"
-    dataset_columns = ["text", "title", "author", "category", "type", "id"]
-    seed_data_format = DatasetFormat.CUSTOM
-    seed_data_location = "gutenberg"  # Dummy value for CUSTOM format
-    output_dataset_format = DatasetFormat.PARQUET
-
-    def __init__(self, run_mode: RunMode) -> None:
-        super().__init__(run_mode)
-        self.tiktoken_encoder = tiktoken.get_encoding("o200k_base")
-
-    def load_custom(self, dataset_root_path: str) -> Dataset:
-        shards_pl = _get_gutenberg_subset(2)
-        logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
-        return Dataset.from_polars(shards_pl)
-
-    async def preprocess_row(self, row: Dict) -> list[dict]:
-        all_chunks: List[List[str]] = [
-            _get_paragraph_chunks(row, self.tiktoken_encoder)
-        ]
-
-        metadata = {
-            "title": row.get("title", ""),
-            "author": row.get("author", ""),
-            "id": row.get("id", ""),
-        }
-
-        rows_out = []
-        for chunks in all_chunks:
-            if len(chunks) < 2:
-                logger.warning(f"Not enough chunks found for {metadata['title']}")
-                continue
-
-            # Iterate through chunks, pairing each chunk with its next chunk
-            for i in range(len(chunks) - 1):
-                prefix = "\n\n".join(chunks[i])
-                next_chunk = "\n\n".join(chunks[i + 1])
-
-                rows_out.append(
-                    {
-                        "prefix": prefix,
-                        "next_chunk": next_chunk,
-                        **metadata,
-                    }
-                )
-        return rows_out
-
-    def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        """Format the prefix text for summarization."""
-        conv_out = []
-        for sample in batch:
-            conv: Conversation = [
-                {
-                    "role": "system",
-                    "content": "You are an expert at creating concise, informative summaries. Summarize the following narrative passage, capturing key events, character actions, themes, and important details. Keep the summary focused and under 200 words.",
-                },
-                {"role": "user", "content": sample["prefix"]},
-            ]
-            conv_out.append(conv)
-        return conv_out
-
-    def format_output_rows(
-        self, completions: List[str], input_rows: list[dict]
-    ) -> List:
-        out_rows = []
-        for completion, row in zip(completions, input_rows):
-            out_rows.append(
-                {
-                    "prefix": row["prefix"],
-                    "summary": completion,
-                    "next_chunk": row["next_chunk"],
-                    "title": row.get("title", ""),
-                    "author": row.get("author", ""),
-                    "id": row.get("id", ""),
-                }
-            )
-        return out_rows
-
-    async def generate(
-        self, generation_wrapper: GenerationWrapper, input_rows: list[dict]
-    ) -> list[dict]:
-        try:
-            summary_convs = self.format_input_conversation(input_rows)
-            completions = await generation_wrapper.generate(summary_convs)
-            return self.format_output_rows(completions, input_rows)
         except TimeoutError:
             logger.error("Timeout error processing batch")
             return []
@@ -523,7 +412,7 @@ async def score_writing(
 
 async def generate_and_score(
     generator: GenerationWrapper,
-    input_rows: List[Dict],
+    input_rows: list[dict],
     bench: CreativeWritingBench,
     judge_generator: GenerationWrapper,
 ):
@@ -573,7 +462,7 @@ class GenerationBestOfN(BaseTaskV1):
         self.judge_generator = get_generation_wrapper("gemini-2.0-flash")
 
     async def generate(
-        self, generation_wrapper: GenerationWrapper, input_rows: List[Dict]
+        self, generation_wrapper: GenerationWrapper, input_rows: list[dict]
     ) -> list[dict]:
         if self.bench is None:
             self.bench = CreativeWritingBench(self.run_mode)

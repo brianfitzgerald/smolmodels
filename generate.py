@@ -24,7 +24,7 @@ from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
 from synthetic_data.tasks.roleplaying import (
     RoleplayingGameMultiStepTask,
 )
-from synthetic_data.tasks.writing import (
+from synthetic_data.tasks.next_chapter import (
     GutenbergSummaryContinuation,
 )
 from synthetic_data.utils import DatasetFormat
