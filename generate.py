@@ -468,7 +468,7 @@ ALL_TASKS: Dict[TaskName, type[BaseTask | BaseTaskV1]] = {
 def main(
     task_name: TaskName | None = None,
     save_every_n_batches: int = 5,
-    batch_size: int = 16,
+    batch_size: int = 8,
     restart: bool = False,
     model: RemoteModel = "gpt-5-mini",
     n_epochs: int = 1,

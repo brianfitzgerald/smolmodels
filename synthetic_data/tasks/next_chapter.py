@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 
 import tiktoken
 from datasets import Dataset
@@ -27,8 +28,45 @@ CHAPTER_HEADING_PATTERN = re.compile(
     re.MULTILINE,
 )
 
-MAX_TOKENS = 2048
-MIN_NEXT_CHUNK_TOKENS = 256
+# Pattern to detect metadata lines (author credits, contents, etc.)
+METADATA_PATTERN = re.compile(
+    r"^(?:"
+    r"By\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*|"  # By George Meredith
+    r"Contents:?|"  # Contents:
+    r"Table\s+of\s+Contents|"
+    r"Introduction|"
+    r"Preface|"
+    r"Foreword|"
+    r"Dedication|"
+    r"Acknowledgements?|"
+    r"Copyright|"
+    r"Published\s+by|"
+    r"First\s+published|"
+    r"All\s+rights\s+reserved|"
+    r"ISBN|"
+    r"Illustrated\s+by|"
+    r"Edited\s+by|"
+    r"Translated\s+by"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+# Minimum requirements for valid narrative content
+MIN_PARAGRAPH_WORDS = 15
+MIN_PREFIX_WORDS = 30
+MIN_SUMMARY_WORDS = 100
+
+
+@dataclass
+class ChunkConfig:
+    """Configuration for chunk extraction."""
+
+    max_summary_tokens: int = 2048
+    max_prefix_tokens: int = 256
+    min_next_chunk_tokens: int = 256
+    min_paragraph_words: int = MIN_PARAGRAPH_WORDS
+    min_prefix_words: int = MIN_PREFIX_WORDS
+    min_summary_words: int = MIN_SUMMARY_WORDS
 
 
 def is_chapter_heading(paragraph: str) -> bool:
@@ -43,65 +81,143 @@ def is_chapter_heading(paragraph: str) -> bool:
     return False
 
 
-def find_long_prefix_chunks(
+def is_metadata(paragraph: str) -> bool:
+    """Check if a paragraph looks like metadata (author, contents, etc.)."""
+    stripped = paragraph.strip()
+    # Very short content is likely metadata
+    if len(stripped) < 50 and METADATA_PATTERN.match(stripped):
+        return True
+    return False
+
+
+def is_valid_narrative_paragraph(
+    paragraph: str, min_words: int = MIN_PARAGRAPH_WORDS
+) -> bool:
+    """
+    Check if a paragraph contains valid narrative content.
+
+    A valid narrative paragraph should:
+    - Have enough words
+    - Not be metadata
+    - Not be a chapter heading
+    - Contain actual prose (not just dialogue markers or short fragments)
+    """
+    stripped = paragraph.strip()
+
+    # Check minimum word count
+    words = stripped.split()
+    if len(words) < min_words:
+        return False
+
+    # Check for metadata patterns
+    if is_metadata(stripped):
+        return False
+
+    # Check for chapter headings
+    if is_chapter_heading(stripped):
+        return False
+
+    return True
+
+
+def filter_valid_paragraphs(
+    paragraphs: list[str], min_words: int = MIN_PARAGRAPH_WORDS
+) -> list[str]:
+    """Filter paragraphs to only include valid narrative content."""
+    return [p for p in paragraphs if is_valid_narrative_paragraph(p, min_words)]
+
+
+def count_words(text: str) -> int:
+    """Count words in text."""
+    return len(text.split())
+
+
+def find_chunks_with_summary(
     paragraphs: list[str],
     encoder: tiktoken.Encoding,
-    max_tokens: int = MAX_TOKENS,
-    min_next_chunk_tokens: int = MIN_NEXT_CHUNK_TOKENS,
-) -> list[tuple[str, str]]:
+    config: ChunkConfig | None = None,
+) -> list[tuple[str, str, str]]:
     """
-    Find (prefix, next_chunk) pairs where prefix accumulates paragraphs
-    up to max_tokens or until a chapter heading is found.
-    Both prefix and next_chunk are capped at max_tokens.
+    Find (prefix, summary_content, next_chunk) tuples where:
+    - summary_content: longer passage (up to max_summary_tokens) for summarization
+    - prefix: shorter passage (up to max_prefix_tokens) extracted from the start
+    - next_chunk: the continuation passage
 
-    Returns a list of (prefix, next_chunk) tuples.
+    All outputs are validated to contain reasonable narrative content.
+
+    Returns a list of (prefix, summary_content, next_chunk) tuples.
     """
-    if len(paragraphs) < 2:
+    if config is None:
+        config = ChunkConfig()
+
+    # First filter out invalid paragraphs
+    valid_paragraphs = filter_valid_paragraphs(paragraphs, config.min_paragraph_words)
+
+    if len(valid_paragraphs) < 2:
         return []
 
-    results: list[tuple[str, str]] = []
+    results: list[tuple[str, str, str]] = []
     i = 0
 
-    while i < len(paragraphs):
-        # Accumulate paragraphs for prefix
-        prefix_paragraphs: list[str] = []
-        prefix_tokens = 0
+    while i < len(valid_paragraphs):
+        # Accumulate paragraphs for summary_content (longer passage)
+        summary_paragraphs: list[str] = []
+        summary_tokens = 0
 
-        while i < len(paragraphs):
-            para = paragraphs[i]
+        while i < len(valid_paragraphs):
+            para = valid_paragraphs[i]
 
             # Check if this paragraph is a chapter heading
-            if prefix_paragraphs and is_chapter_heading(para):
+            if summary_paragraphs and is_chapter_heading(para):
                 # Stop accumulating - this heading starts a new section
                 break
 
             # Check if adding this paragraph would exceed max tokens
             para_tokens = len(encoder.encode(para + "\n\n"))
-            if prefix_tokens > 0 and prefix_tokens + para_tokens > max_tokens:
+            if (
+                summary_tokens > 0
+                and summary_tokens + para_tokens > config.max_summary_tokens
+            ):
                 # Stop accumulating - we've hit the token limit
                 break
 
+            summary_paragraphs.append(para)
+            summary_tokens += para_tokens
+            i += 1
+
+        # Extract shorter prefix from the beginning of summary_content
+        prefix_paragraphs: list[str] = []
+        prefix_tokens = 0
+        for para in summary_paragraphs:
+            para_tokens = len(encoder.encode(para + "\n\n"))
+            if (
+                prefix_tokens > 0
+                and prefix_tokens + para_tokens > config.max_prefix_tokens
+            ):
+                break
             prefix_paragraphs.append(para)
             prefix_tokens += para_tokens
-            i += 1
 
         # Now accumulate next_chunk paragraphs
         next_chunk_paragraphs: list[str] = []
         next_chunk_tokens = 0
         j = i
 
-        while j < len(paragraphs):
-            para = paragraphs[j]
+        while j < len(valid_paragraphs):
+            para = valid_paragraphs[j]
 
             # Check if adding this paragraph would exceed max tokens
             para_tokens = len(encoder.encode(para + "\n\n"))
-            if next_chunk_tokens > 0 and next_chunk_tokens + para_tokens > max_tokens:
+            if (
+                next_chunk_tokens > 0
+                and next_chunk_tokens + para_tokens > config.max_summary_tokens
+            ):
                 # Stop accumulating - we've hit the token limit
                 break
 
             # Stop at chapter heading (after getting minimum content)
             if next_chunk_paragraphs and is_chapter_heading(para):
-                if next_chunk_tokens >= min_next_chunk_tokens:
+                if next_chunk_tokens >= config.min_next_chunk_tokens:
                     break
 
             next_chunk_paragraphs.append(para)
@@ -109,21 +225,37 @@ def find_long_prefix_chunks(
             j += 1
 
             # Stop if we have enough content for next_chunk
-            if next_chunk_tokens >= min_next_chunk_tokens:
+            if next_chunk_tokens >= config.min_next_chunk_tokens:
                 # Check if next paragraph is a chapter heading
-                if j < len(paragraphs) and is_chapter_heading(paragraphs[j]):
+                if j < len(valid_paragraphs) and is_chapter_heading(
+                    valid_paragraphs[j]
+                ):
                     break
 
-        # Create the pair if we have both parts
-        if prefix_paragraphs and next_chunk_paragraphs:
+        # Create the tuple if we have all parts with sufficient content
+        if prefix_paragraphs and summary_paragraphs and next_chunk_paragraphs:
             prefix = "\n\n".join(prefix_paragraphs)
+            summary_content = "\n\n".join(summary_paragraphs)
             next_chunk = "\n\n".join(next_chunk_paragraphs)
-            results.append((prefix, next_chunk))
+
+            # Validate minimum word counts
+            if (
+                count_words(prefix) >= config.min_prefix_words
+                and count_words(summary_content) >= config.min_summary_words
+            ):
+                results.append((prefix, summary_content, next_chunk))
 
         # Move to next section (skip the next_chunk we just processed)
         i = j
 
     return results
+
+
+SUMMARIZE_PROMPT = """
+You are an expert at creating concise, informative summaries of nonfiction narrative passages.
+Summarize the following narrative passage, capturing key events, character actions, themes, and important details.
+Describe the tone and style of the writing, and the overall narrative arc.
+"""
 
 
 class GutenbergSummaryContinuation(BaseTaskV1):
@@ -152,18 +284,19 @@ class GutenbergSummaryContinuation(BaseTaskV1):
             "id": row.get("id", ""),
         }
 
-        # Find long prefix chunks (up to 8k tokens or chapter boundary)
-        chunk_pairs = find_long_prefix_chunks(paragraphs, self.encoder)
+        # Find chunks: short prefix, longer summary_content, and next_chunk
+        chunk_tuples = find_chunks_with_summary(paragraphs, self.encoder)
 
-        if not chunk_pairs:
+        if not chunk_tuples:
             logger.warning(f"No valid chunks found for {metadata['title']}")
             return []
 
         rows_out = []
-        for prefix, next_chunk in chunk_pairs:
+        for prefix, summary_content, next_chunk in chunk_tuples:
             rows_out.append(
                 {
                     "prefix": prefix,
+                    "summary_content": summary_content,
                     "next_chunk": next_chunk,
                     **metadata,
                 }
@@ -171,15 +304,15 @@ class GutenbergSummaryContinuation(BaseTaskV1):
         return rows_out
 
     def format_input_conversation(self, batch: list[dict]) -> list[Conversation]:
-        """Format the prefix text for summarization."""
+        """Format the summary_content text for summarization."""
         conv_out = []
         for sample in batch:
             conv: Conversation = [
                 {
                     "role": "system",
-                    "content": "You are an expert at creating concise, informative summaries. Summarize the following narrative passage, capturing key events, character actions, themes, and important details. Keep the summary focused and under 200 words.",
+                    "content": SUMMARIZE_PROMPT,
                 },
-                {"role": "user", "content": sample["prefix"]},
+                {"role": "user", "content": sample["summary_content"]},
             ]
             conv_out.append(conv)
         return conv_out
@@ -192,6 +325,7 @@ class GutenbergSummaryContinuation(BaseTaskV1):
             out_rows.append(
                 {
                     "prefix": row["prefix"],
+                    "summary_content": row["summary_content"],
                     "summary": completion,
                     "next_chunk": row["next_chunk"],
                     "title": row.get("title", ""),
