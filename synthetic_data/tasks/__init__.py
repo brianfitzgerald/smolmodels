@@ -211,20 +211,3 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
 
     def get_output_row(self, episode: EpisodeT) -> list[dict]:
         raise NotImplementedError
-
-
-def get_gutenberg_subset(n_shards: int = 1) -> pl.DataFrame:
-    """Gutenberg dataset is large, so download only certain shards."""
-    gutenberg_location = snapshot_download("SaylorTwift/Gutenberg", repo_type="dataset")
-    files = os.listdir(os.path.join(gutenberg_location, "data"))
-    files.sort()
-    out_pl = None
-    for shard_idx in range(n_shards):
-        file = files[shard_idx]
-        df = pl.read_parquet(os.path.join(gutenberg_location, "data", file))
-        if out_pl is None:
-            out_pl = df
-        else:
-            out_pl = out_pl.vstack(df)
-    assert out_pl is not None, "could not find any shards"
-    return out_pl

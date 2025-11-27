@@ -6,7 +6,8 @@ from datasets import Dataset
 from loguru import logger
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.gutenberg_parser import super_cleaner
-from synthetic_data.tasks import BaseTaskV1, RunMode, get_gutenberg_subset
+from synthetic_data.gutenberg_process import get_gutenberg_subset
+from synthetic_data.tasks import BaseTaskV1, RunMode
 from synthetic_data.utils import Conversation, DatasetFormat
 
 # Pattern to detect chapter headings

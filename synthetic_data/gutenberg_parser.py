@@ -2,6 +2,7 @@ import string
 from builtins import str
 import os
 import re
+import polars as pl
 
 TEXT_START_MARKERS = frozenset(
     (
@@ -131,11 +132,11 @@ def _strip_headers(text: str):
     return sep.join(out)
 
 
-email_regex = re.compile("[\w.-]+@[\w.-]+\.\w+")
-footnote_notation_regex = re.compile("^\{.+\}|^\[.+\]")
-number_of_copies_regex = re.compile("[0-9]* copies|copyright")
-starts_with_regex = re.compile("^[%_<>*]")
-image_formats_regex = re.compile("\.png|\.jpg|\.jpeg|\.gif|picture:")
+email_regex = re.compile(r"[\w.-]+@[\w.-]+\.\w+")
+footnote_notation_regex = re.compile(r"^\{.+\}|^\[.+\]")
+number_of_copies_regex = re.compile(r"[0-9]* copies|copyright")
+starts_with_regex = re.compile(r"^[%_<>*]")
+image_formats_regex = re.compile(r"\.png|\.jpg|\.jpeg|\.gif|picture:")
 
 
 def _is_title_or_etc(text: str, min_token: int = 5) -> bool:
