@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
-
+import polars as pl
+import os
 import tiktoken
 from datasets import Dataset
 from loguru import logger
@@ -271,9 +272,11 @@ class GutenbergSummaryContinuation(BaseTaskV1):
         self.encoder = tiktoken.get_encoding("o200k_base")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
-        shards_pl = get_gutenberg_subset(2)
-        logger.info(f"Loaded {len(shards_pl)} rows from Gutenberg dataset")
-        return Dataset.from_polars(shards_pl)
+        books_pl = pl.read_parquet(
+            os.path.join(dataset_root_path, "gutenberg_books.parquet"), n_rows=1000
+        )
+        logger.info(f"Loaded {len(books_pl)} rows from Gutenberg dataset")
+        return Dataset.from_polars(books_pl)
 
     async def preprocess_row(self, row: dict) -> list[dict]:
         text = row["text"]
