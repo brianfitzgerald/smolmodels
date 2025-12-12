@@ -86,7 +86,7 @@
             "program": "util_scripts.py",
             "args": [
                 "upload_dataset",
-                "gutenberg_books"
+                "gutenberg_summary_continuation"
             ]
         },
         {

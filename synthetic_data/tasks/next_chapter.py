@@ -7,7 +7,6 @@ from datasets import Dataset
 from loguru import logger
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.gutenberg_parser import super_cleaner
-from synthetic_data.gutenberg_process import get_gutenberg_subset
 from synthetic_data.tasks import BaseTaskV1, RunMode
 from synthetic_data.utils import Conversation, DatasetFormat
 
@@ -54,21 +53,19 @@ METADATA_PATTERN = re.compile(
 )
 
 # Minimum requirements for valid narrative content
-MIN_PARAGRAPH_WORDS = 15
-MIN_PREFIX_WORDS = 30
-MIN_SUMMARY_WORDS = 100
 
 
 @dataclass
-class ChunkConfig:
+class NCPConfig:
     """Configuration for chunk extraction."""
 
-    max_summary_tokens: int = 2048
-    max_prefix_tokens: int = 256
-    min_next_chunk_tokens: int = 256
-    min_paragraph_words: int = MIN_PARAGRAPH_WORDS
-    min_prefix_words: int = MIN_PREFIX_WORDS
-    min_summary_words: int = MIN_SUMMARY_WORDS
+    summarize: bool = False
+    max_summary_tokens: int = 1024
+    max_prefix_tokens: int = 512
+    min_next_chunk_tokens: int = 512
+    min_paragraph_words: int = 15
+    min_prefix_words: int = 30
+    min_summary_words: int = 100
 
 
 def is_chapter_heading(paragraph: str) -> bool:
@@ -92,9 +89,7 @@ def is_metadata(paragraph: str) -> bool:
     return False
 
 
-def is_valid_narrative_paragraph(
-    paragraph: str, min_words: int = MIN_PARAGRAPH_WORDS
-) -> bool:
+def is_valid_narrative_paragraph(paragraph: str, min_words: int = 15) -> bool:
     """
     Check if a paragraph contains valid narrative content.
 
@@ -122,9 +117,7 @@ def is_valid_narrative_paragraph(
     return True
 
 
-def filter_valid_paragraphs(
-    paragraphs: list[str], min_words: int = MIN_PARAGRAPH_WORDS
-) -> list[str]:
+def filter_valid_paragraphs(paragraphs: list[str], min_words: int) -> list[str]:
     """Filter paragraphs to only include valid narrative content."""
     return [p for p in paragraphs if is_valid_narrative_paragraph(p, min_words)]
 
@@ -135,9 +128,9 @@ def count_words(text: str) -> int:
 
 
 def find_chunks_with_summary(
+    config: NCPConfig,
     paragraphs: list[str],
     encoder: tiktoken.Encoding,
-    config: ChunkConfig | None = None,
 ) -> list[tuple[str, str, str]]:
     """
     Find (prefix, summary_content, next_chunk) tuples where:
@@ -149,8 +142,6 @@ def find_chunks_with_summary(
 
     Returns a list of (prefix, summary_content, next_chunk) tuples.
     """
-    if config is None:
-        config = ChunkConfig()
 
     # First filter out invalid paragraphs
     valid_paragraphs = filter_valid_paragraphs(paragraphs, config.min_paragraph_words)
@@ -270,6 +261,7 @@ class GutenbergSummaryContinuation(BaseTaskV1):
     def __init__(self, run_mode: RunMode) -> None:
         super().__init__(run_mode)
         self.encoder = tiktoken.get_encoding("o200k_base")
+        self.config = NCPConfig()
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         books_pl = pl.read_parquet(
@@ -289,7 +281,7 @@ class GutenbergSummaryContinuation(BaseTaskV1):
         }
 
         # Find chunks: short prefix, longer summary_content, and next_chunk
-        chunk_tuples = find_chunks_with_summary(paragraphs, self.encoder)
+        chunk_tuples = find_chunks_with_summary(self.config, paragraphs, self.encoder)
 
         if not chunk_tuples:
             logger.warning(f"No valid chunks found for {metadata['title']}")
@@ -344,7 +336,11 @@ class GutenbergSummaryContinuation(BaseTaskV1):
     ) -> list[dict]:
         try:
             summary_convs = self.format_input_conversation(input_rows)
-            completions = await generation_wrapper.generate(summary_convs)
+            completions = []
+            if self.config.summarize:
+                completions = await generation_wrapper.generate(summary_convs)
+            else:
+                completions = ["" * len(input_rows)]
             return self.format_output_rows(completions, input_rows)
         except TimeoutError:
             logger.error("Timeout error processing batch")

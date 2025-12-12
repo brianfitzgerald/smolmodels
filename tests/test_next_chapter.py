@@ -4,7 +4,7 @@ import tiktoken
 import pytest
 
 from synthetic_data.tasks.next_chapter import (
-    ChunkConfig,
+    NCPConfig,
     is_chapter_heading,
     is_metadata,
     is_valid_narrative_paragraph,
@@ -189,7 +189,7 @@ class TestFindChunksWithSummary:
             "When morning came again, the garden was transformed by the rain, with droplets sparkling on every leaf and petal.",
             "Elizabeth decided to take another walk, this time carrying an umbrella just in case the weather turned again unexpectedly.",
         ]
-        config = ChunkConfig(
+        config = NCPConfig(
             max_summary_tokens=100,  # Small limit to force split (each para ~25 tokens)
             max_prefix_tokens=50,
             min_next_chunk_tokens=25,
@@ -216,7 +216,7 @@ class TestFindChunksWithSummary:
             "By the time she reached the house, the first drops were already falling. She hurried inside just as the storm broke.",
             "The evening passed quietly as Elizabeth sat by the fire, reading her favorite novel and sipping tea from a delicate china cup.",
         ]
-        config = ChunkConfig(
+        config = NCPConfig(
             max_summary_tokens=100,  # Small limit to force split
             max_prefix_tokens=50,
             min_next_chunk_tokens=25,
@@ -262,7 +262,7 @@ class TestFindChunksWithSummary:
         long_para = " ".join(["word"] * 500)
         paragraphs = [long_para, long_para, long_para]
 
-        config = ChunkConfig(
+        config = NCPConfig(
             max_summary_tokens=100,  # Very small limit
             max_prefix_tokens=50,
             min_next_chunk_tokens=20,
@@ -286,7 +286,7 @@ class TestFindChunksWithSummary:
             "When morning came again, the garden was transformed by the rain, with droplets sparkling on every leaf and petal.",
             "Elizabeth decided to take another walk, this time carrying an umbrella just in case the weather turned again unexpectedly.",
         ]
-        config = ChunkConfig(
+        config = NCPConfig(
             max_summary_tokens=100,  # Small limit to force split
             max_prefix_tokens=50,
             min_next_chunk_tokens=25,
