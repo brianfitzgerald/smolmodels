@@ -28,13 +28,25 @@
             "program": "evaluate.py",
         },
         {
-            "name": "Generate",
+            "name": "Generate - Gutenberg NCP",
             "type": "debugpy",
             "request": "launch",
             "program": "generate.py",
             "args": [
                 "--task_name",
                 "gutenberg_summary_continuation",
+                "--batch_size",
+                "4"
+            ],
+        },
+        {
+            "name": "Generate - Roleplaying Game",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "generate.py",
+            "args": [
+                "--task_name",
+                "roleplaying_game",
                 "--batch_size",
                 "4"
             ],

@@ -3,7 +3,7 @@ from jinja2 import Template
 from loguru import logger
 
 from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
-from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
+from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
     ROLEPLAYING_PROMPT,

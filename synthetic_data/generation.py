@@ -387,6 +387,7 @@ GenerationRole = Literal["generation", "followup", "parameter"]
 
 RemoteModel = Literal[
     "claude-4-sonnet",
+    "claude-4-5-sonnet",
     "claude-3-5-haiku",
     "qwen-qwq",
     "deepseek-v3",
@@ -437,6 +438,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "claude-4-sonnet": RemoteModelChoice(
         AnthropicGenerationWrapper,
         GenWrapperArgs(max_rps=100, model_id="claude-sonnet-4-20250514"),
+    ),
+    "claude-4-5-sonnet": RemoteModelChoice(
+        AnthropicGenerationWrapper,
+        GenWrapperArgs(max_rps=100, model_id="claude-sonnet-4-5-20250929"),
     ),
     "claude-3-5-haiku": RemoteModelChoice(
         AnthropicGenerationWrapper,
