@@ -441,6 +441,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return True
 
     def get_output_row(self, episode: RPGEpisode) -> list[dict]:
+        # Use None for empty dice_rolls to avoid schema inference issues
+        dice_rolls = episode.dice_rolls if episode.dice_rolls else None
         return [
             {
                 "conversation": episode.conversation,
@@ -452,6 +454,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "followup_model": self.generation_model_names["followup"],
                 "parameter_model": self.generation_model_names["parameter"],
                 "num_turns": episode.step_count,
-                "dice_rolls": episode.dice_rolls,
+                "dice_rolls": dice_rolls,
             }
         ]
