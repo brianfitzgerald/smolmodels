@@ -6,7 +6,10 @@
       "Bash(uv pip install:*)",
       "Bash(ruff check:*)",
       "Bash(pyright:*)",
-      "Bash(ruff format:*)"
+      "Bash(ruff format:*)",
+      "Bash(python generate.py:*)",
+      "Bash(LOG_LEVEL=DEBUG python:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

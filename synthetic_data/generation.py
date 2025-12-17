@@ -195,6 +195,12 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     for result in results
                     if result.choices[0].message.content is not None
                 ]
+                # Prepend prefill to completions for consistency with Anthropic behavior
+                # TODO double check this
+                if args.prefill:
+                    completions = [
+                        args.prefill + completion for completion in completions
+                    ]
                 return completions
             except LengthFinishReasonError as e:
                 logger.error(f"Max length error: {e}")
@@ -294,7 +300,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     model=self.gen_wrapper_args.model_id,
                     messages=conversation,
                     system=system_msg,
-                    temperature=args.temperature,
+                    temperature=args.temperature
+                    if args.temperature is not None
+                    else ANTHROPIC_NOT_GIVEN,
                     max_tokens=args.max_tokens,
                 )
                 completion_requests.append(request)
