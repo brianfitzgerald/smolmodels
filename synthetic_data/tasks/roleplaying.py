@@ -1,4 +1,5 @@
 import random
+import re
 from typing import TypedDict
 
 from datasets import Dataset
@@ -21,6 +22,74 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
+
+# Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
+DICE_PATTERN = re.compile(r"\b(\d*)d(\d+)([+-]\d+)?\b", re.IGNORECASE)
+
+
+def roll_dice(
+    num_dice: int, num_sides: int, modifier: int = 0
+) -> tuple[list[int], int]:
+    """Roll dice and return individual rolls and total."""
+    rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
+    total = sum(rolls) + modifier
+    return rolls, total
+
+
+def parse_and_roll_dice(text: str) -> list[dict]:
+    """Find all dice notation in text and roll them.
+
+    Returns a list of roll results with notation, rolls, and total.
+    """
+    results = []
+    for match in DICE_PATTERN.finditer(text):
+        num_dice = int(match.group(1)) if match.group(1) else 1
+        num_sides = int(match.group(2))
+        modifier = int(match.group(3)) if match.group(3) else 0
+
+        rolls, total = roll_dice(num_dice, num_sides, modifier)
+
+        notation = f"{num_dice}d{num_sides}"
+        if modifier > 0:
+            notation += f"+{modifier}"
+        elif modifier < 0:
+            notation += str(modifier)
+
+        results.append(
+            {
+                "notation": notation,
+                "rolls": rolls,
+                "modifier": modifier,
+                "total": total,
+            }
+        )
+    return results
+
+
+def format_dice_results(results: list[dict]) -> str:
+    """Format dice roll results as a string."""
+    if not results:
+        return ""
+
+    parts = []
+    for r in results:
+        rolls_str = ", ".join(str(x) for x in r["rolls"])
+        if r["modifier"] != 0:
+            mod_str = (
+                f" + {r['modifier']}"
+                if r["modifier"] > 0
+                else f" - {abs(r['modifier'])}"
+            )
+            parts.append(
+                f"[{r['notation']}: rolled {rolls_str}{mod_str} = {r['total']}]"
+            )
+        else:
+            if len(r["rolls"]) == 1:
+                parts.append(f"[{r['notation']}: {r['total']}]")
+            else:
+                parts.append(f"[{r['notation']}: rolled {rolls_str} = {r['total']}]")
+
+    return "\n".join(parts)
 
 
 async def generate_with_retry(
@@ -58,6 +127,7 @@ class RPGEpisode(BaseModel):
     parameters_generated: bool = False
     scenario_generated: bool = False
     conversation: Conversation = Field(default_factory=list)
+    dice_rolls: list[dict] = Field(default_factory=list)  # Track all dice rolls
     run_metadata: dict = Field(default_factory=dict)
     seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
 
@@ -83,10 +153,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         run_mode: RunMode,
         max_user_responses: int = 10,
         input_prompt: str = "A mysterious forest adventure",
+        num_episodes: int = 100,
     ):
         super().__init__(run_mode)
         self.max_user_responses = max_user_responses
         self.input_prompt = input_prompt
+        self.num_episodes = num_episodes
 
         gen_model: RemoteModel = (
             "claude-3-5-haiku" if USE_DEV_MODELS else "claude-4-5-sonnet"
@@ -105,8 +177,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             f"Loading custom dataset for roleplaying game with prompt: {self.input_prompt}"
         )
         # Create dummy data for the roleplaying game
-        dummy_data = [{"prompt": self.input_prompt} for _ in range(10)]  # 10 episodes
-        logger.info(f"Created {len(dummy_data)} dummy episodes")
+        dummy_data = [{"prompt": self.input_prompt} for _ in range(self.num_episodes)]
+        logger.info(f"Created {len(dummy_data)} episodes")
         return Dataset.from_list(dummy_data)
 
     async def start_episode(self, sample: None) -> RPGEpisode:
@@ -143,7 +215,21 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Step 1+: Generate turn-by-turn conversation
         if episode.step_count < self.max_user_responses:
-            await self._generate_turn(episode, self.generation_wrappers["followup"])
+            success = await self._generate_turn(
+                episode, self.generation_wrappers["followup"]
+            )
+            if not success:
+                # If we have at least 1 user action, finish the sample with what we have
+                if self._has_user_action(episode):
+                    logger.warning(
+                        f"Turn generation failed at step {episode.step_count + 1}, "
+                        f"finishing episode with {episode.step_count} turns"
+                    )
+                    return episode  # Return partial episode
+                else:
+                    raise ValueError(
+                        "Failed to generate turn before any user actions were collected"
+                    )
             episode.step_count += 1
             return None  # Still in progress
 
@@ -233,6 +319,21 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         opening_message = parsed_tags["dm_narration"]
         if "npc_dialogue" in parsed_tags:
             opening_message += f"\n\n{parsed_tags['npc_dialogue']}"
+
+        # Check for dice rolls in the opening narration
+        dice_results = parse_and_roll_dice(opening_message)
+        if dice_results:
+            for result in dice_results:
+                episode.dice_rolls.append(
+                    {
+                        "turn": 0,
+                        **result,
+                    }
+                )
+            dice_str = format_dice_results(dice_results)
+            logger.info(f"Dice rolled in opening: {dice_str}")
+            opening_message += f"\n\n{dice_str}"
+
         episode.conversation.append(
             {
                 "role": "assistant",
@@ -241,10 +342,17 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         logger.debug(f"Scenario:\n{episode.scenario_tags}")
 
+    def _has_user_action(self, episode: RPGEpisode) -> bool:
+        """Check if the episode has at least one user action."""
+        return any(m["role"] == "user" for m in episode.conversation)
+
     async def _generate_turn(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
-    ):
-        """Generate a single turn of conversation (user response + assistant response)"""
+    ) -> bool:
+        """Generate a single turn of conversation (user response + assistant response).
+
+        Returns True if the turn was generated successfully, False if generation failed.
+        """
 
         assert episode.scenario_tags is not None
 
@@ -275,7 +383,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             required_tags=["user_action"],
         )
         if user_response_tags is None:
-            raise ValueError("Failed to generate user response")
+            logger.warning("Failed to generate user response")
+            return False
         user_action_content = user_response_tags["user_action"]
 
         episode.conversation.append({"role": "user", "content": user_action_content})
@@ -304,26 +413,45 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             required_tags=["dm_narration"],
         )
         if parsed_tags is None:
-            raise ValueError("Failed to generate assistant response")
+            logger.warning("Failed to generate assistant response")
+            return False
         formatted_dm_response = parsed_tags["dm_narration"]
+
+        # Check for dice rolls in the DM response
+        dice_results = parse_and_roll_dice(formatted_dm_response)
+        if dice_results:
+            # Track the rolls
+            for result in dice_results:
+                episode.dice_rolls.append(
+                    {
+                        "turn": episode.step_count + 1,
+                        **result,
+                    }
+                )
+            # Format and append dice results to the response
+            dice_str = format_dice_results(dice_results)
+            logger.info(f"Dice rolled: {dice_str}")
+            formatted_dm_response += f"\n\n{dice_str}"
 
         episode.conversation.append(
             {"role": "assistant", "content": formatted_dm_response}
         )
 
         logger.info(f"Generated turn {episode.step_count + 1}")
+        return True
 
     def get_output_row(self, episode: RPGEpisode) -> list[dict]:
-        scenario = episode.scenario or "No scenario generated"
         return [
             {
+                "conversation": episode.conversation,
                 "game_setting": episode.game_setting or "No setting generated",
                 "player_character": episode.player_character
                 or "No characters generated",
-                "scenario": scenario,
                 "original_input": {"prompt": self.input_prompt},
                 "generation_model": self.generation_model_names["generation"],
                 "followup_model": self.generation_model_names["followup"],
                 "parameter_model": self.generation_model_names["parameter"],
+                "num_turns": episode.step_count,
+                "dice_rolls": episode.dice_rolls,
             }
         ]

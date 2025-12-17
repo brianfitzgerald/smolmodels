@@ -9,7 +9,8 @@
       "Bash(ruff format:*)",
       "Bash(python generate.py:*)",
       "Bash(LOG_LEVEL=DEBUG python:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
