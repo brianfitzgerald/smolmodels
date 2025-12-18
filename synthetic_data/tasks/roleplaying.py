@@ -1,11 +1,11 @@
 import random
 import re
+from dataclasses import dataclass, field
 from typing import TypedDict
 
 from datasets import Dataset
 from jinja2 import Template
 from loguru import logger
-from pydantic import BaseModel, Field
 
 from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
 from synthetic_data.tasks import BaseTask, RunMode
@@ -118,7 +118,8 @@ class ScenarioTags(TypedDict, total=False):
     npc_dialogue: str | None
 
 
-class RPGEpisode(BaseModel):
+@dataclass
+class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
@@ -126,10 +127,10 @@ class RPGEpisode(BaseModel):
     scenario_tags: ScenarioTags | None = None
     parameters_generated: bool = False
     scenario_generated: bool = False
-    conversation: Conversation = Field(default_factory=list)
-    dice_rolls: list[dict] = Field(default_factory=list)  # Track all dice rolls
-    run_metadata: dict = Field(default_factory=dict)
-    seed: int = Field(default_factory=lambda: random.randint(0, 2**32))
+    conversation: Conversation = field(default_factory=list)
+    dice_rolls: list[dict] = field(default_factory=list)  # Track all dice rolls
+    run_metadata: dict = field(default_factory=dict)
+    seed: int = random.randint(0, 2**32)
 
 
 USE_DEV_MODELS = True
@@ -153,7 +154,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         run_mode: RunMode,
         max_user_responses: int = 10,
         input_prompt: str = "A mysterious forest adventure",
-        num_episodes: int = 100,
+        num_episodes: int = 1000,
     ):
         super().__init__(run_mode)
         self.max_user_responses = max_user_responses
@@ -161,7 +162,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.num_episodes = num_episodes
 
         gen_model: RemoteModel = (
-            "claude-3-5-haiku" if USE_DEV_MODELS else "claude-4-5-sonnet"
+            "claude-4-5-haiku" if USE_DEV_MODELS else "claude-4-5-sonnet"
         )
 
         self._add_generation_wrapper("generation", gen_model)
@@ -266,7 +267,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.debug(f"\nPlayer character:\n{episode.player_character}")
 
     def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
-        template = Template(ROLEPLAYING_PROMPT)
+        template: Template = Template(ROLEPLAYING_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
             PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
@@ -359,7 +360,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Flip roles in the conversation: user becomes assistant and vice versa
         flipped_conversation = self._flip_conversation_roles(episode.conversation)
 
-        template = Template(USER_ACTION_PROMPT)
+        template: Template = Template(USER_ACTION_PROMPT)
         formatted_user_action_prompt = template.render(
             GAME_SETTING=episode.game_setting,
             PLAYER_CHARACTER=episode.player_character,

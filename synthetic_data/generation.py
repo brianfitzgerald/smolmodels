@@ -3,17 +3,18 @@ import os
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from typing import Any, Dict, Literal, Optional, cast
+from typing import Dict, Literal, Optional, cast
 
 import google.genai as genai
 import google.genai.types
+from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import AnthropicError, AsyncAnthropic
+from anthropic import NotGiven as AnthropicNotGiven
 from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
-from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, NotGiven, OpenAI
-from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN, NotGiven as AnthropicNotGiven
+from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from pydantic import BaseModel
 
@@ -396,6 +397,7 @@ GenerationRole = Literal["generation", "followup", "parameter"]
 RemoteModel = Literal[
     "claude-4-sonnet",
     "claude-4-5-sonnet",
+    "claude-4-5-haiku",
     "claude-3-5-haiku",
     "qwen-qwq",
     "deepseek-v3",
@@ -454,6 +456,10 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
     "claude-3-5-haiku": RemoteModelChoice(
         AnthropicGenerationWrapper,
         GenWrapperArgs(max_rps=100, model_id="claude-3-5-haiku-latest"),
+    ),
+    "claude-4-5-haiku": RemoteModelChoice(
+        AnthropicGenerationWrapper,
+        GenWrapperArgs(max_rps=100, model_id="claude-haiku-4-5-20251001"),
     ),
     "gpt-4o-mini": RemoteModelChoice(
         OpenAIGenerationWrapper,

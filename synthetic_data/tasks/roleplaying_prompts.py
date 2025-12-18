@@ -115,6 +115,12 @@ Here is the information about the player character:
 </player_character>
 
 Generate a realistic player response that a human player might make. This should be a natural, in-character response that advances the story or explores the scenario.
+Keep the response short and concise. Respond in first person.
+
+Example response:
+<user_action>
+I approach the dragon and ask if it would like to trade for the ruby necklace.
+</user_action>
 
 Your response should be in the following format:
 <user_action>
