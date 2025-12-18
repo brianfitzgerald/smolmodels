@@ -123,6 +123,7 @@ class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
+    input_prompt: str | None = None
     scenario: str | None = None
     scenario_tags: ScenarioTags | None = None
     parameters_generated: bool = False
@@ -153,12 +154,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self,
         run_mode: RunMode,
         max_user_responses: int = 10,
-        input_prompt: str = "A mysterious forest adventure",
         num_episodes: int = 1000,
     ):
         super().__init__(run_mode)
         self.max_user_responses = max_user_responses
-        self.input_prompt = input_prompt
         self.num_episodes = num_episodes
 
         gen_model: RemoteModel = (
@@ -174,11 +173,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         Custom dataset loading logic for roleplaying game.
         Since this is a synthetic task, we create dummy data.
         """
-        logger.info(
-            f"Loading custom dataset for roleplaying game with prompt: {self.input_prompt}"
-        )
+        logger.info("Loading custom dataset for roleplaying game")
         # Create dummy data for the roleplaying game
-        dummy_data = [{"prompt": self.input_prompt} for _ in range(self.num_episodes)]
+        dummy_data = [
+            {
+                "input_prompt": "A mysterious forest adventure",
+                "seed": random.randint(0, 2**32),
+            }
+            for _ in range(self.num_episodes)
+        ]
         logger.info(f"Created {len(dummy_data)} episodes")
         return Dataset.from_list(dummy_data)
 
@@ -191,13 +194,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "followup_model": self.generation_wrappers["followup"].provider_name,
             "parameter_model": self.generation_wrappers["parameter"].provider_name,
             "max_user_responses": self.max_user_responses,
-            "input_prompt": self.input_prompt,
             "seed": seed,
             "parameters_generated": False,
             "scenario_generated": False,
             "user_responses_generated": False,
         }
-        logger.info(f"Start episode with prompt: {self.input_prompt}, seed: {seed}")
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
@@ -246,7 +247,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             {
                 "role": "user",
-                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {self.input_prompt}\n\nPlease provide:\n1. A detailed GAME_SETTING (2-3 paragraphs)\n2. PLAYER_CHARACTER information (1-2 paragraphs describing the main character)",
+                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {episode.input_prompt}\n\nPlease provide:\n1. A detailed GAME_SETTING (2-3 paragraphs)\n2. PLAYER_CHARACTER information (1-2 paragraphs describing the main character)",
             },
         ]
 
@@ -450,7 +451,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "game_setting": episode.game_setting or "No setting generated",
                 "player_character": episode.player_character
                 or "No characters generated",
-                "original_input": {"prompt": self.input_prompt},
                 "generation_model": self.generation_model_names["generation"],
                 "followup_model": self.generation_model_names["followup"],
                 "parameter_model": self.generation_model_names["parameter"],
