@@ -336,9 +336,10 @@ class GutenbergSummaryContinuation(BaseTaskV1):
     ) -> list[dict]:
         try:
             summary_convs = self.format_input_conversation(input_rows)
-            completions = []
+            completions: list[str] = []
             if self.config.summarize:
-                completions = await generation_wrapper.generate(summary_convs)
+                results = await generation_wrapper.generate(summary_convs)
+                completions = [r.content or "" for r in results]
             else:
                 completions = ["" * len(input_rows)]
             return self.format_output_rows(completions, input_rows)

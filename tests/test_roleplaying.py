@@ -21,7 +21,6 @@ from synthetic_data.tasks.roleplaying_tools import (
     PLAYER_TOOLS,
     ALL_TOOLS,
     ToolResult,
-    convert_to_openai_format,
     parse_dice_notation,
     execute_roll_dice,
     execute_random_choice,
@@ -50,13 +49,15 @@ def make_tool_call(id: str, name: str, arguments: dict) -> ChatCompletionMessage
 
 
 class TestToolSchemas:
-    """Test that tool schemas are properly defined."""
+    """Test that tool schemas are properly defined in OpenAI format."""
 
     def test_roll_dice_schema(self):
-        assert ROLL_DICE_TOOL["name"] == "roll_dice"
-        assert "description" in ROLL_DICE_TOOL
-        assert "input_schema" in ROLL_DICE_TOOL
-        schema = ROLL_DICE_TOOL["input_schema"]
+        assert ROLL_DICE_TOOL["type"] == "function"
+        func = ROLL_DICE_TOOL["function"]
+        assert func["name"] == "roll_dice"
+        assert "description" in func
+        assert "parameters" in func
+        schema = func["parameters"]
         assert schema["type"] == "object"
         assert "notation" in schema["properties"]
         assert "reason" in schema["properties"]
@@ -64,20 +65,23 @@ class TestToolSchemas:
         assert "reason" in schema["required"]
 
     def test_random_choice_schema(self):
-        assert RANDOM_CHOICE_TOOL["name"] == "random_choice"
-        schema = RANDOM_CHOICE_TOOL["input_schema"]
+        func = RANDOM_CHOICE_TOOL["function"]
+        assert func["name"] == "random_choice"
+        schema = func["parameters"]
         assert "options" in schema["properties"]
         assert schema["properties"]["options"]["type"] == "array"
 
     def test_present_choices_schema(self):
-        assert PRESENT_CHOICES_TOOL["name"] == "present_choices"
-        schema = PRESENT_CHOICES_TOOL["input_schema"]
+        func = PRESENT_CHOICES_TOOL["function"]
+        assert func["name"] == "present_choices"
+        schema = func["parameters"]
         assert "prompt" in schema["properties"]
         assert "choices" in schema["properties"]
 
     def test_speak_schema(self):
-        assert SPEAK_TOOL["name"] == "speak"
-        schema = SPEAK_TOOL["input_schema"]
+        func = SPEAK_TOOL["function"]
+        assert func["name"] == "speak"
+        schema = func["parameters"]
         assert "character" in schema["properties"]
         assert "message" in schema["properties"]
         assert "tone" in schema["properties"]
@@ -86,8 +90,9 @@ class TestToolSchemas:
         assert "tone" not in schema["required"]
 
     def test_action_schema(self):
-        assert ACTION_TOOL["name"] == "action"
-        schema = ACTION_TOOL["input_schema"]
+        func = ACTION_TOOL["function"]
+        assert func["name"] == "action"
+        schema = func["parameters"]
         assert "description" in schema["properties"]
         assert "target" in schema["properties"]
         assert "description" in schema["required"]
@@ -107,27 +112,15 @@ class TestToolSchemas:
 
         assert len(ALL_TOOLS) == 5
 
-
-class TestOpenAIFormatConversion:
-    """Test conversion from Anthropic to OpenAI tool format."""
-
-    def test_convert_single_tool(self):
-        result = convert_to_openai_format([ROLL_DICE_TOOL])
-        assert len(result) == 1
-        tool = result[0]
-        assert tool["type"] == "function"
-        assert tool["function"]["name"] == "roll_dice"
-        assert tool["function"]["description"] == ROLL_DICE_TOOL["description"]
-        assert tool["function"]["parameters"] == ROLL_DICE_TOOL["input_schema"]
-
-    def test_convert_multiple_tools(self):
-        result = convert_to_openai_format(DM_TOOLS)
-        assert len(result) == 4
-        names = [t["function"]["name"] for t in result]
-        assert "roll_dice" in names
-        assert "random_choice" in names
-        assert "present_choices" in names
-        assert "speak" in names
+    def test_openai_format_structure(self):
+        """Verify all tools have correct OpenAI format structure."""
+        for tool in ALL_TOOLS:
+            assert tool["type"] == "function"
+            assert "function" in tool
+            func = tool["function"]
+            assert "name" in func
+            assert "description" in func
+            assert "parameters" in func
 
 
 class TestDiceNotationParsing:
@@ -363,7 +356,7 @@ class TestGenerateWithToolsLoop:
         """Test generation that returns content without tool calls."""
         async def _test():
             mock_wrapper = MagicMock()
-            mock_wrapper.generate_with_tools = AsyncMock(
+            mock_wrapper.generate = AsyncMock(
                 return_value=[
                     GenerationResult(
                         content="The adventurer stands at the crossroads.",
@@ -381,7 +374,7 @@ class TestGenerateWithToolsLoop:
             assert result.content == "The adventurer stands at the crossroads."
             assert result.tool_calls == []
             assert tool_results == []
-            mock_wrapper.generate_with_tools.assert_called_once()
+            mock_wrapper.generate.assert_called_once()
 
         asyncio.run(_test())
 
@@ -410,7 +403,7 @@ class TestGenerateWithToolsLoop:
                 stop_reason="end_turn",
             )
 
-            mock_wrapper.generate_with_tools = AsyncMock(
+            mock_wrapper.generate = AsyncMock(
                 side_effect=[[first_response], [second_response]]
             )
 
@@ -423,7 +416,7 @@ class TestGenerateWithToolsLoop:
             assert len(tool_results) == 1
             assert tool_results[0].tool_call_id == "call_123"
             assert "rolls" in tool_results[0].content
-            assert mock_wrapper.generate_with_tools.call_count == 2
+            assert mock_wrapper.generate.call_count == 2
 
         asyncio.run(_test())
 
@@ -457,7 +450,7 @@ class TestGenerateWithToolsLoop:
                 )],
             ]
 
-            mock_wrapper.generate_with_tools = AsyncMock(side_effect=responses)
+            mock_wrapper.generate = AsyncMock(side_effect=responses)
 
             conversation = [{"role": "user", "content": "I approach the gate."}]
             result, tool_results = await generate_with_tools_loop(
@@ -477,7 +470,7 @@ class TestGenerateWithToolsLoop:
             mock_wrapper = MagicMock()
 
             # Always return tool calls (never stops)
-            mock_wrapper.generate_with_tools = AsyncMock(
+            mock_wrapper.generate = AsyncMock(
                 return_value=[
                     GenerationResult(
                         content=None,
@@ -495,7 +488,7 @@ class TestGenerateWithToolsLoop:
             )
 
             # Should stop after 3 iterations
-            assert mock_wrapper.generate_with_tools.call_count == 3
+            assert mock_wrapper.generate.call_count == 3
             assert len(tool_results) == 3
 
         asyncio.run(_test())
@@ -537,7 +530,8 @@ class TestRoleplayingTaskIntegration:
             # Mock the generate method for parameter generation
             mock_task.generation_wrappers["parameter"].generate = AsyncMock(
                 return_value=[
-                    """Here are the game parameters:
+                    GenerationResult(
+                        content="""Here are the game parameters:
 
 <game_setting>
 A dark and mysterious forest filled with ancient magic. The trees whisper secrets
@@ -549,7 +543,10 @@ Elara, a young elven ranger with emerald eyes and silver hair. She carries a bow
 crafted from the heartwood of the World Tree and seeks to uncover the truth about
 her missing parents.
 </player_character>
-"""
+""",
+                        tool_calls=[],
+                        stop_reason="end_turn",
+                    )
                 ]
             )
 
@@ -571,8 +568,8 @@ her missing parents.
                 player_character="Elara, an elven ranger.",
             )
 
-            # Mock generate_with_tools to return a scenario with tool usage
-            mock_task.generation_wrappers["generation"].generate_with_tools = AsyncMock(
+            # Mock generate to return a scenario with tool usage
+            mock_task.generation_wrappers["generation"].generate = AsyncMock(
                 side_effect=[
                     # First call: DM uses speak tool
                     [GenerationResult(
@@ -601,9 +598,11 @@ her missing parents.
 
             await mock_task._generate_scenario(episode, mock_task.generation_wrappers["generation"])
 
-            assert len(episode.conversation) == 1
+            # Conversation now includes assistant message + tool result messages
+            assert len(episode.conversation) == 2  # assistant + 1 tool result
             assert episode.conversation[0]["role"] == "assistant"
             assert "forest" in episode.conversation[0]["content"].lower()
+            assert episode.conversation[1]["role"] == "tool"
             assert len(episode.tool_calls_history) == 1
             assert episode.tool_calls_history[0]["turn"] == 0
 
@@ -623,7 +622,7 @@ her missing parents.
             )
 
             # Mock player action generation - use side_effect so loop terminates after tool execution
-            mock_task.generation_wrappers["followup"].generate_with_tools = AsyncMock(
+            mock_task.generation_wrappers["followup"].generate = AsyncMock(
                 side_effect=[
                     # First call: player uses action tool
                     [GenerationResult(
@@ -647,7 +646,7 @@ her missing parents.
             )
 
             # Mock DM response generation
-            mock_task.generation_wrappers["generation"].generate_with_tools = AsyncMock(
+            mock_task.generation_wrappers["generation"].generate = AsyncMock(
                 side_effect=[
                     # DM rolls perception
                     [GenerationResult(
@@ -693,11 +692,16 @@ her missing parents.
             )
 
             assert success is True
-            assert len(episode.conversation) == 3  # Original + user + assistant
+            # Conversation includes:
+            # Original + user + assistant + dm_tool_result_1 + dm_tool_result_2
+            # (User tool results are NOT in conversation - only in tool_calls_history)
+            assert len(episode.conversation) == 5
             assert episode.conversation[1]["role"] == "user"
             assert episode.conversation[2]["role"] == "assistant"
+            assert episode.conversation[3]["role"] == "tool"  # DM's first tool result
+            assert episode.conversation[4]["role"] == "tool"  # DM's second tool result
 
-            # Check tool calls were recorded
+            # Check tool calls were recorded (player tools still tracked in history)
             player_tools = [t for t in episode.tool_calls_history if t.get("role") == "player"]
             dm_tools = [t for t in episode.tool_calls_history if t.get("role") == "dm"]
             assert len(player_tools) == 1
@@ -713,12 +717,16 @@ her missing parents.
             # Mock parameter generation
             mock_task.generation_wrappers["parameter"].generate = AsyncMock(
                 return_value=[
-                    "<game_setting>A haunted castle.</game_setting>\n<player_character>A brave knight.</player_character>"
+                    GenerationResult(
+                        content="<game_setting>A haunted castle.</game_setting>\n<player_character>A brave knight.</player_character>",
+                        tool_calls=[],
+                        stop_reason="end_turn",
+                    )
                 ]
             )
 
             # Mock scenario generation
-            mock_task.generation_wrappers["generation"].generate_with_tools = AsyncMock(
+            mock_task.generation_wrappers["generation"].generate = AsyncMock(
                 return_value=[
                     GenerationResult(
                         content="You stand before the castle gates.",
@@ -729,7 +737,7 @@ her missing parents.
             )
 
             # Mock turn generation (player + DM)
-            mock_task.generation_wrappers["followup"].generate_with_tools = AsyncMock(
+            mock_task.generation_wrappers["followup"].generate = AsyncMock(
                 return_value=[
                     GenerationResult(
                         content="I approach the gates.",
@@ -797,8 +805,12 @@ her missing parents.
         assert row["game_setting"] == "A magical realm."
         assert row["player_character"] == "A wizard named Merlin."
         assert row["num_turns"] == 3
-        assert len(row["conversation"]) == 3
-        assert len(row["tool_calls_history"]) == 2
+        # conversation and tool_calls_history are now JSON strings
+        import json
+        conversation = json.loads(row["conversation"])
+        tool_calls_history = json.loads(row["tool_calls_history"])
+        assert len(conversation) == 3
+        assert len(tool_calls_history) == 2
 
 
 class TestToolExecutionInContext:

@@ -53,6 +53,11 @@ modal deploy modal_vllm.py
 python util_scripts.py test_openai_api
 ```
 
+### Generation
+
+```bash
+python generate.py --task_name roleplaying_game --batch_size 4
+```
 
 # Utils
 ```bash

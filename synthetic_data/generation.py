@@ -2,9 +2,8 @@ import asyncio
 import json
 import os
 import traceback
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from typing import Any, Dict, Literal, Optional, cast
+from typing import Any, Optional, cast
 
 import google.genai as genai
 import google.genai.types
@@ -15,159 +14,34 @@ from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
 from anthropic.types.text_block import TextBlock
 from anthropic.types.tool_use_block import ToolUseBlock
-from datasets import Dataset, concatenate_datasets
 from loguru import logger
 from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
+)
+from openai.types.chat.chat_completion_message_tool_call import (
     Function as ToolCallFunction,
 )
-from pydantic import BaseModel
 
+from synthetic_data.generation_utils import (
+    MAX_RETRIES,
+    GenerationArgs,
+    GenerationResult,
+    GenerationWrapper,
+    GenWrapperArgs,
+    RemoteModel,
+    convert_openai_to_anthropic_messages,
+)
 from synthetic_data.utils import (
     Conversation,
-    DatasetFormat,
     get_class_name,
 )
-
-SHAREGPT_TO_OPENAI_ROLE = {
-    "system": "system",
-    "human": "user",
-    "gpt": "assistant",
-}
-
-
-def save_output_dataset(
-    output_dataset: Dataset,
-    dataset_name: str,
-    new_dataset_rows: list[Dict],
-    format: DatasetFormat,
-    dataset_output_dir: str | None = None,
-):
-    dataset_new_rows = Dataset.from_list(new_dataset_rows)
-    concatted_dataset = concatenate_datasets([output_dataset, dataset_new_rows])
-    logger.info(
-        f"Saving {len(new_dataset_rows)} new rows to {dataset_name}, {len(concatted_dataset)} total."
-    )
-
-    if format == DatasetFormat.HF_DATASET:
-        concatted_dataset.push_to_hub(dataset_name)
-    elif format == DatasetFormat.PARQUET:
-        filename = f"{dataset_name}.parquet"
-        if dataset_output_dir is None:
-            raise ValueError(
-                f"dataset_output_dir is required for {DatasetFormat.PARQUET} format"
-            )
-        dataset_path = os.path.join(dataset_output_dir, filename)
-        logger.info(f"Saving to {dataset_path}")
-        concatted_dataset.to_parquet(dataset_path)
-    else:
-        raise ValueError(f"Unsupported output format: {format}")
-
-
-MAX_RETRIES = 10
-
-
-class GenerationArgs(BaseModel):
-    """
-    Arguments that can be overridden on a per-generation basis.
-    """
-
-    max_tokens: int = 4096
-    temperature: float | None = None
-    stop: list[str] | None = None
-    seed: Optional[int] = None
-    n_retries: int = MAX_RETRIES
-    prefill: str | None = None
-    thinking_budget: int | None = None
-    tools: list[dict[str, Any]] | None = None
-
-
-@dataclass
-class GenerationResult:
-    """Result from a generation call that may include tool calls."""
-
-    content: str | None
-    tool_calls: list[ChatCompletionMessageToolCall]
-    stop_reason: str
-
-
-class GenWrapperArgs(BaseModel):
-    """
-    Properties of a specific model.
-    """
-
-    model_id: Optional[str] = None
-    lora_name: Optional[str] = None
-    default_generation_args: GenerationArgs = GenerationArgs()
-    max_concurrent: int = 8
-    max_rps: float = 8.0
-    providers: list[str] | None = None
-    is_reasoning_model: bool = False
-    use_async_client: bool = True
-
-
-class GenerationWrapper(ABC):
-    """
-    Abstract method for various ways of generating data.
-    """
-
-    provider_name: str
-
-    def __init__(self, default_args: GenWrapperArgs) -> None:
-        super().__init__()
-        self.gen_wrapper_args = default_args
-
-    @abstractmethod
-    async def generate(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[str]:
-        """
-        Generate completions for the given conversations.
-        If args is provided, it will override the args in the wrapper.
-        """
-        pass
-
-    async def generate_with_tools(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[GenerationResult]:
-        """
-        Generate completions with tool calling support.
-        Returns structured GenerationResult objects that may contain tool calls.
-
-        Default implementation falls back to regular generate() without tool support.
-        Subclasses should override this for native tool calling.
-        """
-        results = await self.generate(conversations, args)
-        return [
-            GenerationResult(content=r, tool_calls=[], stop_reason="end_turn")
-            for r in results
-        ]
-
-    def set_max_concurrent(self, max_concurrent: int) -> None:
-        self.gen_wrapper_args.max_concurrent = max_concurrent
-
 
 MOCK_SNIPPET = """
 def solution(problem_input):
     return []
 """
-
-
-class MockGenerator(GenerationWrapper):
-    def __init__(self, _: GenWrapperArgs) -> None:
-        self.mock_completions = []
-
-    def set_mock_completions(self, completions: list[str]) -> None:
-        self.mock_completions = completions
-
-    async def generate(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[str]:
-        if self.mock_completions:
-            return self.mock_completions
-        return [MOCK_SNIPPET] * len(conversations)
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
@@ -194,72 +68,14 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
     async def generate(
         self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[str]:
-        self.n_retries = MAX_RETRIES
-        args = args or self.gen_wrapper_args.default_generation_args
-        while True:
-            completion_requests = []
-            for conversation in conversations:
-                temperature = args.temperature
-                if self.gen_wrapper_args.is_reasoning_model:
-                    temperature = NOT_GIVEN
-
-                # TODO re add structured output support
-                request = self.oai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=conversation,
-                    temperature=temperature,
-                    max_completion_tokens=args.max_tokens,
-                    extra_body=self.extra_body,
-                    seed=args.seed,
-                )
-                completion_requests.append(request)
-            try:
-                results: list[ChatCompletion] = await asyncio.gather(
-                    *completion_requests
-                )
-                if not results:
-                    logger.error(results)
-                    raise ValueError("No completions returned")
-                assert all(len(result.choices) > 0 for result in results), (
-                    "No completions returned"
-                )
-                completions = [
-                    result.choices[0].message.content
-                    for result in results
-                    if result.choices[0].message.content is not None
-                ]
-                # Prepend prefill to completions for consistency with Anthropic behavior
-                # TODO double check this
-                if args.prefill:
-                    completions = [
-                        args.prefill + completion for completion in completions
-                    ]
-                return completions
-            except LengthFinishReasonError as e:
-                logger.error(f"Max length error: {e}")
-                return []
-            except Exception as e:
-                logger.error(
-                    f"Error while generating: {e}, retries left: {self.n_retries}"
-                )
-                traceback.print_exc()
-                await asyncio.sleep(1)
-                self.n_retries -= 1
-                if self.n_retries <= 0:
-                    raise e
-
-    async def generate_with_tools(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
     ) -> list[GenerationResult]:
-        """Generate with native OpenAI tool calling support."""
+        self.n_retries = MAX_RETRIES
         args = args or self.gen_wrapper_args.default_generation_args
 
-        if not args.tools:
-            # Fall back to regular generate if no tools provided
-            return await super().generate_with_tools(conversations, args)
-
-        self.n_retries = MAX_RETRIES
+        # Convert tools to OpenAI format if provided
+        openai_tools = NOT_GIVEN
+        if args.tools:
+            openai_tools = args.tools
         while True:
             completion_requests = []
             for conversation in conversations:
@@ -267,27 +83,14 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 if self.gen_wrapper_args.is_reasoning_model:
                     temperature = NOT_GIVEN
 
-                # Convert tools to OpenAI format
-                openai_tools = [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": tool["name"],
-                            "description": tool["description"],
-                            "parameters": tool["input_schema"],
-                        },
-                    }
-                    for tool in args.tools
-                ]
-
                 request = self.oai_client.chat.completions.create(
                     model=self.model_name,
-                    messages=conversation,  # type: ignore
+                    messages=cast(Any, conversation),
                     temperature=temperature,
                     max_completion_tokens=args.max_tokens,
                     extra_body=self.extra_body,
                     seed=args.seed,
-                    tools=openai_tools,  # type: ignore
+                    tools=openai_tools,
                 )
                 completion_requests.append(request)
 
@@ -307,12 +110,18 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     choice = result.choices[0]
                     message = choice.message
                     content = message.content
+
                     # Filter to only include function tool calls (not custom tools)
                     # The OpenAI SDK returns a union type that includes custom tools
                     tool_calls: list[ChatCompletionMessageToolCall] = [
-                        tc for tc in (message.tool_calls or [])
-                        if hasattr(tc, "function") and tc.function is not None  # type: ignore[union-attr]
+                        tc
+                        for tc in (message.tool_calls or [])
+                        if hasattr(tc, "function") and tc.function is not None
                     ]
+
+                    # Prepend prefill to content for consistency with Anthropic behavior
+                    if args.prefill and content:
+                        content = args.prefill + content
 
                     generation_results.append(
                         GenerationResult(
@@ -329,7 +138,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 return []
             except Exception as e:
                 logger.error(
-                    f"Error while generating with tools: {e}, retries left: {self.n_retries}"
+                    f"Error while generating: {e}, retries left: {self.n_retries}"
                 )
                 traceback.print_exc()
                 await asyncio.sleep(1)
@@ -400,7 +209,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
     async def generate(
         self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[str]:
+    ) -> list[GenerationResult]:
         args = args or self.gen_wrapper_args.default_generation_args
         try:
             completion_requests = []
@@ -411,57 +220,31 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 system_msg: str | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
                 conversation = cast(list[MessageParam], conversation)
                 if conversation[0]["role"] == "system":
-                    system_msg = conversation[0]["content"]  # type: ignore
+                    system_msg = conversation[0]["content"]
                     conversation = conversation[1:]
+
+                # Convert OpenAI-style tool messages to Anthropic format
+                conversation = convert_openai_to_anthropic_messages(
+                    cast(list[dict[str, Any]], conversation)
+                )
+
                 if args.prefill:
                     conversation = [
                         *conversation,
                         {"role": "assistant", "content": args.prefill},
                     ]
-                request = self.client.messages.create(
-                    model=self.gen_wrapper_args.model_id,
-                    messages=conversation,
-                    system=system_msg,
-                    temperature=args.temperature
-                    if args.temperature is not None
-                    else ANTHROPIC_NOT_GIVEN,
-                    max_tokens=args.max_tokens,
-                )
-                completion_requests.append(request)
-            results: list[Message] = await asyncio.gather(*completion_requests)
-            completions = [
-                result.content[0].text  # type: ignore
-                for result in results
-                if result.content is not None
-            ]
-            if args.prefill:
-                completions = [args.prefill + completion for completion in completions]
-            return completions
-        except AnthropicError as e:
-            logger.error(f"Error while generating: {e}")
-            return []
 
-    async def generate_with_tools(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[GenerationResult]:
-        """Generate with native Anthropic tool calling support."""
-        args = args or self.gen_wrapper_args.default_generation_args
-
-        if not args.tools:
-            # Fall back to regular generate if no tools provided
-            return await super().generate_with_tools(conversations, args)
-
-        try:
-            completion_requests = []
-            for conversation in conversations:
-                assert self.gen_wrapper_args.model_id is not None, (
-                    "model_id is required for AnthropicGenerationWrapper"
-                )
-                system_msg: str | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
-                conversation = cast(list[MessageParam], conversation)
-                if conversation[0]["role"] == "system":
-                    system_msg = conversation[0]["content"]  # type: ignore
-                    conversation = conversation[1:]
+                # Convert tools from OpenAI format to Anthropic format if provided
+                anthropic_tools: list | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+                if args.tools:
+                    anthropic_tools = [
+                        {
+                            "name": tool["function"]["name"],
+                            "description": tool["function"].get("description", ""),
+                            "input_schema": tool["function"].get("parameters", {}),
+                        }
+                        for tool in args.tools
+                    ]
 
                 request = self.client.messages.create(
                     model=self.gen_wrapper_args.model_id,
@@ -471,7 +254,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     if args.temperature is not None
                     else ANTHROPIC_NOT_GIVEN,
                     max_tokens=args.max_tokens,
-                    tools=args.tools,  # type: ignore
+                    tools=anthropic_tools,
                 )
                 completion_requests.append(request)
 
@@ -498,6 +281,10 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             )
                         )
 
+                # Prepend prefill to content if provided
+                if args.prefill and content:
+                    content = args.prefill + content
+
                 generation_results.append(
                     GenerationResult(
                         content=content,
@@ -509,7 +296,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             return generation_results
 
         except AnthropicError as e:
-            logger.error(f"Error while generating with tools: {e}")
+            logger.error(f"Error while generating: {e}")
             return []
 
 
@@ -524,7 +311,7 @@ def _openai_conversation_to_gemini(conversation: Conversation):
     return [
         google.genai.types.Content(
             role=GEMINI_ROLE_MAP[message["role"]],
-            parts=[google.genai.types.Part.from_text(text=message["content"])],  # type: ignore
+            parts=[google.genai.types.Part.from_text(text=message["content"])],
         )
         for message in conversation
     ]
@@ -544,7 +331,7 @@ class GeminiWrapper(GenerationWrapper):
 
     async def generate(
         self, conversations: list[Conversation], args: GenerationArgs | None = None
-    ) -> list[str]:
+    ) -> list[GenerationResult]:
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -572,7 +359,14 @@ class GeminiWrapper(GenerationWrapper):
                         continue
                     return []
 
-                return [result.text or "" for result in results]
+                return [
+                    GenerationResult(
+                        content=result.text or "",
+                        tool_calls=[],
+                        stop_reason="end_turn",
+                    )
+                    for result in results
+                ]
 
             except Exception as e:
                 logger.error(f"Error while generating (attempt {attempt + 1}): {e}")
@@ -582,30 +376,6 @@ class GeminiWrapper(GenerationWrapper):
 
         # Return empty list if all retries failed
         return []
-
-
-GenerationRole = Literal["generation", "followup", "parameter"]
-
-RemoteModel = Literal[
-    "claude-4-sonnet",
-    "claude-4-5-sonnet",
-    "claude-4-5-haiku",
-    "claude-3-5-haiku",
-    "qwen-qwq",
-    "deepseek-v3",
-    "deepseek-r1",
-    "mistral-small-3",
-    "gpt-4o-mini",
-    "gpt-4o",
-    "gpt-4.1-nano",
-    "gpt-4.1-mini",
-    "o3-mini",
-    "mock",
-    "vllm",
-    "gemini-2.0-flash",
-    "gemini-2.5-flash",
-    "gpt-5-mini",
-]
 
 
 @dataclass
@@ -669,7 +439,6 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
         OpenAIGenerationWrapper,
         GenWrapperArgs(model_id="gpt-4.1-nano", max_rps=5000 / 60),
     ),
-    "mock": RemoteModelChoice(MockGenerator),
     "vllm": RemoteModelChoice(
         VLLMWrapper,
         GenWrapperArgs(max_rps=8.0),

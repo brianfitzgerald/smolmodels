@@ -6,6 +6,7 @@ from typing import Any
 from datasets import Dataset
 from jinja2 import Template
 from loguru import logger
+from openai.types.chat import ChatCompletionFunctionToolParam
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
@@ -85,7 +86,7 @@ def format_tool_calls_for_conversation(
 async def generate_with_tools_loop(
     wrapper: GenerationWrapper,
     conversation: Conversation,
-    tools: list[dict[str, Any]],
+    tools: list[ChatCompletionFunctionToolParam],
     args: GenerationArgs | None = None,
     max_iterations: int = MAX_TOOL_ITERATIONS,
 ) -> tuple[GenerationResult, list[ToolResult]]:
@@ -102,7 +103,7 @@ async def generate_with_tools_loop(
     result: GenerationResult | None = None
 
     for iteration in range(max_iterations):
-        results = await wrapper.generate_with_tools([current_conversation], gen_args)
+        results = await wrapper.generate([current_conversation], gen_args)
         if not results:
             raise ValueError("No generation results returned")
 
@@ -116,15 +117,19 @@ async def generate_with_tools_loop(
             "content": result.content,
             "tool_calls": format_tool_calls_for_conversation(result.tool_calls),
         }
-        current_conversation.append(assistant_message)  # type: ignore
+        current_conversation.append(assistant_message)
 
         tool_results = execute_tool_calls(result.tool_calls)
         all_tool_results.extend(tool_results)
 
         for tool_result in tool_results:
-            current_conversation.append(format_tool_result_for_conversation(tool_result))  # type: ignore
+            current_conversation.append(
+                format_tool_result_for_conversation(tool_result)
+            )
 
-        logger.debug(f"Iteration {iteration + 1}: executed {len(result.tool_calls)} tool calls")
+        logger.debug(
+            f"Iteration {iteration + 1}: executed {len(result.tool_calls)} tool calls"
+        )
 
     logger.warning(f"Reached max iterations ({max_iterations}) in tool loop")
     if result is None:
@@ -245,12 +250,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
 
         for attempt in range(MAX_PARSE_RETRIES):
-            response = await self.generation_wrappers["parameter"].generate(
+            results = await self.generation_wrappers["parameter"].generate(
                 [parameter_conversation]
             )
             try:
+                content = results[0].content or ""
                 parsed_tags = parse_xml_tags(
-                    response[0], required_tags=["game_setting", "player_character"]
+                    content, required_tags=["game_setting", "player_character"]
                 )
                 episode.game_setting = parsed_tags["game_setting"]
                 episode.player_character = parsed_tags["player_character"]
@@ -259,9 +265,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 return
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
-                    logger.warning(f"Parse failed (attempt {attempt + 1}), retrying: {e}")
+                    logger.warning(
+                        f"Parse failed (attempt {attempt + 1}), retrying: {e}"
+                    )
                 else:
-                    raise ValueError(f"Failed to generate game parameters after {MAX_PARSE_RETRIES} attempts")
+                    raise ValueError(
+                        f"Failed to generate game parameters after {MAX_PARSE_RETRIES} attempts"
+                    )
 
     def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
         template: Template = Template(ROLEPLAYING_PROMPT)
@@ -280,20 +290,57 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return formatted_prompt
 
     def _flip_conversation_roles(self, conversation: Conversation) -> Conversation:
-        """Flip user and assistant roles in a conversation while preserving system messages."""
+        """Flip user and assistant roles in a conversation while preserving system messages.
+
+        Note: When flipping assistant to user, we don't copy tool_calls since user messages
+        cannot have tool_calls. We also skip tool result messages since they don't make
+        sense in the flipped context.
+        """
         flipped_conversation = []
+
+        # First pass: collect all tool results
+        all_tool_contents: list[str] = []
         for message in conversation:
+            if message["role"] == "tool":
+                content = message.get("content", "")
+                if content:
+                    all_tool_contents.append(content)
+
+        # Second pass: process messages
+        for i, message in enumerate(conversation):
             if message["role"] == "user":
                 flipped_conversation.append(
                     {"role": "assistant", "content": message["content"]}  # type: ignore
                 )
             elif message["role"] == "assistant":
-                new_msg: dict[str, Any] = {"role": "user", "content": message["content"]}
-                if "tool_calls" in message:
-                    new_msg["tool_calls"] = message["tool_calls"]
-                flipped_conversation.append(new_msg)  # type: ignore
+                # Don't copy tool_calls to user messages (users can't make tool calls)
+                content = message.get("content") or ""
+
+                # If no text content, check for tool results that follow this assistant message
+                if not content:
+                    # Collect tool results that immediately follow this assistant message
+                    following_tool_contents = []
+                    for j in range(i + 1, len(conversation)):
+                        if conversation[j]["role"] == "tool":
+                            tool_content = conversation[j].get("content", "")
+                            if tool_content:
+                                following_tool_contents.append(tool_content)
+                        else:
+                            break  # Stop at next non-tool message
+                    if following_tool_contents:
+                        content = "\n".join(following_tool_contents)
+
+                # Only add if there's meaningful content
+                if content:
+                    flipped_conversation.append(
+                        {
+                            "role": "user",
+                            "content": content,
+                        }
+                    )  # type: ignore
             elif message["role"] == "tool":
-                flipped_conversation.append(message)
+                # Skip tool result messages - we've extracted their content above
+                continue
             else:
                 flipped_conversation.append(message)
         return flipped_conversation
@@ -329,17 +376,25 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "content": result.content,
         }
         if result.tool_calls:
-            assistant_message["tool_calls"] = format_tool_calls_for_conversation(result.tool_calls)
+            assistant_message["tool_calls"] = format_tool_calls_for_conversation(
+                result.tool_calls
+            )
 
         episode.conversation.append(assistant_message)  # type: ignore
 
+        # Add tool result messages to conversation (for context when flipping roles)
         for tool_result in tool_results:
-            episode.tool_calls_history.append({
-                "turn": 0,
-                "tool_call_id": tool_result.tool_call_id,
-                "result": tool_result.content,
-                "success": tool_result.success,
-            })
+            episode.conversation.append(
+                format_tool_result_for_conversation(tool_result)
+            )  # type: ignore
+            episode.tool_calls_history.append(
+                {
+                    "turn": 0,
+                    "tool_call_id": tool_result.tool_call_id,
+                    "result": tool_result.content,
+                    "success": tool_result.success,
+                }
+            )
 
         logger.debug(f"Scenario generated with {len(tool_results)} tool calls")
 
@@ -355,6 +410,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         Returns True if the turn was generated successfully, False if generation failed.
         """
         flipped_conversation = self._flip_conversation_roles(episode.conversation)
+
+        if not flipped_conversation:
+            logger.warning(
+                f"No messages in flipped conversation. Original conversation: {episode.conversation}"
+            )
+            return False
 
         user_action_conversation: Conversation = [
             {
@@ -376,26 +437,33 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 PLAYER_TOOLS,
             )
         except Exception as e:
-            logger.warning(f"Failed to generate user response: {e}")
+            logger.exception(f"Failed to generate user response: {e}")
             return False
 
+        # Note: User messages should NOT have tool_calls - only assistants can use tools.
+        # The player's actions are communicated through the content, not tool_calls.
+        # Tool results from player actions are still tracked in tool_calls_history but
+        # not added to the conversation (they would cause API errors since they have no
+        # corresponding tool_use in a preceding assistant message).
         user_message: dict[str, Any] = {
             "role": "user",
-            "content": user_result.content,
+            "content": user_result.content or "",
         }
-        if user_result.tool_calls:
-            user_message["tool_calls"] = format_tool_calls_for_conversation(user_result.tool_calls)
 
         episode.conversation.append(user_message)  # type: ignore
 
+        # Track player tool results in history but don't add to conversation
+        # (user messages can't have tool_calls, so tool results would be orphaned)
         for tool_result in user_tool_results:
-            episode.tool_calls_history.append({
-                "turn": episode.step_count + 1,
-                "role": "player",
-                "tool_call_id": tool_result.tool_call_id,
-                "result": tool_result.content,
-                "success": tool_result.success,
-            })
+            episode.tool_calls_history.append(
+                {
+                    "turn": episode.step_count + 1,
+                    "role": "player",
+                    "tool_call_id": tool_result.tool_call_id,
+                    "result": tool_result.content,
+                    "success": tool_result.success,
+                }
+            )
 
         dm_conversation: Conversation = [
             {
@@ -418,7 +486,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 DM_TOOLS,
             )
         except Exception as e:
-            logger.warning(f"Failed to generate DM response: {e}")
+            logger.exception(f"Failed to generate DM response: {e}")
             return False
 
         dm_message: dict[str, Any] = {
@@ -426,33 +494,48 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "content": dm_result.content,
         }
         if dm_result.tool_calls:
-            dm_message["tool_calls"] = format_tool_calls_for_conversation(dm_result.tool_calls)
+            dm_message["tool_calls"] = format_tool_calls_for_conversation(
+                dm_result.tool_calls
+            )
 
         episode.conversation.append(dm_message)  # type: ignore
 
+        # Add tool result messages to conversation
         for tool_result in dm_tool_results:
-            episode.tool_calls_history.append({
-                "turn": episode.step_count + 1,
-                "role": "dm",
-                "tool_call_id": tool_result.tool_call_id,
-                "result": tool_result.content,
-                "success": tool_result.success,
-            })
+            episode.conversation.append(
+                format_tool_result_for_conversation(tool_result)
+            )  # type: ignore
+            episode.tool_calls_history.append(
+                {
+                    "turn": episode.step_count + 1,
+                    "role": "dm",
+                    "tool_call_id": tool_result.tool_call_id,
+                    "result": tool_result.content,
+                    "success": tool_result.success,
+                }
+            )
 
         logger.info(f"Generated turn {episode.step_count + 1}")
         return True
 
     def get_output_row(self, episode: RPGEpisode) -> list[dict]:
-        tool_calls_history = episode.tool_calls_history if episode.tool_calls_history else None
+        # Serialize tool_calls_history to JSON to avoid schema mismatch
+        # (different tools return different result structures)
+        tool_calls_history_json = (
+            json.dumps(episode.tool_calls_history) if episode.tool_calls_history else None
+        )
+        # Serialize conversation to JSON for consistent schema
+        conversation_json = json.dumps(episode.conversation) if episode.conversation else None
         return [
             {
-                "conversation": episode.conversation,
+                "conversation": conversation_json,
                 "game_setting": episode.game_setting or "No setting generated",
-                "player_character": episode.player_character or "No characters generated",
+                "player_character": episode.player_character
+                or "No characters generated",
                 "generation_model": self.generation_model_names["generation"],
                 "followup_model": self.generation_model_names["followup"],
                 "parameter_model": self.generation_model_names["parameter"],
                 "num_turns": episode.step_count,
-                "tool_calls_history": tool_calls_history,
+                "tool_calls_history": tool_calls_history_json,
             }
         ]

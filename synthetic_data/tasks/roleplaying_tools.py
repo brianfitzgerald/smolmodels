@@ -9,9 +9,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from openai.types.chat.chat_completion_function_tool_param import (
+    ChatCompletionFunctionToolParam,
+)
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
-    Function as ToolCallFunction,
 )
 
 # Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
@@ -28,113 +30,128 @@ class ToolResult:
     error: str | None = None
 
 
-# Tool Schema Definitions (Anthropic format - can be converted for OpenAI)
+# Tool Schema Definitions (OpenAI format - ChatCompletionToolParam)
 
-ROLL_DICE_TOOL = {
-    "name": "roll_dice",
-    "description": "Roll dice using standard RPG notation. Use this for any random chance events, skill checks, combat, or when randomness is needed.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "notation": {
-                "type": "string",
-                "description": "Dice notation like '2d6+3' (roll 2 six-sided dice and add 3), '1d20' (roll one 20-sided die), '3d8-2' (roll 3 eight-sided dice and subtract 2). Format: [count]d[sides][+/-modifier]",
-            },
-            "reason": {
-                "type": "string",
-                "description": "Brief explanation of what this roll is for (e.g., 'attack roll', 'perception check', 'damage')",
-            },
-        },
-        "required": ["notation", "reason"],
-    },
-}
-
-RANDOM_CHOICE_TOOL = {
-    "name": "random_choice",
-    "description": "Randomly select one option from a list. Use this when the outcome should be randomly determined from multiple possibilities.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "options": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of options to randomly choose from",
-            },
-            "reason": {
-                "type": "string",
-                "description": "Brief explanation of what this choice determines",
-            },
-        },
-        "required": ["options", "reason"],
-    },
-}
-
-PRESENT_CHOICES_TOOL = {
-    "name": "present_choices",
-    "description": "Present a set of choices to the player. Use this when you want to give the player specific options to choose from.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "prompt": {
-                "type": "string",
-                "description": "The question or situation prompting the choice",
-            },
-            "choices": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Short identifier"},
-                        "description": {
-                            "type": "string",
-                            "description": "Description of this choice",
-                        },
-                    },
-                    "required": ["id", "description"],
+ROLL_DICE_TOOL: ChatCompletionFunctionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "roll_dice",
+        "description": "Roll dice using standard RPG notation. Use this for any random chance events, skill checks, combat, or when randomness is needed.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "notation": {
+                    "type": "string",
+                    "description": "Dice notation like '2d6+3' (roll 2 six-sided dice and add 3), '1d20' (roll one 20-sided die), '3d8-2' (roll 3 eight-sided dice and subtract 2). Format: [count]d[sides][+/-modifier]",
                 },
-                "description": "List of choices available to the player",
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of what this roll is for (e.g., 'attack roll', 'perception check', 'damage')",
+                },
             },
+            "required": ["notation", "reason"],
         },
-        "required": ["prompt", "choices"],
     },
 }
 
-SPEAK_TOOL = {
-    "name": "speak",
-    "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "character": {
-                "type": "string",
-                "description": "Name of the character speaking",
+RANDOM_CHOICE_TOOL: ChatCompletionFunctionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "random_choice",
+        "description": "Randomly select one option from a list. Use this when the outcome should be randomly determined from multiple possibilities.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of options to randomly choose from",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of what this choice determines",
+                },
             },
-            "message": {"type": "string", "description": "What the character says"},
-            "tone": {
-                "type": "string",
-                "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
-            },
+            "required": ["options", "reason"],
         },
-        "required": ["character", "message"],
     },
 }
 
-ACTION_TOOL = {
-    "name": "action",
-    "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "description": {
-                "type": "string",
-                "description": "Description of the action being taken",
+PRESENT_CHOICES_TOOL: ChatCompletionFunctionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "present_choices",
+        "description": "Present a set of choices to the player. Use this when you want to give the player specific options to choose from.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "The question or situation prompting the choice",
+                },
+                "choices": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Short identifier"},
+                            "description": {
+                                "type": "string",
+                                "description": "Description of this choice",
+                            },
+                        },
+                        "required": ["id", "description"],
+                    },
+                    "description": "List of choices available to the player",
+                },
             },
-            "target": {
-                "type": "string",
-                "description": "Optional target of the action (object, NPC, location)",
-            },
+            "required": ["prompt", "choices"],
         },
-        "required": ["description"],
+    },
+}
+
+SPEAK_TOOL: ChatCompletionFunctionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "speak",
+        "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "character": {
+                    "type": "string",
+                    "description": "Name of the character speaking",
+                },
+                "message": {"type": "string", "description": "What the character says"},
+                "tone": {
+                    "type": "string",
+                    "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
+                },
+            },
+            "required": ["character", "message"],
+        },
+    },
+}
+
+ACTION_TOOL: ChatCompletionFunctionToolParam = {
+    "type": "function",
+    "function": {
+        "name": "action",
+        "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Description of the action being taken",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Optional target of the action (object, NPC, location)",
+                },
+            },
+            "required": ["description"],
+        },
     },
 }
 
@@ -143,30 +160,13 @@ DM_TOOLS = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, PRESENT_CHOICES_TOOL, SPEAK_TOOL
 PLAYER_TOOLS = [ROLL_DICE_TOOL, SPEAK_TOOL, ACTION_TOOL]
 
 # All tools combined
-ALL_TOOLS = [
+ALL_TOOLS: list[ChatCompletionFunctionToolParam] = [
     ROLL_DICE_TOOL,
     RANDOM_CHOICE_TOOL,
     PRESENT_CHOICES_TOOL,
     SPEAK_TOOL,
     ACTION_TOOL,
 ]
-
-
-def convert_to_openai_format(anthropic_tools: list[dict]) -> list[dict]:
-    """Convert Anthropic tool format to OpenAI function calling format."""
-    openai_tools = []
-    for tool in anthropic_tools:
-        openai_tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "parameters": tool["input_schema"],
-                },
-            }
-        )
-    return openai_tools
 
 
 def parse_dice_notation(notation: str) -> tuple[int, int, int] | None:
@@ -234,9 +234,7 @@ def execute_random_choice(options: list[str], reason: str) -> ToolResult:
     )
 
 
-def execute_present_choices(
-    prompt: str, choices: list[dict[str, str]]
-) -> ToolResult:
+def execute_present_choices(prompt: str, choices: list[dict[str, str]]) -> ToolResult:
     """Present choices to the player."""
     return ToolResult(
         tool_call_id="",
@@ -310,6 +308,8 @@ def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolResult:
     return result
 
 
-def execute_tool_calls(tool_calls: list[ChatCompletionMessageToolCall]) -> list[ToolResult]:
+def execute_tool_calls(
+    tool_calls: list[ChatCompletionMessageToolCall],
+) -> list[ToolResult]:
     """Execute multiple tool calls and return results."""
     return [execute_tool_call(tc) for tc in tool_calls]

@@ -344,7 +344,8 @@ class GutenbergBacktranslation(BaseTaskV1):
             filter_convs = [
                 format_classify_fiction_prompt(p["text"]) for p in input_rows
             ]
-            filter_completions = await generation_wrapper.generate(filter_convs)
+            filter_results = await generation_wrapper.generate(filter_convs)
+            filter_completions = [r.content or "" for r in filter_results]
             filter_labels = [extract_fiction_label(c) for c in filter_completions]
             logger.info(filter_labels)
 
@@ -356,7 +357,8 @@ class GutenbergBacktranslation(BaseTaskV1):
             bt_convs = [
                 format_writing_backtranslation_prompt(p["text"]) for p in valid_rows
             ]
-            completions = await generation_wrapper.generate(bt_convs)
+            bt_results = await generation_wrapper.generate(bt_convs)
+            completions = [r.content or "" for r in bt_results]
             return self.format_output_rows(completions, valid_rows)
         except TimeoutError:
             logger.error("Timeout error processing batch")
@@ -398,10 +400,11 @@ async def score_writing(
     logger.info(
         f"Judging {len(judge_convs)} completions with {judge_generator.gen_wrapper_args.model_id}"
     )
-    judge_completions = await judge_generator.generate(judge_convs)
+    judge_results = await judge_generator.generate(judge_convs)
+    judge_completions = [r.content or "" for r in judge_results]
 
-    if any([x is None for x in judge_completions]):
-        logger.warning("Some judge completions were None")
+    if any([x is None or x == "" for x in judge_completions]):
+        logger.warning("Some judge completions were None or empty")
         return []
 
     score_dicts = [bench.parse_judge_scores(score) for score in judge_completions]
@@ -423,7 +426,8 @@ async def generate_and_score(
     logger.info(
         f"Generating {len(input_convs)} completions with {generator.gen_wrapper_args.model_id}"
     )
-    completions = await generator.generate(input_convs)
+    results = await generator.generate(input_convs)
+    completions = [r.content or "" for r in results]
 
     scores_formatted = await score_writing(
         completions, [row["instruction"] for row in input_rows], bench, judge_generator

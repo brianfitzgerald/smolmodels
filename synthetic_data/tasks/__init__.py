@@ -9,17 +9,17 @@ from huggingface_hub import snapshot_download
 from loguru import logger
 
 from synthetic_data.generation import (
-    GenerationRole,
     GenerationWrapper,
     GenWrapperArgs,
     RemoteModel,
     get_generation_wrapper,
 )
+from synthetic_data.generation_utils import GenerationRole
+from synthetic_data.gutenberg_process import get_gutenberg_subset
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
 )
-from synthetic_data.gutenberg_process import get_gutenberg_subset
 
 RunMode = Literal["modal", "cli", "notebook"]
 
@@ -84,7 +84,9 @@ class BaseTaskV1(ABC):
     ) -> list[dict]:
         try:
             conversations = self.format_input_conversation(input_rows)
-            completions = await generation_wrapper.generate(conversations)
+            results = await generation_wrapper.generate(conversations)
+            # Extract content from GenerationResult objects
+            completions = [r.content or "" for r in results]
             return self.format_output_rows(completions, input_rows)
         except TimeoutError:
             logger.error("Timeout error processing batch")
