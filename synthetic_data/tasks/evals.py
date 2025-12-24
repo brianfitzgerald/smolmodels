@@ -1,13 +1,13 @@
 import asyncio
-from evaluation.code_execution import EvalResult, EvalTask
-from synthetic_data.generation import GenerationWrapper, get_generation_wrapper
-from synthetic_data.utils import Conversation, flatten_list, ldictl
-from datasets import Dataset
 import json
 import re
+
+from datasets import Dataset
 from loguru import logger
 
 from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
+from synthetic_data.generation import GenerationWrapper, get_generation_wrapper
+from synthetic_data.utils import Conversation, flatten_list, ldictl
 
 
 def parse_scores(judge_model_response):
@@ -25,11 +25,8 @@ def parse_scores(judge_model_response):
     return scores
 
 
-class EQBenchWriting(EvalTask):
+class EQBenchWriting:
     def __init__(self):
-        super().__init__(
-            name="eq_bench_writing",
-        )
         self.judge_model = get_generation_wrapper("gpt-4o")
         self.n_iters = 5
         self.judge = CreativeWritingBench("cli")
@@ -47,12 +44,12 @@ class EQBenchWriting(EvalTask):
 
     async def run_eval(  # type: ignore
         self, batch: dict, generation_wrapper: GenerationWrapper
-    ) -> list[EvalResult]:
+    ) -> list[dict]:
         # Run inference to get completions
         writing_prompt: list[str] = batch["writing_prompt"]
         seed_modifiers: list[list[str]] = batch["seed_modifiers"]
 
-        async def process_iteration(i: int) -> list[EvalResult]:
+        async def process_iteration(i: int) -> list[dict]:
             # TODO check that seed is correct
             modified_prompts = [
                 prompt.replace("<SEED>", seed[j])
@@ -82,7 +79,7 @@ class EQBenchWriting(EvalTask):
             )
             iteration_scores = [parse_scores(sample) for sample in judge_samples]
             return [
-                EvalResult(
+                dict(
                     prompt=writing_prompt[i],
                     model_response=generated_samples[i],
                     scores=iteration_scores[i],
