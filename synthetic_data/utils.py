@@ -10,16 +10,18 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 import pandas as pd
 from loguru import logger
+from openai.types.chat import ChatCompletionMessageToolCall
 from pydantic.dataclasses import dataclass
 from tabulate import tabulate
 
 
-class Message(TypedDict):
+class Message(TypedDict, total=False):
     role: Literal["system", "user", "assistant", "tool", "function"]
     content: str
+    tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
 
 
-Conversation = List[dict[str, str]]
+Conversation = List[Message]
 ShareGPTConversation = List[Dict[str, str]]
 
 JSONSchemaKey = Union[str, int, float, bool, List[Any], Dict[str, Any], None]
