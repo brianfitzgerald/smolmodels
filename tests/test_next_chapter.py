@@ -138,7 +138,7 @@ class TestFilterValidParagraphs:
             "Contents:",
             "The story begins in a small village on the coast of England, where the waves crashed against the rocky shore.",
         ]
-        result = filter_valid_paragraphs(paragraphs)
+        result = filter_valid_paragraphs(paragraphs, min_words=15)
         assert len(result) == 1
         assert "story begins" in result[0]
 
@@ -148,7 +148,7 @@ class TestFilterValidParagraphs:
             "Also short text.",
             "The story begins in a small village on the coast of England, where the waves crashed against the rocky shore.",
         ]
-        result = filter_valid_paragraphs(paragraphs)
+        result = filter_valid_paragraphs(paragraphs, min_words=15)
         assert len(result) == 1
 
     def test_keeps_valid_narrative(self):
@@ -157,7 +157,7 @@ class TestFilterValidParagraphs:
             "She had been waiting for this moment all week, and now that it had arrived, she felt a mixture of excitement and dread.",
             "The garden was in full bloom, with roses and lilies competing for attention in the warm spring air.",
         ]
-        result = filter_valid_paragraphs(paragraphs)
+        result = filter_valid_paragraphs(paragraphs, min_words=15)
         assert len(result) == 3
 
 
@@ -197,7 +197,7 @@ class TestFindChunksWithSummary:
             min_prefix_words=10,
             min_summary_words=20,
         )
-        results = find_chunks_with_summary(paragraphs, encoder, config)
+        results = find_chunks_with_summary(config, paragraphs, encoder)
         assert len(results) >= 1
         prefix, summary, next_chunk = results[0]
         assert len(prefix) > 0
@@ -224,7 +224,7 @@ class TestFindChunksWithSummary:
             min_prefix_words=10,
             min_summary_words=20,
         )
-        results = find_chunks_with_summary(paragraphs, encoder, config)
+        results = find_chunks_with_summary(config, paragraphs, encoder)
 
         # Should have results since there are valid narrative paragraphs
         assert len(results) >= 1
@@ -237,14 +237,16 @@ class TestFindChunksWithSummary:
             assert "Contents:" not in summary
 
     def test_empty_input(self, encoder):
-        results = find_chunks_with_summary([], encoder)
+        config = NCPConfig()
+        results = find_chunks_with_summary(config, [], encoder)
         assert results == []
 
     def test_single_paragraph(self, encoder):
         paragraphs = [
             "The morning sun cast long shadows across the courtyard as Elizabeth made her way to the garden.",
         ]
-        results = find_chunks_with_summary(paragraphs, encoder)
+        config = NCPConfig()
+        results = find_chunks_with_summary(config, paragraphs, encoder)
         assert results == []
 
     def test_all_invalid_paragraphs(self, encoder):
@@ -254,7 +256,8 @@ class TestFindChunksWithSummary:
             "CHAPTER I",
             "Short.",
         ]
-        results = find_chunks_with_summary(paragraphs, encoder)
+        config = NCPConfig()
+        results = find_chunks_with_summary(config, paragraphs, encoder)
         assert results == []
 
     def test_respects_token_limits(self, encoder):
@@ -270,7 +273,7 @@ class TestFindChunksWithSummary:
             min_prefix_words=5,
             min_summary_words=5,
         )
-        results = find_chunks_with_summary(paragraphs, encoder, config)
+        results = find_chunks_with_summary(config, paragraphs, encoder)
         # Should handle gracefully even with very small limits
         # Results may be empty if paragraphs are too long to fit
         assert isinstance(results, list)
@@ -294,7 +297,7 @@ class TestFindChunksWithSummary:
             min_prefix_words=10,
             min_summary_words=20,
         )
-        results = find_chunks_with_summary(paragraphs, encoder, config)
+        results = find_chunks_with_summary(config, paragraphs, encoder)
 
         assert len(results) >= 1
         for prefix, summary, _ in results:

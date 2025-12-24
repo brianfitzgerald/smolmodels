@@ -7,12 +7,8 @@ from typing import Any, Literal
 from datasets import Dataset
 from jinja2 import Template
 from loguru import logger
-from openai.types.chat.chat_completion_message_tool_call import (
-    ChatCompletionMessageToolCall,
-)
 
 from synthetic_data.generation import (
-    GenerationArgs,
     GenerationWrapper,
     RemoteModel,
 )
@@ -23,7 +19,6 @@ from synthetic_data.tasks.roleplaying_prompts import (
     USER_ACTION_PROMPT,
 )
 from synthetic_data.tasks.roleplaying_tools import (
-    DM_TOOLS,
     ToolResult,
 )
 from synthetic_data.utils import (
@@ -50,12 +45,13 @@ GAME_SETTINGS = [
     "museum",
 ]
 
+RolePlayingRole = Literal["player", "dungeon_master"]
+
 
 @dataclass
 class Action:
-    role: Literal["player", "dm"]
-    tool_calls: list[ChatCompletionMessageToolCall]
-    content: str
+    role: Literal["player", "dungeon_master"]
+    message: Message
 
 
 @dataclass
@@ -153,18 +149,25 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
+        # Interleave user and DM actions
         if episode.step_count < self.max_user_responses:
-            success = await self._generate_turn(
-                episode, self.generation_wrappers["player"]
-            )
-            if not success:
-                logger.warning(
-                    f"Turn generation failed at step {episode.step_count + 1}, "
-                    f"finishing episode with {episode.step_count} turns"
-                )
-                return episode
+            # Generate player action
+            conversation = self._format_conversation(episode, "player")
+            results = await self.generation_wrappers["player"].generate([conversation])
+            assert len(results) == 1
+            episode.actions.append(Action(role="player", message=results[0].message))
             episode.step_count += 1
-            return None
+
+            # Generate dungeon master action
+            conversation = self._format_conversation(episode, "dungeon_master")
+            results = await self.generation_wrappers["dungeon_master"].generate(
+                [conversation]
+            )
+            assert len(results) == 1
+            episode.actions.append(
+                Action(role="dungeon_master", message=results[0].message)
+            )
+            episode.step_count += 1
 
         return episode
 
@@ -199,6 +202,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 episode.player_character = parsed_tags["player_character"]
                 logger.debug(f"\nGame setting:\n{episode.game_setting}")
                 logger.debug(f"\nPlayer character:\n{episode.player_character}")
+                break  # Successfully parsed, exit the retry loop
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
                     logger.warning(
@@ -297,32 +301,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
 
         logger.info(
-            f"Generating scenario with {self.generation_model_names['generation']}"
+            f"Generating scenario with {self.generation_model_names['dungeon_master']}"
         )
 
-        result, tool_results = await generate_with_tools_loop(
-            generation_wrapper,
-            scenario_conversation,
-            DM_TOOLS,
-            GenerationArgs(max_tokens=8192, temperature=1),
-        )
-
-        episode.conversation.append(assistant_message)  # type: ignore
-
-        # Add tool result messages to conversation (for context when flipping roles)
-        for tool_result in tool_results:
-            episode.actions.append(
-                Action(
-                    role="dm",
-                    tool_calls=result.tool_calls,
-                    content=result.content,
-                )
-            )
-
-        logger.debug(f"Scenario generated with {len(tool_results)} tool calls")
+        results = await generation_wrapper.generate([scenario_conversation])
+        return results[0].content
 
     def _format_conversation(
-        self, episode: RPGEpisode, generating_role: Literal["player", "dm"]
+        self, episode: RPGEpisode, generating_role: RolePlayingRole
     ) -> Conversation:
         """
         For the DM, generate with player actions as user actions, and DM actions as assistant actions.
@@ -331,21 +317,31 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation: Conversation = []
 
         for action in episode.actions:
-            if generating_role == "dm":
+            if generating_role == "dungeon_master":
                 # DM perspective: player -> user, dm -> assistant
                 role = "user" if action.role == "player" else "assistant"
             else:  # generating_role == "player"
-                # Player perspective: dm -> user, player -> assistant
-                role = "user" if action.role == "dm" else "assistant"
+                # Player perspective: dungeon_master -> user, player -> assistant
+                role = "user" if action.role == "dungeon_master" else "assistant"
 
             message: Message = {
                 "role": role,
-                "content": action.content,
+                "content": action.message.get("content", ""),
             }
 
+            tool_calls = action.message.get("tool_calls")
             # Only assistant messages can have tool_calls in the OpenAI API format
-            if role == "assistant" and action.tool_calls:
-                message["tool_calls"] = action.tool_calls
+            if tool_calls and role == "assistant":
+                # If assistant, add tool calls
+                message["tool_calls"] = tool_calls
+            elif tool_calls:
+                # If user, format tool call in message content
+                # TODO determine better way to format this to not break tool call formatting
+                # in the fine-tuned model
+                message["content"] = (
+                    message.get("content", "")
+                    + f"<tool_calls>{json.dumps(tool_calls)}</tool_calls>"
+                )
 
             conversation.append(message)
 

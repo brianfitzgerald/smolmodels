@@ -1,7 +1,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional, cast
 
 from anthropic.types.message_param import MessageParam
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
+    Message,
 )
 
 MAX_RETRIES = 10
@@ -180,8 +181,19 @@ class GenerationResult:
     """Result from a generation call that may include tool calls."""
 
     content: str | None
-    tool_calls: list[ChatCompletionMessageToolCall]
-    stop_reason: str
+    tool_calls: list[ChatCompletionMessageToolCall] = field(default_factory=list)
+    stop_reason: str = "stop"
+
+    @property
+    def message(self) -> Message:
+        """Return a Message dict for compatibility with code expecting message format."""
+        msg: Message = {
+            "role": "assistant",
+            "content": self.content or "",
+        }
+        if self.tool_calls:
+            msg["tool_calls"] = self.tool_calls
+        return msg
 
 
 class GenWrapperArgs(BaseModel):
