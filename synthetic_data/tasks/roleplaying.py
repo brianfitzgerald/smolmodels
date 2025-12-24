@@ -1,19 +1,18 @@
+import asyncio
 import json
 import random
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from datasets import Dataset
 from jinja2 import Template
 from loguru import logger
-from openai.types.chat import ChatCompletionFunctionToolParam
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
 
 from synthetic_data.generation import (
     GenerationArgs,
-    GenerationResult,
     GenerationWrapper,
     RemoteModel,
 )
@@ -27,7 +26,6 @@ from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
     PLAYER_TOOLS,
     ToolResult,
-    execute_tool_calls,
 )
 from synthetic_data.utils import (
     Conversation,
@@ -39,6 +37,27 @@ from synthetic_data.utils import (
 MAX_PARSE_RETRIES = 3
 MAX_TOOL_ITERATIONS = 5
 
+GAME_SETTINGS = [
+    "forest",
+    "cave",
+    "dungeon",
+    "city",
+    "ruins",
+    "castle",
+    "temple",
+    "library",
+    "museum",
+    "library",
+    "museum",
+]
+
+
+@dataclass
+class Action:
+    role: Literal["player", "dm"]
+    tool_calls: list[ChatCompletionMessageToolCall]
+    content: str
+
 
 @dataclass
 class RPGEpisode:
@@ -46,12 +65,8 @@ class RPGEpisode:
     game_setting: str | None = None
     player_character: str | None = None
     input_prompt: str | None = None
-    parameters_generated: bool = False
-    scenario_generated: bool = False
-    conversation: Conversation = field(default_factory=list)
-    tool_calls_history: list[dict[str, Any]] = field(default_factory=list)
-    run_metadata: dict = field(default_factory=dict)
-    seed: int = field(default_factory=lambda: random.randint(0, 2**32))
+    actions: list[Action] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 USE_DEV_MODELS = True
@@ -64,77 +79,6 @@ def format_tool_result_for_conversation(result: ToolResult) -> dict[str, Any]:
         "tool_call_id": result.tool_call_id,
         "content": json.dumps(result.content) if result.success else result.error,
     }
-
-
-def format_tool_calls_for_conversation(
-    tool_calls: list[ChatCompletionMessageToolCall],
-) -> list[dict[str, Any]]:
-    """Format tool calls for inclusion in assistant message."""
-    return [
-        {
-            "id": tc.id,
-            "type": tc.type,
-            "function": {
-                "name": tc.function.name,
-                "arguments": tc.function.arguments,
-            },
-        }
-        for tc in tool_calls
-    ]
-
-
-async def generate_with_tools_loop(
-    wrapper: GenerationWrapper,
-    conversation: Conversation,
-    tools: list[ChatCompletionFunctionToolParam],
-    args: GenerationArgs | None = None,
-    max_iterations: int = MAX_TOOL_ITERATIONS,
-) -> tuple[GenerationResult, list[ToolResult]]:
-    """
-    Generate with tools, executing tool calls and continuing until the model stops.
-    Returns the final generation result and all tool results from the loop.
-    """
-    current_conversation = list(conversation)
-    all_tool_results: list[ToolResult] = []
-
-    gen_args = args or GenerationArgs()
-    gen_args = gen_args.model_copy(update={"tools": tools})
-
-    result: GenerationResult | None = None
-
-    for iteration in range(max_iterations):
-        results = await wrapper.generate([current_conversation], gen_args)
-        if not results:
-            raise ValueError("No generation results returned")
-
-        result = results[0]
-
-        if not result.tool_calls:
-            return result, all_tool_results
-
-        assistant_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": result.content,
-            "tool_calls": format_tool_calls_for_conversation(result.tool_calls),
-        }
-        current_conversation.append(assistant_message)
-
-        tool_results = execute_tool_calls(result.tool_calls)
-        all_tool_results.extend(tool_results)
-
-        for tool_result in tool_results:
-            current_conversation.append(
-                format_tool_result_for_conversation(tool_result)
-            )
-
-        logger.debug(
-            f"Iteration {iteration + 1}: executed {len(result.tool_calls)} tool calls"
-        )
-
-    logger.warning(f"Reached max iterations ({max_iterations}) in tool loop")
-    if result is None:
-        raise ValueError("No generation result after tool loop")
-    return result, all_tool_results
 
 
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
@@ -164,9 +108,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "claude-4-5-haiku" if USE_DEV_MODELS else "claude-4-5-sonnet"
         )
 
-        self._add_generation_wrapper("generation", gen_model)
-        self._add_generation_wrapper("followup", gen_model)
-        self._add_generation_wrapper("parameter", gen_model)
+        self._add_generation_wrapper("dungeon_master", gen_model)
+        self._add_generation_wrapper("player", gen_model)
+        self._add_generation_wrapper("adventure_parameters", gen_model)
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -174,59 +118,52 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         Since this is a synthetic task, we create dummy data.
         """
         logger.info("Loading custom dataset for roleplaying game")
-        dummy_data = [
+        seed = random.randint(0, 2**32)
+        rng = random.Random(seed)
+        game_setting = rng.choice(GAME_SETTINGS)
+        episode_data = [
             {
-                "input_prompt": "A mysterious forest adventure",
+                "game_setting": game_setting,
                 "seed": random.randint(0, 2**32),
             }
             for _ in range(self.num_episodes)
         ]
-        logger.info(f"Created {len(dummy_data)} episodes")
-        return Dataset.from_list(dummy_data)
+        logger.info(f"Created {len(episode_data)} episodes")
+        return Dataset.from_list(episode_data)
 
-    async def start_episode(self, sample: None) -> RPGEpisode:
+    async def initial_observation(self, sample: None) -> RPGEpisode:
         seed = hash(str(sample)) % (2**32)
         ep = RPGEpisode()
-        ep.run_metadata = {
-            "generation_model": self.generation_wrappers["generation"].provider_name,
-            "followup_model": self.generation_wrappers["followup"].provider_name,
-            "parameter_model": self.generation_wrappers["parameter"].provider_name,
+        ep.metadata = {
+            "dungeon_master_model": self.generation_wrappers[
+                "dungeon_master"
+            ].provider_name,
+            "player_model": self.generation_wrappers["player"].provider_name,
+            "adventure_parameters_model": self.generation_wrappers[
+                "adventure_parameters"
+            ].provider_name,
             "max_user_responses": self.max_user_responses,
             "seed": seed,
-            "parameters_generated": False,
-            "scenario_generated": False,
-            "user_responses_generated": False,
         }
+
+        # Generate parameters and scenario in parallel
+        await asyncio.gather(
+            self._generate_parameters(ep),
+            self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
+        )
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
-        if not episode.parameters_generated:
-            await self._generate_parameters(episode)
-            episode.parameters_generated = True
-            return None
-
-        if not episode.scenario_generated:
-            await self._generate_scenario(
-                episode, self.generation_wrappers["generation"]
-            )
-            episode.scenario_generated = True
-            return None
-
         if episode.step_count < self.max_user_responses:
             success = await self._generate_turn(
-                episode, self.generation_wrappers["followup"]
+                episode, self.generation_wrappers["player"]
             )
             if not success:
-                if self._has_user_action(episode):
-                    logger.warning(
-                        f"Turn generation failed at step {episode.step_count + 1}, "
-                        f"finishing episode with {episode.step_count} turns"
-                    )
-                    return episode
-                else:
-                    raise ValueError(
-                        "Failed to generate turn before any user actions were collected"
-                    )
+                logger.warning(
+                    f"Turn generation failed at step {episode.step_count + 1}, "
+                    f"finishing episode with {episode.step_count} turns"
+                )
+                return episode
             episode.step_count += 1
             return None
 
@@ -234,6 +171,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def _generate_parameters(self, episode: RPGEpisode):
         """Generate game parameters (setting and characters) using XML parsing."""
+        theme_input = episode.input_prompt or "A mysterious adventure"
         parameter_conversation: Conversation = [
             {
                 "role": "system",
@@ -241,16 +179,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
             {
                 "role": "user",
-                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {episode.input_prompt or 'A mysterious adventure'}",
+                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
             },
         ]
 
         logger.info(
-            f"Generating game parameters with {self.generation_model_names['parameter']}"
+            f"Generating game parameters with {self.generation_model_names['adventure_parameters']}"
         )
 
         for attempt in range(MAX_PARSE_RETRIES):
-            results = await self.generation_wrappers["parameter"].generate(
+            results = await self.generation_wrappers["adventure_parameters"].generate(
                 [parameter_conversation]
             )
             try:
@@ -262,7 +200,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 episode.player_character = parsed_tags["player_character"]
                 logger.debug(f"\nGame setting:\n{episode.game_setting}")
                 logger.debug(f"\nPlayer character:\n{episode.player_character}")
-                return
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
                     logger.warning(
@@ -371,29 +308,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             GenerationArgs(max_tokens=8192, temperature=1),
         )
 
-        assistant_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": result.content,
-        }
-        if result.tool_calls:
-            assistant_message["tool_calls"] = format_tool_calls_for_conversation(
-                result.tool_calls
-            )
-
         episode.conversation.append(assistant_message)  # type: ignore
 
         # Add tool result messages to conversation (for context when flipping roles)
         for tool_result in tool_results:
-            episode.conversation.append(
-                format_tool_result_for_conversation(tool_result)
-            )  # type: ignore
-            episode.tool_calls_history.append(
-                {
-                    "turn": 0,
-                    "tool_call_id": tool_result.tool_call_id,
-                    "result": tool_result.content,
-                    "success": tool_result.success,
-                }
+            episode.actions.append(
+                Action(
+                    role="dm",
+                    tool_calls=result.tool_calls,
+                    content=result.content,
+                )
             )
 
         logger.debug(f"Scenario generated with {len(tool_results)} tool calls")
@@ -431,7 +355,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
 
         try:
-            user_result, user_tool_results = await generate_with_tools_loop(
+            user_result, user_tool_results = await self.generation_wrappers[
+                "followup"
+            ].generate_with_tools(
                 self.generation_wrappers["followup"],
                 user_action_conversation,
                 PLAYER_TOOLS,
@@ -522,10 +448,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Serialize tool_calls_history to JSON to avoid schema mismatch
         # (different tools return different result structures)
         tool_calls_history_json = (
-            json.dumps(episode.tool_calls_history) if episode.tool_calls_history else None
+            json.dumps(episode.tool_calls_history)
+            if episode.tool_calls_history
+            else None
         )
         # Serialize conversation to JSON for consistent schema
-        conversation_json = json.dumps(episode.conversation) if episode.conversation else None
+        conversation_json = (
+            json.dumps(episode.conversation) if episode.conversation else None
+        )
         return [
             {
                 "conversation": conversation_json,

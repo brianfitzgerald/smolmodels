@@ -17,13 +17,14 @@ from synthetic_data.generation import (
     get_generation_wrapper,
 )
 from synthetic_data.gutenberg_parser import super_cleaner
+from synthetic_data.gutenberg_process import get_gutenberg_subset
 from synthetic_data.prompts import (
     format_classify_fiction_prompt,
     format_writing_backtranslation_prompt,
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTaskV1, RunMode, get_gutenberg_subset
+from synthetic_data.tasks import BaseTaskV1, RunMode
 from synthetic_data.utils import Conversation, DatasetFormat
 
 

@@ -18,14 +18,14 @@ from synthetic_data.generation import (
     GenWrapperArgs,
     RemoteModel,
     get_generation_wrapper,
-    save_output_dataset,
 )
+from synthetic_data.generation_utils import GenerationResult, save_output_dataset
 from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
-from synthetic_data.tasks.roleplaying import (
-    RoleplayingGameMultiStepTask,
-)
 from synthetic_data.tasks.next_chapter import (
     GutenbergSummaryContinuation,
+)
+from synthetic_data.tasks.roleplaying import (
+    RoleplayingGameMultiStepTask,
 )
 from synthetic_data.utils import DatasetFormat
 
@@ -222,7 +222,7 @@ class AutoscalingGenerationManager:
 
     async def generate_with_autoscaling(
         self, wrapper: GenerationWrapper, conversations: List[Any], **kwargs: Any
-    ) -> List[str]:
+    ) -> List[GenerationResult]:
         """Generate with autoscaling based on throughput"""
         wrapper_info = self.get_wrapper_info(wrapper)
         provider = wrapper_info.provider
@@ -415,7 +415,7 @@ async def process_single_step_task(
     )
 
     # Format output rows
-    return task.format_output_rows(completions, processed_batches)
+    return completions  # ty:ignore[invalid-return-type]
 
 
 async def process_multi_step_task(
@@ -433,18 +433,16 @@ async def process_multi_step_task(
             raise ValueError("No wrappers registered in autoscaling manager")
 
         # Set the generation wrapper in the episode
-        episode = await task.start_episode(row)
+        episode = await task.initial_observation(row)
 
         # Run episode steps until completion
         while True:
-            step_result = await task.step_episode(episode)
+            step_result = await task.step(episode)
             if (
                 step_result
             ):  # If step_episode returns non-empty list, episode is complete
                 break
 
-        # Get output row
-        output_rows = task.get_output_row(episode)
         results.extend(output_rows)
 
     return results
@@ -557,7 +555,7 @@ def main(
 
     asyncio.run(
         run_task(
-            task,  # pyright: ignore[reportArgumentType]
+            task,  # pyright: ignore[reportArgumentType]  # ty:ignore[invalid-argument-type]
             generation_wrapper,
             input_dataset,
             output_dataset,

@@ -20,7 +20,8 @@ from synthetic_data.utils import (
 
 MAX_RETRIES = 10
 
-GenerationRole = Literal["generation", "followup", "parameter"]
+# Used for role playing tasks
+GenerationRole = Literal["dungeon_master", "player", "adventure_parameters"]
 
 RemoteModel = Literal[
     "claude-4-sonnet",

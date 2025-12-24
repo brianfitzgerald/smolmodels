@@ -3,9 +3,7 @@ from abc import ABC
 from typing import Generic, List, Literal, Optional, TypeVar
 
 import pandas as pd
-import polars as pl
 from datasets import Dataset, load_dataset
-from huggingface_hub import snapshot_download
 from loguru import logger
 
 from synthetic_data.generation import (
@@ -15,7 +13,6 @@ from synthetic_data.generation import (
     get_generation_wrapper,
 )
 from synthetic_data.generation_utils import GenerationRole
-from synthetic_data.gutenberg_process import get_gutenberg_subset
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
@@ -23,8 +20,9 @@ from synthetic_data.utils import (
 
 RunMode = Literal["modal", "cli", "notebook"]
 
-# Generic type for sample dataclasses
+# Type for the input to the initial_observation function
 SampleT = TypeVar("SampleT")
+# Type for the finished episode
 EpisodeT = TypeVar("EpisodeT")
 
 
@@ -130,6 +128,12 @@ class BaseTaskV1(ABC):
 
 
 class BaseTask(ABC, Generic[SampleT, EpisodeT]):
+    """
+    Base task class for multi-step tasks.
+    EpisodeT is the type for the finished episode
+    SampleT is the type for the input sample data.
+    """
+
     seed_data_location: str | None = None
     seed_data_format: DatasetFormat = DatasetFormat.SYNTHETIC
     output_dataset_name: str
@@ -201,16 +205,11 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         """
         raise NotImplementedError
 
-    async def start_episode(self, sample: SampleT) -> EpisodeT:
+    async def initial_observation(self, sample: SampleT) -> EpisodeT:
         raise NotImplementedError
 
-    async def step_episode(self, episode: EpisodeT) -> EpisodeT | None:
+    async def step(self) -> EpisodeT | None:
         """
-        Perform one step of the episode.
-        If the episode is complete, return the episode.
-        Otherwise, return None.
+        Step the episode. Returns the episode if finished.
         """
-        raise NotImplementedError
-
-    def get_output_row(self, episode: EpisodeT) -> list[dict]:
         raise NotImplementedError
