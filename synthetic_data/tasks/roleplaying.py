@@ -1,18 +1,32 @@
+import json
 import random
-import re
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import Any
 
 from datasets import Dataset
 from jinja2 import Template
 from loguru import logger
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+)
 
-from synthetic_data.generation import GenerationArgs, GenerationWrapper, RemoteModel
+from synthetic_data.generation import (
+    GenerationArgs,
+    GenerationResult,
+    GenerationWrapper,
+    RemoteModel,
+)
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     GAME_PARAMETER_PROMPT,
     ROLEPLAYING_PROMPT,
     USER_ACTION_PROMPT,
+)
+from synthetic_data.tasks.roleplaying_tools import (
+    DM_TOOLS,
+    PLAYER_TOOLS,
+    ToolResult,
+    execute_tool_calls,
 )
 from synthetic_data.utils import (
     Conversation,
@@ -22,100 +36,7 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
-
-# Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
-DICE_PATTERN = re.compile(r"\b(\d*)d(\d+)([+-]\d+)?\b", re.IGNORECASE)
-
-
-def roll_dice(
-    num_dice: int, num_sides: int, modifier: int = 0
-) -> tuple[list[int], int]:
-    """Roll dice and return individual rolls and total."""
-    rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
-    total = sum(rolls) + modifier
-    return rolls, total
-
-
-def parse_and_roll_dice(text: str) -> list[dict]:
-    """Find all dice notation in text and roll them.
-
-    Returns a list of roll results with notation, rolls, and total.
-    """
-    results = []
-    for match in DICE_PATTERN.finditer(text):
-        num_dice = int(match.group(1)) if match.group(1) else 1
-        num_sides = int(match.group(2))
-        modifier = int(match.group(3)) if match.group(3) else 0
-
-        rolls, total = roll_dice(num_dice, num_sides, modifier)
-
-        notation = f"{num_dice}d{num_sides}"
-        if modifier > 0:
-            notation += f"+{modifier}"
-        elif modifier < 0:
-            notation += str(modifier)
-
-        results.append(
-            {
-                "notation": notation,
-                "rolls": rolls,
-                "modifier": modifier,
-                "total": total,
-            }
-        )
-    return results
-
-
-def format_dice_results(results: list[dict]) -> str:
-    """Format dice roll results as a string."""
-    if not results:
-        return ""
-
-    parts = []
-    for r in results:
-        rolls_str = ", ".join(str(x) for x in r["rolls"])
-        if r["modifier"] != 0:
-            mod_str = (
-                f" + {r['modifier']}"
-                if r["modifier"] > 0
-                else f" - {abs(r['modifier'])}"
-            )
-            parts.append(
-                f"[{r['notation']}: rolled {rolls_str}{mod_str} = {r['total']}]"
-            )
-        else:
-            if len(r["rolls"]) == 1:
-                parts.append(f"[{r['notation']}: {r['total']}]")
-            else:
-                parts.append(f"[{r['notation']}: rolled {rolls_str} = {r['total']}]")
-
-    return "\n".join(parts)
-
-
-async def generate_with_retry(
-    wrapper: GenerationWrapper,
-    conversations: list[Conversation],
-    required_tags: list[str],
-    args: GenerationArgs | None = None,
-) -> dict[str, str] | None:
-    """Generate and parse XML tags, retrying on parse failure."""
-    for attempt in range(MAX_PARSE_RETRIES):
-        response = await wrapper.generate(conversations, args)
-        try:
-            return parse_xml_tags(response[0], required_tags=required_tags)
-        except ValueError as e:
-            if attempt < MAX_PARSE_RETRIES - 1:
-                logger.warning(f"Parse failed (attempt {attempt + 1}), retrying: {e}")
-            else:
-                logger.error(f"Parse failed after {MAX_PARSE_RETRIES} attempts")
-                return None
-
-
-class ScenarioTags(TypedDict, total=False):
-    game_design: str
-    dm_narration: str
-    dm_response: str
-    npc_dialogue: str | None
+MAX_TOOL_ITERATIONS = 5
 
 
 @dataclass
@@ -124,25 +45,99 @@ class RPGEpisode:
     game_setting: str | None = None
     player_character: str | None = None
     input_prompt: str | None = None
-    scenario: str | None = None
-    scenario_tags: ScenarioTags | None = None
     parameters_generated: bool = False
     scenario_generated: bool = False
     conversation: Conversation = field(default_factory=list)
-    dice_rolls: list[dict] = field(default_factory=list)  # Track all dice rolls
+    tool_calls_history: list[dict[str, Any]] = field(default_factory=list)
     run_metadata: dict = field(default_factory=dict)
-    seed: int = random.randint(0, 2**32)
+    seed: int = field(default_factory=lambda: random.randint(0, 2**32))
 
 
 USE_DEV_MODELS = True
 
 
+def format_tool_result_for_conversation(result: ToolResult) -> dict[str, Any]:
+    """Format a tool result for inclusion in the conversation."""
+    return {
+        "role": "tool",
+        "tool_call_id": result.tool_call_id,
+        "content": json.dumps(result.content) if result.success else result.error,
+    }
+
+
+def format_tool_calls_for_conversation(
+    tool_calls: list[ChatCompletionMessageToolCall],
+) -> list[dict[str, Any]]:
+    """Format tool calls for inclusion in assistant message."""
+    return [
+        {
+            "id": tc.id,
+            "type": tc.type,
+            "function": {
+                "name": tc.function.name,
+                "arguments": tc.function.arguments,
+            },
+        }
+        for tc in tool_calls
+    ]
+
+
+async def generate_with_tools_loop(
+    wrapper: GenerationWrapper,
+    conversation: Conversation,
+    tools: list[dict[str, Any]],
+    args: GenerationArgs | None = None,
+    max_iterations: int = MAX_TOOL_ITERATIONS,
+) -> tuple[GenerationResult, list[ToolResult]]:
+    """
+    Generate with tools, executing tool calls and continuing until the model stops.
+    Returns the final generation result and all tool results from the loop.
+    """
+    current_conversation = list(conversation)
+    all_tool_results: list[ToolResult] = []
+
+    gen_args = args or GenerationArgs()
+    gen_args = gen_args.model_copy(update={"tools": tools})
+
+    result: GenerationResult | None = None
+
+    for iteration in range(max_iterations):
+        results = await wrapper.generate_with_tools([current_conversation], gen_args)
+        if not results:
+            raise ValueError("No generation results returned")
+
+        result = results[0]
+
+        if not result.tool_calls:
+            return result, all_tool_results
+
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": result.content,
+            "tool_calls": format_tool_calls_for_conversation(result.tool_calls),
+        }
+        current_conversation.append(assistant_message)  # type: ignore
+
+        tool_results = execute_tool_calls(result.tool_calls)
+        all_tool_results.extend(tool_results)
+
+        for tool_result in tool_results:
+            current_conversation.append(format_tool_result_for_conversation(tool_result))  # type: ignore
+
+        logger.debug(f"Iteration {iteration + 1}: executed {len(result.tool_calls)} tool calls")
+
+    logger.warning(f"Reached max iterations ({max_iterations}) in tool loop")
+    if result is None:
+        raise ValueError("No generation result after tool loop")
+    return result, all_tool_results
+
+
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     """
-    Multi-step variant:
+    Multi-step roleplaying game task using native tool calling:
     Step 1: Generate game parameters (setting and characters)
-    Step 2: Generate the roleplaying scenario using ROLEPLAYING_PROMPT
-    Step 3: Generate simulated user responses
+    Step 2: Generate the initial scenario using DM tools
+    Step 3: Generate turn-by-turn conversation with tool usage
     """
 
     seed_data_format = DatasetFormat.CUSTOM
@@ -174,7 +169,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         Since this is a synthetic task, we create dummy data.
         """
         logger.info("Loading custom dataset for roleplaying game")
-        # Create dummy data for the roleplaying game
         dummy_data = [
             {
                 "input_prompt": "A mysterious forest adventure",
@@ -187,7 +181,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def start_episode(self, sample: None) -> RPGEpisode:
         seed = hash(str(sample)) % (2**32)
-        # Update wrappers with seed for deterministic generation
         ep = RPGEpisode()
         ep.run_metadata = {
             "generation_model": self.generation_wrappers["generation"].provider_name,
@@ -202,73 +195,84 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
-        # Step 0: Generate game parameters and scenario if not done yet
         if not episode.parameters_generated:
             await self._generate_parameters(episode)
             episode.parameters_generated = True
-            return None  # Still in progress
+            return None
 
         if not episode.scenario_generated:
             await self._generate_scenario(
                 episode, self.generation_wrappers["generation"]
             )
             episode.scenario_generated = True
-            return None  # Still in progress
+            return None
 
-        # Step 1+: Generate turn-by-turn conversation
         if episode.step_count < self.max_user_responses:
             success = await self._generate_turn(
                 episode, self.generation_wrappers["followup"]
             )
             if not success:
-                # If we have at least 1 user action, finish the sample with what we have
                 if self._has_user_action(episode):
                     logger.warning(
                         f"Turn generation failed at step {episode.step_count + 1}, "
                         f"finishing episode with {episode.step_count} turns"
                     )
-                    return episode  # Return partial episode
+                    return episode
                 else:
                     raise ValueError(
                         "Failed to generate turn before any user actions were collected"
                     )
             episode.step_count += 1
-            return None  # Still in progress
+            return None
 
-        return episode  # Episode complete
+        return episode
 
     async def _generate_parameters(self, episode: RPGEpisode):
-        """Generate game parameters (setting and characters)"""
-        parameter_conversation = [
+        """Generate game parameters (setting and characters) using XML parsing."""
+        parameter_conversation: Conversation = [
             {
                 "role": "system",
-                "content": GAME_PARAMETER_PROMPT
-                + "\n\nYou are tasked with generating game parameters for a roleplaying scenario. Create engaging and detailed content.",
+                "content": GAME_PARAMETER_PROMPT,
             },
             {
                 "role": "user",
-                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {episode.input_prompt}\n\nPlease provide:\n1. A detailed GAME_SETTING (2-3 paragraphs)\n2. PLAYER_CHARACTER information (1-2 paragraphs describing the main character)",
+                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {episode.input_prompt or 'A mysterious adventure'}",
             },
         ]
 
         logger.info(
             f"Generating game parameters with {self.generation_model_names['parameter']}"
         )
-        parsed_tags = await generate_with_retry(
-            self.generation_wrappers["parameter"],
-            [parameter_conversation],
-            required_tags=["game_setting", "player_character"],
-        )
-        if parsed_tags is None:
-            raise ValueError("Failed to generate game parameters")
-        episode.game_setting = parsed_tags["game_setting"]
-        episode.player_character = parsed_tags["player_character"]
 
-        logger.debug(f"\nGame setting:\n{episode.game_setting}")
-        logger.debug(f"\nPlayer character:\n{episode.player_character}")
+        for attempt in range(MAX_PARSE_RETRIES):
+            response = await self.generation_wrappers["parameter"].generate(
+                [parameter_conversation]
+            )
+            try:
+                parsed_tags = parse_xml_tags(
+                    response[0], required_tags=["game_setting", "player_character"]
+                )
+                episode.game_setting = parsed_tags["game_setting"]
+                episode.player_character = parsed_tags["player_character"]
+                logger.debug(f"\nGame setting:\n{episode.game_setting}")
+                logger.debug(f"\nPlayer character:\n{episode.player_character}")
+                return
+            except ValueError as e:
+                if attempt < MAX_PARSE_RETRIES - 1:
+                    logger.warning(f"Parse failed (attempt {attempt + 1}), retrying: {e}")
+                else:
+                    raise ValueError(f"Failed to generate game parameters after {MAX_PARSE_RETRIES} attempts")
 
     def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
         template: Template = Template(ROLEPLAYING_PROMPT)
+        formatted_prompt = template.render(
+            GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
+            PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
+        )
+        return formatted_prompt
+
+    def _user_action_system_prompt(self, episode: RPGEpisode) -> str:
+        template: Template = Template(USER_ACTION_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
             PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
@@ -284,65 +288,60 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     {"role": "assistant", "content": message["content"]}  # type: ignore
                 )
             elif message["role"] == "assistant":
-                flipped_conversation.append(
-                    {"role": "user", "content": message["content"]}  # type: ignore
-                )
+                new_msg: dict[str, Any] = {"role": "user", "content": message["content"]}
+                if "tool_calls" in message:
+                    new_msg["tool_calls"] = message["tool_calls"]
+                flipped_conversation.append(new_msg)  # type: ignore
+            elif message["role"] == "tool":
+                flipped_conversation.append(message)
             else:
-                # Keep system messages as-is
                 flipped_conversation.append(message)
         return flipped_conversation
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ):
-        """Generate the initial roleplaying scenario"""
-
+        """Generate the initial roleplaying scenario using DM tools."""
         scenario_conversation: Conversation = [
             {
-                "role": "user",
+                "role": "system",
                 "content": self._game_master_system_prompt(episode),
+            },
+            {
+                "role": "user",
+                "content": "Begin the adventure. Set the scene and introduce the player to their situation.",
             },
         ]
 
         logger.info(
             f"Generating scenario with {self.generation_model_names['generation']}"
         )
-        parsed_tags = await generate_with_retry(
+
+        result, tool_results = await generate_with_tools_loop(
             generation_wrapper,
-            [scenario_conversation],
-            required_tags=["game_design", "dm_narration"],
-            args=GenerationArgs(
-                max_tokens=8192, temperature=1, prefill="<game_design>"
-            ),
+            scenario_conversation,
+            DM_TOOLS,
+            GenerationArgs(max_tokens=8192, temperature=1),
         )
-        if parsed_tags is None:
-            raise ValueError("Failed to generate scenario")
-        episode.scenario_tags = ScenarioTags(**parsed_tags)
-        opening_message = parsed_tags["dm_narration"]
-        if "npc_dialogue" in parsed_tags:
-            opening_message += f"\n\n{parsed_tags['npc_dialogue']}"
 
-        # Check for dice rolls in the opening narration
-        dice_results = parse_and_roll_dice(opening_message)
-        if dice_results:
-            for result in dice_results:
-                episode.dice_rolls.append(
-                    {
-                        "turn": 0,
-                        **result,
-                    }
-                )
-            dice_str = format_dice_results(dice_results)
-            logger.info(f"Dice rolled in opening: {dice_str}")
-            opening_message += f"\n\n{dice_str}"
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": result.content,
+        }
+        if result.tool_calls:
+            assistant_message["tool_calls"] = format_tool_calls_for_conversation(result.tool_calls)
 
-        episode.conversation.append(
-            {
-                "role": "assistant",
-                "content": opening_message,
-            }
-        )
-        logger.debug(f"Scenario:\n{episode.scenario_tags}")
+        episode.conversation.append(assistant_message)  # type: ignore
+
+        for tool_result in tool_results:
+            episode.tool_calls_history.append({
+                "turn": 0,
+                "tool_call_id": tool_result.tool_call_id,
+                "result": tool_result.content,
+                "success": tool_result.success,
+            })
+
+        logger.debug(f"Scenario generated with {len(tool_results)} tool calls")
 
     def _has_user_action(self, episode: RPGEpisode) -> bool:
         """Check if the episode has at least one user action."""
@@ -351,26 +350,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     async def _generate_turn(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ) -> bool:
-        """Generate a single turn of conversation (user response + assistant response).
-
+        """
+        Generate a single turn of conversation (player action + DM response).
         Returns True if the turn was generated successfully, False if generation failed.
         """
-
-        assert episode.scenario_tags is not None
-
-        # Flip roles in the conversation: user becomes assistant and vice versa
         flipped_conversation = self._flip_conversation_roles(episode.conversation)
-
-        template: Template = Template(USER_ACTION_PROMPT)
-        formatted_user_action_prompt = template.render(
-            GAME_SETTING=episode.game_setting,
-            PLAYER_CHARACTER=episode.player_character,
-        )
 
         user_action_conversation: Conversation = [
             {
                 "role": "system",
-                "content": formatted_user_action_prompt,
+                "content": self._user_action_system_prompt(episode),
             },
             *flipped_conversation,
         ]
@@ -379,82 +368,91 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(
             f"Generating user response {episode.step_count + 1} with {self.generation_model_names['followup']}"
         )
-        user_response_tags = await generate_with_retry(
-            self.generation_wrappers["followup"],
-            [user_action_conversation],
-            required_tags=["user_action"],
-        )
-        if user_response_tags is None:
-            logger.warning("Failed to generate user response")
+
+        try:
+            user_result, user_tool_results = await generate_with_tools_loop(
+                self.generation_wrappers["followup"],
+                user_action_conversation,
+                PLAYER_TOOLS,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate user response: {e}")
             return False
-        user_action_content = user_response_tags["user_action"]
 
-        episode.conversation.append({"role": "user", "content": user_action_content})
+        user_message: dict[str, Any] = {
+            "role": "user",
+            "content": user_result.content,
+        }
+        if user_result.tool_calls:
+            user_message["tool_calls"] = format_tool_calls_for_conversation(user_result.tool_calls)
 
-        # Generate assistant response
-        assistant_conversation: Conversation = [
+        episode.conversation.append(user_message)  # type: ignore
+
+        for tool_result in user_tool_results:
+            episode.tool_calls_history.append({
+                "turn": episode.step_count + 1,
+                "role": "player",
+                "tool_call_id": tool_result.tool_call_id,
+                "result": tool_result.content,
+                "success": tool_result.success,
+            })
+
+        dm_conversation: Conversation = [
             {
                 "role": "system",
                 "content": self._game_master_system_prompt(episode),
             },
-            {
-                "role": "user",
-                "content": f"Game Setting: {episode.game_setting}\nPlayer Character: {episode.player_character}\nPlayer Response: {user_action_content}\n\nRespond as the dungeon master:",
-            },
             *episode.conversation,
         ]
 
-        log_conversation(assistant_conversation)
+        log_conversation(dm_conversation)
 
         logger.info(
-            f"Generating assistant response {episode.step_count + 1} with {self.generation_model_names['generation']}"
+            f"Generating DM response {episode.step_count + 1} with {self.generation_model_names['generation']}"
         )
-        parsed_tags = await generate_with_retry(
-            generation_wrapper,
-            [assistant_conversation],
-            required_tags=["dm_narration"],
-        )
-        if parsed_tags is None:
-            logger.warning("Failed to generate assistant response")
+
+        try:
+            dm_result, dm_tool_results = await generate_with_tools_loop(
+                generation_wrapper,
+                dm_conversation,
+                DM_TOOLS,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate DM response: {e}")
             return False
-        formatted_dm_response = parsed_tags["dm_narration"]
 
-        # Check for dice rolls in the DM response
-        dice_results = parse_and_roll_dice(formatted_dm_response)
-        if dice_results:
-            # Track the rolls
-            for result in dice_results:
-                episode.dice_rolls.append(
-                    {
-                        "turn": episode.step_count + 1,
-                        **result,
-                    }
-                )
-            # Format and append dice results to the response
-            dice_str = format_dice_results(dice_results)
-            logger.info(f"Dice rolled: {dice_str}")
-            formatted_dm_response += f"\n\n{dice_str}"
+        dm_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": dm_result.content,
+        }
+        if dm_result.tool_calls:
+            dm_message["tool_calls"] = format_tool_calls_for_conversation(dm_result.tool_calls)
 
-        episode.conversation.append(
-            {"role": "assistant", "content": formatted_dm_response}
-        )
+        episode.conversation.append(dm_message)  # type: ignore
+
+        for tool_result in dm_tool_results:
+            episode.tool_calls_history.append({
+                "turn": episode.step_count + 1,
+                "role": "dm",
+                "tool_call_id": tool_result.tool_call_id,
+                "result": tool_result.content,
+                "success": tool_result.success,
+            })
 
         logger.info(f"Generated turn {episode.step_count + 1}")
         return True
 
     def get_output_row(self, episode: RPGEpisode) -> list[dict]:
-        # Use None for empty dice_rolls to avoid schema inference issues
-        dice_rolls = episode.dice_rolls if episode.dice_rolls else None
+        tool_calls_history = episode.tool_calls_history if episode.tool_calls_history else None
         return [
             {
                 "conversation": episode.conversation,
                 "game_setting": episode.game_setting or "No setting generated",
-                "player_character": episode.player_character
-                or "No characters generated",
+                "player_character": episode.player_character or "No characters generated",
                 "generation_model": self.generation_model_names["generation"],
                 "followup_model": self.generation_model_names["followup"],
                 "parameter_model": self.generation_model_names["parameter"],
                 "num_turns": episode.step_count,
-                "dice_rolls": dice_rolls,
+                "tool_calls_history": tool_calls_history,
             }
         ]

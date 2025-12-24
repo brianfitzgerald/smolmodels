@@ -14,7 +14,9 @@
       "Bash(ls:*)",
       "Bash(uv pip show:*)",
       "Bash(uv sync:*)",
-      "Bash(ty check:*)"
+      "Bash(ty check:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

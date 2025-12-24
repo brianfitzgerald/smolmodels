@@ -1,9 +1,10 @@
 import asyncio
+import json
 import os
 import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
-from typing import Dict, Literal, Optional, cast
+from typing import Any, Dict, Literal, Optional, cast
 
 import google.genai as genai
 import google.genai.types
@@ -12,10 +13,16 @@ from anthropic import AnthropicError, AsyncAnthropic
 from anthropic import NotGiven as AnthropicNotGiven
 from anthropic.types.message import Message
 from anthropic.types.message_param import MessageParam
+from anthropic.types.text_block import TextBlock
+from anthropic.types.tool_use_block import ToolUseBlock
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
 from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+    Function as ToolCallFunction,
+)
 from pydantic import BaseModel
 
 from synthetic_data.utils import (
@@ -74,6 +81,16 @@ class GenerationArgs(BaseModel):
     n_retries: int = MAX_RETRIES
     prefill: str | None = None
     thinking_budget: int | None = None
+    tools: list[dict[str, Any]] | None = None
+
+
+@dataclass
+class GenerationResult:
+    """Result from a generation call that may include tool calls."""
+
+    content: str | None
+    tool_calls: list[ChatCompletionMessageToolCall]
+    stop_reason: str
 
 
 class GenWrapperArgs(BaseModel):
@@ -111,6 +128,22 @@ class GenerationWrapper(ABC):
         If args is provided, it will override the args in the wrapper.
         """
         pass
+
+    async def generate_with_tools(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[GenerationResult]:
+        """
+        Generate completions with tool calling support.
+        Returns structured GenerationResult objects that may contain tool calls.
+
+        Default implementation falls back to regular generate() without tool support.
+        Subclasses should override this for native tool calling.
+        """
+        results = await self.generate(conversations, args)
+        return [
+            GenerationResult(content=r, tool_calls=[], stop_reason="end_turn")
+            for r in results
+        ]
 
     def set_max_concurrent(self, max_concurrent: int) -> None:
         self.gen_wrapper_args.max_concurrent = max_concurrent
@@ -209,6 +242,94 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             except Exception as e:
                 logger.error(
                     f"Error while generating: {e}, retries left: {self.n_retries}"
+                )
+                traceback.print_exc()
+                await asyncio.sleep(1)
+                self.n_retries -= 1
+                if self.n_retries <= 0:
+                    raise e
+
+    async def generate_with_tools(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[GenerationResult]:
+        """Generate with native OpenAI tool calling support."""
+        args = args or self.gen_wrapper_args.default_generation_args
+
+        if not args.tools:
+            # Fall back to regular generate if no tools provided
+            return await super().generate_with_tools(conversations, args)
+
+        self.n_retries = MAX_RETRIES
+        while True:
+            completion_requests = []
+            for conversation in conversations:
+                temperature = args.temperature
+                if self.gen_wrapper_args.is_reasoning_model:
+                    temperature = NOT_GIVEN
+
+                # Convert tools to OpenAI format
+                openai_tools = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool["name"],
+                            "description": tool["description"],
+                            "parameters": tool["input_schema"],
+                        },
+                    }
+                    for tool in args.tools
+                ]
+
+                request = self.oai_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=conversation,  # type: ignore
+                    temperature=temperature,
+                    max_completion_tokens=args.max_tokens,
+                    extra_body=self.extra_body,
+                    seed=args.seed,
+                    tools=openai_tools,  # type: ignore
+                )
+                completion_requests.append(request)
+
+            try:
+                results: list[ChatCompletion] = await asyncio.gather(
+                    *completion_requests
+                )
+                if not results:
+                    logger.error(results)
+                    raise ValueError("No completions returned")
+
+                generation_results = []
+                for result in results:
+                    if not result.choices:
+                        continue
+
+                    choice = result.choices[0]
+                    message = choice.message
+                    content = message.content
+                    # Filter to only include function tool calls (not custom tools)
+                    # The OpenAI SDK returns a union type that includes custom tools
+                    tool_calls: list[ChatCompletionMessageToolCall] = [
+                        tc for tc in (message.tool_calls or [])
+                        if hasattr(tc, "function") and tc.function is not None  # type: ignore[union-attr]
+                    ]
+
+                    generation_results.append(
+                        GenerationResult(
+                            content=content,
+                            tool_calls=tool_calls,
+                            stop_reason=choice.finish_reason or "stop",
+                        )
+                    )
+
+                return generation_results
+
+            except LengthFinishReasonError as e:
+                logger.error(f"Max length error: {e}")
+                return []
+            except Exception as e:
+                logger.error(
+                    f"Error while generating with tools: {e}, retries left: {self.n_retries}"
                 )
                 traceback.print_exc()
                 await asyncio.sleep(1)
@@ -318,6 +439,77 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             return completions
         except AnthropicError as e:
             logger.error(f"Error while generating: {e}")
+            return []
+
+    async def generate_with_tools(
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
+    ) -> list[GenerationResult]:
+        """Generate with native Anthropic tool calling support."""
+        args = args or self.gen_wrapper_args.default_generation_args
+
+        if not args.tools:
+            # Fall back to regular generate if no tools provided
+            return await super().generate_with_tools(conversations, args)
+
+        try:
+            completion_requests = []
+            for conversation in conversations:
+                assert self.gen_wrapper_args.model_id is not None, (
+                    "model_id is required for AnthropicGenerationWrapper"
+                )
+                system_msg: str | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
+                conversation = cast(list[MessageParam], conversation)
+                if conversation[0]["role"] == "system":
+                    system_msg = conversation[0]["content"]  # type: ignore
+                    conversation = conversation[1:]
+
+                request = self.client.messages.create(
+                    model=self.gen_wrapper_args.model_id,
+                    messages=conversation,
+                    system=system_msg,
+                    temperature=args.temperature
+                    if args.temperature is not None
+                    else ANTHROPIC_NOT_GIVEN,
+                    max_tokens=args.max_tokens,
+                    tools=args.tools,  # type: ignore
+                )
+                completion_requests.append(request)
+
+            results: list[Message] = await asyncio.gather(*completion_requests)
+            generation_results = []
+
+            for result in results:
+                content: str | None = None
+                tool_calls: list[ChatCompletionMessageToolCall] = []
+
+                for block in result.content:
+                    if isinstance(block, TextBlock):
+                        content = block.text
+                    elif isinstance(block, ToolUseBlock):
+                        # Convert Anthropic tool use to OpenAI format
+                        tool_calls.append(
+                            ChatCompletionMessageToolCall(
+                                id=block.id,
+                                type="function",
+                                function=ToolCallFunction(
+                                    name=block.name,
+                                    arguments=json.dumps(block.input),
+                                ),
+                            )
+                        )
+
+                generation_results.append(
+                    GenerationResult(
+                        content=content,
+                        tool_calls=tool_calls,
+                        stop_reason=result.stop_reason or "end_turn",
+                    )
+                )
+
+            return generation_results
+
+        except AnthropicError as e:
+            logger.error(f"Error while generating with tools: {e}")
             return []
 
 

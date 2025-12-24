@@ -1,0 +1,315 @@
+"""
+Tool definitions and execution functions for the roleplaying game task.
+Supports both Dungeon Master and Player roles with native API tool calling.
+"""
+
+import json
+import random
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+    Function as ToolCallFunction,
+)
+
+# Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
+DICE_PATTERN = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
+
+
+@dataclass
+class ToolResult:
+    """Result of executing a tool."""
+
+    tool_call_id: str
+    content: dict[str, Any]
+    success: bool = True
+    error: str | None = None
+
+
+# Tool Schema Definitions (Anthropic format - can be converted for OpenAI)
+
+ROLL_DICE_TOOL = {
+    "name": "roll_dice",
+    "description": "Roll dice using standard RPG notation. Use this for any random chance events, skill checks, combat, or when randomness is needed.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "notation": {
+                "type": "string",
+                "description": "Dice notation like '2d6+3' (roll 2 six-sided dice and add 3), '1d20' (roll one 20-sided die), '3d8-2' (roll 3 eight-sided dice and subtract 2). Format: [count]d[sides][+/-modifier]",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Brief explanation of what this roll is for (e.g., 'attack roll', 'perception check', 'damage')",
+            },
+        },
+        "required": ["notation", "reason"],
+    },
+}
+
+RANDOM_CHOICE_TOOL = {
+    "name": "random_choice",
+    "description": "Randomly select one option from a list. Use this when the outcome should be randomly determined from multiple possibilities.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of options to randomly choose from",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Brief explanation of what this choice determines",
+            },
+        },
+        "required": ["options", "reason"],
+    },
+}
+
+PRESENT_CHOICES_TOOL = {
+    "name": "present_choices",
+    "description": "Present a set of choices to the player. Use this when you want to give the player specific options to choose from.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": "The question or situation prompting the choice",
+            },
+            "choices": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "Short identifier"},
+                        "description": {
+                            "type": "string",
+                            "description": "Description of this choice",
+                        },
+                    },
+                    "required": ["id", "description"],
+                },
+                "description": "List of choices available to the player",
+            },
+        },
+        "required": ["prompt", "choices"],
+    },
+}
+
+SPEAK_TOOL = {
+    "name": "speak",
+    "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "character": {
+                "type": "string",
+                "description": "Name of the character speaking",
+            },
+            "message": {"type": "string", "description": "What the character says"},
+            "tone": {
+                "type": "string",
+                "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
+            },
+        },
+        "required": ["character", "message"],
+    },
+}
+
+ACTION_TOOL = {
+    "name": "action",
+    "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {
+                "type": "string",
+                "description": "Description of the action being taken",
+            },
+            "target": {
+                "type": "string",
+                "description": "Optional target of the action (object, NPC, location)",
+            },
+        },
+        "required": ["description"],
+    },
+}
+
+# Tool collections by role
+DM_TOOLS = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, PRESENT_CHOICES_TOOL, SPEAK_TOOL]
+PLAYER_TOOLS = [ROLL_DICE_TOOL, SPEAK_TOOL, ACTION_TOOL]
+
+# All tools combined
+ALL_TOOLS = [
+    ROLL_DICE_TOOL,
+    RANDOM_CHOICE_TOOL,
+    PRESENT_CHOICES_TOOL,
+    SPEAK_TOOL,
+    ACTION_TOOL,
+]
+
+
+def convert_to_openai_format(anthropic_tools: list[dict]) -> list[dict]:
+    """Convert Anthropic tool format to OpenAI function calling format."""
+    openai_tools = []
+    for tool in anthropic_tools:
+        openai_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
+                },
+            }
+        )
+    return openai_tools
+
+
+def parse_dice_notation(notation: str) -> tuple[int, int, int] | None:
+    """Parse dice notation into (num_dice, num_sides, modifier).
+
+    Returns None if the notation is invalid.
+    """
+    match = DICE_PATTERN.match(notation.strip())
+    if not match:
+        return None
+
+    num_dice = int(match.group(1)) if match.group(1) else 1
+    num_sides = int(match.group(2))
+    modifier = int(match.group(3)) if match.group(3) else 0
+
+    return num_dice, num_sides, modifier
+
+
+def execute_roll_dice(notation: str, reason: str) -> ToolResult:
+    """Execute a dice roll and return the result."""
+    parsed = parse_dice_notation(notation)
+    if parsed is None:
+        return ToolResult(
+            tool_call_id="",
+            content={},
+            success=False,
+            error=f"Invalid dice notation: {notation}",
+        )
+
+    num_dice, num_sides, modifier = parsed
+    rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
+    total = sum(rolls) + modifier
+
+    return ToolResult(
+        tool_call_id="",
+        content={
+            "notation": notation,
+            "reason": reason,
+            "rolls": rolls,
+            "modifier": modifier,
+            "total": total,
+        },
+    )
+
+
+def execute_random_choice(options: list[str], reason: str) -> ToolResult:
+    """Execute a random choice from options."""
+    if not options:
+        return ToolResult(
+            tool_call_id="",
+            content={},
+            success=False,
+            error="No options provided",
+        )
+
+    chosen = random.choice(options)
+    return ToolResult(
+        tool_call_id="",
+        content={
+            "reason": reason,
+            "options": options,
+            "chosen": chosen,
+            "index": options.index(chosen),
+        },
+    )
+
+
+def execute_present_choices(
+    prompt: str, choices: list[dict[str, str]]
+) -> ToolResult:
+    """Present choices to the player."""
+    return ToolResult(
+        tool_call_id="",
+        content={
+            "prompt": prompt,
+            "choices": choices,
+            "awaiting_player_choice": True,
+        },
+    )
+
+
+def execute_speak(character: str, message: str, tone: str | None = None) -> ToolResult:
+    """Execute a speak action."""
+    result: dict[str, Any] = {
+        "character": character,
+        "message": message,
+    }
+    if tone:
+        result["tone"] = tone
+    return ToolResult(
+        tool_call_id="",
+        content=result,
+    )
+
+
+def execute_action(description: str, target: str | None = None) -> ToolResult:
+    """Execute a player action."""
+    result: dict[str, Any] = {
+        "description": description,
+        "executed": True,
+    }
+    if target:
+        result["target"] = target
+    return ToolResult(
+        tool_call_id="",
+        content=result,
+    )
+
+
+TOOL_EXECUTORS = {
+    "roll_dice": lambda args: execute_roll_dice(args["notation"], args["reason"]),
+    "random_choice": lambda args: execute_random_choice(
+        args["options"], args["reason"]
+    ),
+    "present_choices": lambda args: execute_present_choices(
+        args["prompt"], args["choices"]
+    ),
+    "speak": lambda args: execute_speak(
+        args["character"], args["message"], args.get("tone")
+    ),
+    "action": lambda args: execute_action(args["description"], args.get("target")),
+}
+
+
+def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolResult:
+    """Execute a tool call and return the result."""
+    tool_name = tool_call.function.name
+    executor = TOOL_EXECUTORS.get(tool_name)
+    if executor is None:
+        return ToolResult(
+            tool_call_id=tool_call.id,
+            content={},
+            success=False,
+            error=f"Unknown tool: {tool_name}",
+        )
+
+    # Parse the arguments from JSON string
+    arguments = json.loads(tool_call.function.arguments)
+    result = executor(arguments)
+    result.tool_call_id = tool_call.id
+    return result
+
+
+def execute_tool_calls(tool_calls: list[ChatCompletionMessageToolCall]) -> list[ToolResult]:
+    """Execute multiple tool calls and return results."""
+    return [execute_tool_call(tc) for tc in tool_calls]
