@@ -11,6 +11,7 @@ from datasets import Dataset
 from loguru import logger
 from pydantic import BaseModel
 
+from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
 from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
@@ -22,10 +23,8 @@ from synthetic_data.prompts import (
     tags_to_instruction,
 )
 from synthetic_data.screenplay_parser import ScreenplayParser
-from synthetic_data.tasks import BaseTaskV1, get_gutenberg_subset
+from synthetic_data.tasks import BaseTaskV1, RunMode, get_gutenberg_subset
 from synthetic_data.utils import Conversation, DatasetFormat
-from synthetic_data.tasks import RunMode
-from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
 
 
 @dataclass
@@ -72,7 +71,7 @@ class ScreenplaySummarize(BaseTaskV1):
                     "content": "Summarize the content of the following screenplay scene. Describe the actions of the characters and the contents of the scene. Start responding with the first character's actions or dialogue.",
                 },
                 {"role": "user", "content": scene},
-            ]
+            ]  # ty:ignore[invalid-assignment]
             conv_out.append(conv)
             self.in_rows_batch.append(sample)
         return conv_out
@@ -137,13 +136,15 @@ def _process_gutenberg_extraction_row(
 
 
 def _format_gutenberg_conv(sample: dict) -> Conversation:
-    return [
-        {
-            "role": "system",
-            "content": "Extract the dialogue, actions, and descriptions from the conversation given by the user.",
-        },
-        {"role": "user", "content": sample["text"]},
-    ]
+    system_message = {
+        "role": "system",
+        "content": "Extract the dialogue, actions, and descriptions from the conversation given by the user.",
+    }
+    user_message = {
+        "role": "user",
+        "content": sample["text"],
+    }
+    return [system_message, user_message]
 
 
 class SceneElementType(Enum):
@@ -393,7 +394,7 @@ async def score_writing(
             }
         ]
         for prompt, completion in zip(prompts, completions)
-    ]
+    ]  # ty:ignore[invalid-assignment]
     logger.info(
         f"Judging {len(judge_convs)} completions with {judge_generator.gen_wrapper_args.model_id}"
     )
@@ -418,7 +419,7 @@ async def generate_and_score(
 ):
     input_convs: list[Conversation] = [
         [{"role": "user", "content": row["instruction"]}] for row in input_rows
-    ]
+    ]  # ty:ignore[invalid-assignment]
     logger.info(
         f"Generating {len(input_convs)} completions with {generator.gen_wrapper_args.model_id}"
     )

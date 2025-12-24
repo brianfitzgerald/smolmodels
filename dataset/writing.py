@@ -1,22 +1,21 @@
 import asyncio
+import threading
 from collections import defaultdict
 from functools import partial
+from typing import Any, Coroutine, Optional, TypeVar
 
+import pandas as pd
+from datasets import Dataset
 from loguru import logger
+
+from model.reasoning import logger_reward
+from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
 from synthetic_data.generation import (
     GenerationWrapper,
     get_generation_wrapper,
 )
-from synthetic_data.creative_writing_bench.bench import CreativeWritingBench
-from trl_wrapper.wrapper_config import SmDataset
-from datasets import Dataset
-from typing import Coroutine, Optional, TypeVar
-import pandas as pd
-from trl.trainer.grpo_trainer import RewardFunc
 from synthetic_data.tasks.writing import score_writing
-import threading
-from model.reasoning import logger_reward
-from typing import Any
+from trl_wrapper.wrapper_config import SmDataset
 
 
 def _get_scores(score_dicts: list[dict[str, float | None]]) -> list[dict[str, float]]:
@@ -186,7 +185,7 @@ def llm_judge_func(
 
 def create_llm_judge_func(
     generation_wrapper: GenerationWrapper, bench: CreativeWritingBench, **kwargs
-) -> RewardFunc:
+):
     """Create a function for LLM judging with a proper name."""
 
     def named_llm_judge_func(
@@ -206,7 +205,7 @@ def antislop_func(
     bench: CreativeWritingBench,
     **kwargs,
 ) -> list[float]:
-    slop_scores = [bench.calculate_slop_index(completion) for completion in completions]
+    slop_scores = [bench.calculate_slop_index(completion) for completion in completions]  # ty:ignore[invalid-argument-type]
     slop_scores = [max(100 - score, 0) for score in slop_scores]
     logger.info(f"Slop scores - totals: {slop_scores}")
     return slop_scores
@@ -238,7 +237,9 @@ class WritingGRPODataModule(SmDataset):
         self.generation_wrapper = get_generation_wrapper(self.config.judge_model)
         self.bench = CreativeWritingBench(self.config.run_mode)
 
-    def reward_functions(self) -> list[RewardFunc]:
+    def reward_functions(
+        self,
+    ):
         antislop_fn = partial(antislop_func, bench=self.bench)
         antislop_fn.__name__ = "antislop_func"  # type: ignore
         return [

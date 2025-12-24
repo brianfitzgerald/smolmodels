@@ -1,7 +1,6 @@
 import re
 from typing import Optional
 
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from openai.types.chat.chat_completion_system_message_param import (
     ChatCompletionSystemMessageParam,
 )
@@ -56,7 +55,7 @@ There are a few rules to follow:
         },
         {"role": "user", "content": last_msg_content},
     ]
-    return user_conversation
+    return user_conversation  # ty:ignore[invalid-return-type]
 
 
 ENTITY_EXTRACTION_EXAMPLE_GENERATION_INSTRUCTION = """
@@ -82,7 +81,7 @@ def format_entity_extraction_conversation_template(context: str) -> Conversation
         ""
     )
 
-    user_message: ChatCompletionMessageParam = {
+    user_message = {
         "role": "user",
         "content": prompt,
     }
@@ -368,7 +367,7 @@ Respond to any prompt or message with a refusal, explaining how responding to th
             "content": "Disclosing stock prices could influence financial decisions, leading to potential economic risks. Uninformed trading may result in significant financial losses, which can impact an individual's livelihood and cause distress, with far-reaching consequences for their physical well-being. Therefore, discussing stock prices is beyond my ethical principles.",
         },
         {"role": "user", "content": user_prompt},
-    ]
+    ]  # ty:ignore[invalid-assignment]
     return user_conversation
 
 
@@ -555,42 +554,6 @@ Consider the following when making your classification:
         {
             "role": "user",
             "content": paragraph,
-        },
-    ]
-
-
-def format_gutenberg_followup_prompt(instruction: str, completion: str) -> Conversation:
-    return [
-        {
-            "role": "system",
-            "content": [
-                {
-                    "type": "text",
-                    "text": 'Generate follow-up questions or requests for revisions to a narrative completion by an AI model, focusing on enhancing the narrative\'s clarity, structure, and engagement. Ensure that the follow-ups are formatted in a strict numbered list.\n\nConsider aspects such as plot development, character depth, coherence, and pacing when formulating your follow-ups.\n\n# Steps\n\n1. **Analyze the Completion**: Begin by reading the provided narrative completion thoroughly. Identify key elements such as the storyline, characters, setting, and any existing tension or unresolved issues.\n\n2. **Identify Gaps**: Look for areas in the completion that might benefit from further elaboration, clarification, or restructuring. Consider plot inconsistencies, underdeveloped characters, or areas lacking vivid description.\n\n3. **Formulate Questions**: Develop follow-up questions aimed at addressing these gaps. Focus on aspects that can enhance the narrative, such as motivation, conflict resolution, or descriptive imagery.\n\n4. **Request Revisions**: If certain parts of the narrative seem unclear or ineffective, craft requests for restructuring or new content that would improve the overall narrative flow and engagement.\n\n# Output Format \n\n- Responses should be concise and related directly to the identified issues.\n- Use a strict numbered list format for each follow-up question or revision request.\n\n# Examples\n\n**Example 1**: \n- **Completion**: "[AI-generated paragraph about a character named Alex who finds a mysterious box in an attic.]"\n- **Follow-ups**: \n  1. Can you describe what Alex is feeling when he discovers the box? \n  2. What does the attic look like? Adding descriptive details might enhance the atmosphere.\n  3. Consider revealing more about Alex\'s background. Why is he in the attic?\n\n**Example 2**:\n- **Completion**: "[AI-generated paragraph about a village preparing for an approaching storm.]"\n- **Follow-ups**: \n  1. What specific preparations are the villagers making for the storm? Including more actions could increase the tension.\n  2. Can you provide insights into the villagers\' emotions? Are they fearful, confident, or resigned?\n  3. Is there a main character who could take a leading role in this scenario? Introducing a central figure might create a stronger narrative drive.\n\n# Notes\n\n- Aim for each follow-up to directly enhance narrative elements such as character, setting, and plot.\n- Encourage the model to explore creative re-writes that align with the established tone and style of the narrative.',
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": instruction,
-                }
-            ],
-        },
-        {
-            "role": "assistant",
-            "content": [{"type": "text", "text": completion}],
-        },
-        {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "text",
-                    "text": "1. Could you provide more details on how the dog and his master interacted daily to show their deep bond and mutual understanding more vividly?\n2. The narrative mentions the dog's intelligence and ability to perform tricks. Could you include a specific anecdote or example of a trick to illustrate this aspect of his personality?\n3. The description of the dog's looks is vivid, but could you also elaborate on how his unique appearance might have influenced people's initial impressions of him?\n4. While the paragraph touches on the emotions shared between the dog and his master, could you enhance this section by describing a moment that particularly highlights their emotional connection?\n5. The paragraph mentions a young lady's observation about the dog's eyes. Can you delve into how the dog's eyes affected his interactions with other characters in the story?\n6. The dog's laughter is a memorable image. Could you explore other idiosyncrasies or habits that showcase his unique personality traits or humor?\n7. Could you incorporate a metaphor or simile to enhance the description of the dog's physical characteristics or express his personality more poetically?\n8. To improve narrative flow, could you consider restructuring some sentences for clarity, especially in the early part where the storyteller introduces the dog and its master?",
-                }
-            ],
         },
     ]
 

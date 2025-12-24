@@ -248,7 +248,7 @@ class VLLMWrapper(OpenAIGenerationWrapper):
             self.model_name = _get_model_id(base_url)
 
     async def _list_models(self):
-        models_list = await self.oai_client.models.list()
+        models_list = await self.oai_client.models.list()  # ty:ignore[invalid-await]
         model_ids = [m.id for m in models_list.data]
         logger.info(f"Models: {model_ids}")
         self.model_name = model_ids[0]

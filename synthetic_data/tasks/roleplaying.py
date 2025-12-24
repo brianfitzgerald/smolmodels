@@ -239,7 +239,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def _generate_parameters(self, episode: RPGEpisode):
         """Generate game parameters (setting and characters)"""
-        parameter_conversation: Conversation = [
+        parameter_conversation = [
             {
                 "role": "system",
                 "content": GAME_PARAMETER_PROMPT

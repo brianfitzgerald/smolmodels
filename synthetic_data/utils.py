@@ -6,15 +6,20 @@ import shutil
 import traceback
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 import pandas as pd
 from loguru import logger
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from pydantic.dataclasses import dataclass
 from tabulate import tabulate
 
-Conversation = List[ChatCompletionMessageParam]
+
+class Message(TypedDict):
+    role: Literal["system", "user", "assistant", "tool", "function"]
+    content: str
+
+
+Conversation = List[dict[str, str]]
 ShareGPTConversation = List[Dict[str, str]]
 
 JSONSchemaKey = Union[str, int, float, bool, List[Any], Dict[str, Any], None]
