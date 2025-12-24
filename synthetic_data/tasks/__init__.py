@@ -19,6 +19,7 @@ from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
 )
+from synthetic_data.gutenberg_process import get_gutenberg_subset
 
 RunMode = Literal["modal", "cli", "notebook"]
 

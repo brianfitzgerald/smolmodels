@@ -1,7 +1,7 @@
 [project]
 name = "smolmodels"
 version = "0.1.0"
-description = "Add your description here"
+description = "Collection of personal projects related to language models"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,7 +9,6 @@ dependencies = [
     "evaluate",
     "wandb",
     "fire",
-    "tensorboard",
     "huggingface-hub[hf-transfer]",
     "tabulate==0.9.0",
     "python-dotenv==1.0.1",
@@ -17,72 +16,55 @@ dependencies = [
     "matplotlib",
     "openai==1.101.0",
     "unidecode",
-    "anthropic==0.64.0",
-    "pillow==10.4.0",
     "loguru",
     "webdataset",
     "wheel",
-    "datacommons",
-    "datacommons-pandas>=0.0.3",
-    "ipykernel>=6.29.5",
     "rich>=13.9.2",
     "polars>=1.12.0",
-    "wrapt-timeout-decorator>=1.5.1",
     "ninja>=1.11.1.1",
     "packaging>=24.1",
     "fastapi>=0.115.5",
     "uvicorn>=0.32.1",
     "gradio==5.27.0",
     "scipy",
-    "pyright>=1.1.404",
-    "google-genai==1.32.0",
     "sentencepiece",
     "einops",
     "mistune>=3.1.0",
     "ruff>=0.8.1",
     "chardet>=5.2.0",
     "jsonlines>=4.0.0",
-    "seaborn>=0.13.2",
-    "plotting>=0.0.7",
     "pandas>=2.2.3",
     "modal==1.2.4",
     "pydantic>=2.10.6",
-    "tiktoken",
-    "sigstore>=1.0.0",
-    "kagglehub>=0.3.7",
-    "nltk>=3.9.1",
     "pytest>=8.3.4",
-    "trio>=0.27.0",
-    "httpx>=0.28.0",
+    "synthetic-data",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
 [dependency-groups]
-torch = [
-    "transformers==4.56.0",
-    "torch==2.6.0",
-    "peft>=0.13.2",
-    "trl==0.22.0",
-    "lightning>=2.5.0.post0",
-    "nltk",
+dev = [
+    "ruff>=0.8.1",
+    "pyright>=1.1.404",
+    "pytest>=8.3.4",
+    "ipykernel>=6.29.5",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.2",
+    "plotting>=0.0.7",
+    "rich>=13.9.2",
+    "ty>=0.0.4",
+    "marimo>=0.18.4",
 ]
 
-training = [
-    "setuptools_scm",
-    "cmake",
-    "bitsandbytes>=0.44.1; sys_platform == 'linux'",
-    "liger-kernel>=0.5.2; sys_platform == 'linux'",
-    "flash-attn; sys_platform == 'linux'",
-    "vllm==0.8.5",
-]
-
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }]
 torchvision = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
 torchaudio = { index = "pytorch-cu124", marker = "sys_platform != 'darwin'" }
+synthetic-data = { path = "./synthetic_data", editable = true }
 
 
 [[tool.uv.index]]

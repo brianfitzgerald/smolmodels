@@ -1,23 +1,21 @@
 import ast
-import traceback
-from typing import Any, Callable, List, Optional, Tuple
-from datasets import Dataset
-from rich.syntax import Syntax
-from rich.console import Console
-from typing import Optional, Callable, Literal, Dict
-import ast
 import contextlib
 import io
-from enum import Enum
-from contextlib import redirect_stdout, redirect_stderr, contextmanager
-from wrapt_timeout_decorator import timeout
-from dataclasses import dataclass
-from abc import ABC
-from loguru import logger
 import re
 import signal
+import traceback
+from abc import ABC
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Dict, List, Literal, Optional, Tuple
 
-from evaluation.python_interpereter import evaluate_python_code_ast, LIST_SAFE_MODULES
+from datasets import Dataset
+from loguru import logger
+from rich.console import Console
+from rich.syntax import Syntax
+
+from evaluation.python_interpereter import LIST_SAFE_MODULES, evaluate_python_code_ast
 from synthetic_data.generation import GenerationWrapper
 from synthetic_data.utils import extract_code_block, extract_text_between_tags
 
@@ -242,7 +240,6 @@ class redirect_stdin(contextlib._RedirectStream):  # type: ignore
     _stream = "stdin"
 
 
-@timeout(2)
 def evaluate_sample_exec(
     code_to_run: str, inputs_list: List[str]
 ) -> Tuple[Optional[str], Optional[List]]:

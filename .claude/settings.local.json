@@ -10,7 +10,11 @@
       "Bash(python generate.py:*)",
       "Bash(LOG_LEVEL=DEBUG python:*)",
       "Bash(cat:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(ls:*)",
+      "Bash(uv pip show:*)",
+      "Bash(uv sync:*)",
+      "Bash(ty check:*)"
     ],
     "deny": [],
     "ask": []
