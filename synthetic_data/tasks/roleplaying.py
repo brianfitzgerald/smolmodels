@@ -12,6 +12,7 @@ from synthetic_data.generation import (
     GenerationWrapper,
     RemoteModel,
 )
+from synthetic_data.generation_utils import GenerationArgs
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     DUNGEON_MASTER_ACTION_PROMPT,
@@ -19,6 +20,7 @@ from synthetic_data.tasks.roleplaying_prompts import (
     PLAYER_ACTION_PROMPT,
 )
 from synthetic_data.tasks.roleplaying_tools import (
+    DM_TOOLS,
     ToolResult,
 )
 from synthetic_data.utils import (
@@ -156,7 +158,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
-            [conversation]
+            [conversation],
+            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
         assert len(results) == 1
         episode.actions.append(
