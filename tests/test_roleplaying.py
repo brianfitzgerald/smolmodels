@@ -50,9 +50,16 @@ class TestRoleplayingGameMultiStepTask:
 
     def test_format_conversation_dm_perspective(self, task):
         """Test conversation formatting from dungeon master's perspective."""
+        # Create a scenario message for the episode
+        scenario_result = GenerationResult(
+            content="You find yourself at the entrance of a dark forest.",
+            tool_calls=[],
+        )
+
         episode = RPGEpisode(
             game_setting="A dark forest",
             player_character="A brave warrior",
+            scenario_message=scenario_result,
         )
         player_message: Message = {
             "role": "user",
@@ -69,18 +76,26 @@ class TestRoleplayingGameMultiStepTask:
 
         conversation = task._format_conversation(episode, "dungeon_master")
 
-        # From DM perspective: player -> user, dm -> assistant
-        assert len(conversation) == 2
-        assert conversation[0]["role"] == "user"
-        assert conversation[0]["content"] == "I search the room."
-        assert conversation[1]["role"] == "assistant"
-        assert conversation[1]["content"] == "You find a hidden treasure chest!"
+        # Should have: system, scenario, player action, dm action
+        assert len(conversation) == 4
+        assert conversation[0]["role"] == "system"
+        assert conversation[1]["role"] == "assistant"  # scenario message
+        assert conversation[2]["role"] == "user"  # player action
+        assert conversation[2]["content"] == "I search the room."
+        assert conversation[3]["role"] == "assistant"  # dm action
+        assert conversation[3]["content"] == "You find a hidden treasure chest!"
 
     def test_format_conversation_player_perspective(self, task):
         """Test conversation formatting from player's perspective."""
+        scenario_result = GenerationResult(
+            content="You find yourself at the entrance of a dark forest.",
+            tool_calls=[],
+        )
+
         episode = RPGEpisode(
             game_setting="A dark forest",
             player_character="A brave warrior",
+            scenario_message=scenario_result,
         )
         player_message: Message = {
             "role": "user",
@@ -97,12 +112,14 @@ class TestRoleplayingGameMultiStepTask:
 
         conversation = task._format_conversation(episode, "player")
 
-        # From player perspective: dm -> user, player -> assistant
-        assert len(conversation) == 2
-        assert conversation[0]["role"] == "user"
-        assert conversation[0]["content"] == "You find a hidden treasure chest!"
-        assert conversation[1]["role"] == "assistant"
-        assert conversation[1]["content"] == "I search the room."
+        # Should have: system, scenario, dm action (as user), player action (as assistant)
+        assert len(conversation) == 4
+        assert conversation[0]["role"] == "system"
+        assert conversation[1]["role"] == "assistant"  # scenario message
+        assert conversation[2]["role"] == "user"  # dm action from player perspective
+        assert conversation[2]["content"] == "You find a hidden treasure chest!"
+        assert conversation[3]["role"] == "assistant"  # player action
+        assert conversation[3]["content"] == "I search the room."
 
 
 class TestGenerateParameters:
@@ -146,16 +163,16 @@ She is skilled in illusion magic but struggles with combat spells.
         task.generation_wrappers["adventure_parameters"] = mock_wrapper
 
         episode = RPGEpisode()
-        await task._generate_parameters(episode)
+        game_setting, player_character = await task._generate_parameters(episode)
 
-        assert episode.game_setting is not None
-        assert "mystical forest" in episode.game_setting
-        assert episode.player_character is not None
-        assert "Aelindra" in episode.player_character
+        assert game_setting is not None
+        assert "mystical forest" in game_setting
+        assert player_character is not None
+        assert "Aelindra" in player_character
 
 
 class TestStepEpisode:
-    """Tests for the step_episode method."""
+    """Tests for the step method."""
 
     @pytest.fixture
     def task_with_mocks(self):
@@ -170,8 +187,8 @@ class TestStepEpisode:
             return task
 
     @pytest.mark.asyncio
-    async def test_step_episode_generates_player_and_dm_actions(self, task_with_mocks):
-        """Test that step_episode generates both player and DM actions."""
+    async def test_step_generates_player_and_dm_actions(self, task_with_mocks):
+        """Test that step generates both player and DM actions."""
         task = task_with_mocks
 
         player_response = GenerationResult(
@@ -194,16 +211,53 @@ class TestStepEpisode:
         task.generation_wrappers["player"] = player_wrapper
         task.generation_wrappers["dungeon_master"] = dm_wrapper
 
+        # Create episode with scenario_message set
+        scenario_result = GenerationResult(
+            content="You enter a goblin-infested cave.",
+            tool_calls=[],
+        )
+
         episode = RPGEpisode(
             step_count=0,
             game_setting="A goblin-infested cave",
             player_character="A dwarven fighter",
+            scenario_message=scenario_result,
         )
 
-        updated_episode = await task.step_episode(episode)
+        updated_episode, finished = await task.step(episode)
 
         assert updated_episode is not None
         assert len(updated_episode.actions) == 2
         assert updated_episode.actions[0].role == "player"
         assert updated_episode.actions[1].role == "dungeon_master"
-        assert updated_episode.step_count == 2
+        assert updated_episode.step_count == 1
+        assert finished is False  # max_user_responses is 3, step_count is 1
+
+    @pytest.mark.asyncio
+    async def test_step_returns_finished_when_max_reached(self, task_with_mocks):
+        """Test that step returns finished=True when max_user_responses is reached."""
+        task = task_with_mocks
+        task.max_user_responses = 1  # Set low so we finish after one step
+
+        mock_response = GenerationResult(content="Action", tool_calls=[])
+        mock_wrapper = AsyncMock()
+        mock_wrapper.generate = AsyncMock(return_value=[mock_response])
+        mock_wrapper.provider_name = "mock"
+
+        task.generation_wrappers["player"] = mock_wrapper
+        task.generation_wrappers["dungeon_master"] = mock_wrapper
+
+        scenario_result = GenerationResult(
+            content="The adventure begins.",
+            tool_calls=[],
+        )
+
+        episode = RPGEpisode(
+            step_count=0,
+            scenario_message=scenario_result,
+        )
+
+        updated_episode, finished = await task.step(episode)
+
+        assert updated_episode.step_count == 1
+        assert finished is True

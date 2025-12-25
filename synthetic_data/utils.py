@@ -341,6 +341,7 @@ def log_to_file(
 def log_conversation(conversation: Conversation) -> None:
     """
     Log a Conversation to the console using loguru with colored output based on roles.
+    Handles tool calls and tool results with proper formatting.
 
     Args:
         conversation: The conversation to log
@@ -352,9 +353,11 @@ def log_conversation(conversation: Conversation) -> None:
         "assistant": "\033[34m",  # Blue
         "function": "\033[33m",  # Yellow
         "tool": "\033[35m",  # Magenta
+        "tool_call": "\033[93m",  # Bright Yellow
         "unknown": "\033[31m",  # Red
     }
     reset_color = "\033[0m"
+    dim_color = "\033[2m"  # Dim text for metadata
 
     # Build the complete log message
     log_lines = []
@@ -363,6 +366,8 @@ def log_conversation(conversation: Conversation) -> None:
     for i, message in enumerate(conversation, 1):
         role = message.get("role", "unknown")
         content = message.get("content", "")
+        tool_calls = message.get("tool_calls")
+        tool_call_id = message.get("tool_call_id")
 
         if isinstance(content, str):
             content_str = content
@@ -374,12 +379,57 @@ def log_conversation(conversation: Conversation) -> None:
         # Get color for role, default to red for unknown roles
         color = role_colors.get(role, role_colors["unknown"])
 
-        # Add the message with color and clear separation
-        log_lines.append(f"\n{color}[{i}] {role.upper()}{reset_color}\n")
-        log_lines.append(f"{color}{content_str}{reset_color}\n")
+        # Build header with role and optional tool_call_id for tool results
+        header = f"[{i}] {role.upper()}"
+        if role == "tool" and tool_call_id:
+            header += f" {dim_color}(tool_call_id: {tool_call_id}){reset_color}{color}"
 
-    logger.info("".join(log_lines))
-    print("".join(log_lines))
+        # Add the message header
+        log_lines.append(f"\n{color}{header}{reset_color}\n")
+
+        # Add content if present
+        if content_str:
+            log_lines.append(f"{color}{content_str}{reset_color}\n")
+
+        # Format and display tool calls if present
+        if tool_calls:
+            tool_color = role_colors["tool_call"]
+            log_lines.append(f"{tool_color}Tool Calls:{reset_color}\n")
+            for tc in tool_calls:
+                # Handle both dict-like and object-like tool calls
+                if hasattr(tc, "function"):
+                    # OpenAI ChatCompletionMessageToolCall object
+                    tc_id = tc.id
+                    func_name = tc.function.name
+                    func_args = tc.function.arguments
+                else:
+                    # Dict format
+                    tc_id = tc.get("id", "unknown")
+                    func = tc.get("function", {})
+                    func_name = func.get("name", "unknown")
+                    func_args = func.get("arguments", "{}")
+
+                # Pretty print the arguments
+                try:
+                    if isinstance(func_args, str):
+                        args_dict = json.loads(func_args)
+                    else:
+                        args_dict = func_args
+                    args_str = json.dumps(args_dict, indent=2)
+                except (json.JSONDecodeError, TypeError):
+                    args_str = str(func_args)
+
+                log_lines.append(f"{tool_color}  [{tc_id}] {func_name}({reset_color}\n")
+                # Indent the arguments
+                indented_args = "\n".join(
+                    f"    {line}" for line in args_str.split("\n")
+                )
+                log_lines.append(f"{dim_color}{indented_args}{reset_color}\n")
+                log_lines.append(f"{tool_color}  ){reset_color}\n")
+
+    log_lines.append(f"{'=' * 60}\n")
+    output = "".join(log_lines)
+    logger.info(output)
 
 
 def parse_xml_tags(text: str, required_tags: List[str] = []) -> Dict[str, str]:
