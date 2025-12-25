@@ -59,7 +59,7 @@ class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
-    input_prompt: str | None = None
+    scenario: str | None = None
     actions: list[Action] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -142,10 +142,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         }
 
         # Generate parameters and scenario in parallel
-        params, episode = await asyncio.gather(
+        (game_setting, player_character), scenario = await asyncio.gather(
             self._generate_parameters(ep),
             self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
         )
+        ep.game_setting = game_setting
+        ep.player_character = player_character
+        ep.scenario = scenario
         return ep
 
     async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
@@ -171,9 +174,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         return episode
 
-    async def _generate_parameters(self, episode: RPGEpisode):
+    async def _generate_parameters(
+        self, episode: RPGEpisode
+    ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = episode.input_prompt or "A mysterious adventure"
+        theme_input = episode.scenario or "A mysterious adventure"
         parameter_conversation: Conversation = [
             {
                 "role": "system",
@@ -198,11 +203,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 parsed_tags = parse_xml_tags(
                     content, required_tags=["game_setting", "player_character"]
                 )
-                episode.game_setting = parsed_tags["game_setting"]
-                episode.player_character = parsed_tags["player_character"]
-                logger.debug(f"\nGame setting:\n{episode.game_setting}")
-                logger.debug(f"\nPlayer character:\n{episode.player_character}")
-                break  # Successfully parsed, exit the retry loop
+                game_setting = parsed_tags["game_setting"]
+                player_character = parsed_tags["player_character"]
+                logger.debug(f"\nGame setting:\n{game_setting}")
+                logger.debug(f"\nPlayer character:\n{player_character}")
+                return game_setting, player_character
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
                     logger.warning(
@@ -212,6 +217,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     raise ValueError(
                         f"Failed to generate game parameters after {MAX_PARSE_RETRIES} attempts"
                     )
+        return None, None
 
     def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
         template: Template = Template(DUNGEON_MASTER_ACTION_PROMPT)
@@ -231,7 +237,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
-    ):
+    ) -> str | None:
         """Generate the initial roleplaying scenario using DM tools."""
         scenario_conversation: Conversation = [
             {
@@ -243,10 +249,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": "Begin the adventure. Set the scene and introduce the player to their situation.",
             },
         ]
-
-        logger.info(
-            f"Generating scenario with {self.generation_model_names['dungeon_master']}"
-        )
 
         results = await generation_wrapper.generate([scenario_conversation])
         return results[0].content
