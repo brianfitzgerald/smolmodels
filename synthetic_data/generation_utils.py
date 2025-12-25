@@ -176,13 +176,18 @@ class GenerationArgs(BaseModel):
     tools: list[ChatCompletionToolParam] | None = None
 
 
+FinishReason = Literal[
+    "end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"
+]
+
+
 @dataclass
 class GenerationResult:
     """Result from a generation call that may include tool calls."""
 
     content: str | None
     tool_calls: list[ChatCompletionMessageToolCall] = field(default_factory=list)
-    stop_reason: str = "stop"
+    finish_reason: FinishReason = "end_turn"
 
     @property
     def message(self) -> Message:

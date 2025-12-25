@@ -12,7 +12,7 @@ from synthetic_data.generation import (
     GenerationWrapper,
     RemoteModel,
 )
-from synthetic_data.generation_utils import GenerationArgs
+from synthetic_data.generation_utils import GenerationArgs, GenerationResult
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     DUNGEON_MASTER_ACTION_PROMPT,
@@ -21,6 +21,8 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
+    PRESENT_CHOICES_TOOL,
+    SPEAK_TOOL,
     ToolResult,
 )
 from synthetic_data.utils import (
@@ -62,7 +64,7 @@ class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
-    scenario: str | None = None
+    scenario_message: GenerationResult | None = None
     actions: list[Action] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -145,16 +147,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         }
 
         # Generate parameters and scenario in parallel
-        (game_setting, player_character), scenario = await asyncio.gather(
+        (game_setting, player_character), scenario_result = await asyncio.gather(
             self._generate_parameters(ep),
             self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
         )
         ep.game_setting = game_setting
         ep.player_character = player_character
-        ep.scenario = scenario
+        ep.scenario_message = scenario_result
         return ep
 
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
+        # Generate player action
+        conversation = self._format_conversation(episode, "player")
+        log_conversation(conversation)
+        results = await self.generation_wrappers["player"].generate([conversation])
+        assert len(results) == 1
+        episode.actions.append(Action(role="player", message=results[0].message))
+
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
@@ -166,13 +175,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             Action(role="dungeon_master", message=results[0].message)
         )
 
-        # Generate player action
-        conversation = self._format_conversation(episode, "player")
-        log_conversation(conversation)
-        results = await self.generation_wrappers["player"].generate([conversation])
-        assert len(results) == 1
-        episode.actions.append(Action(role="player", message=results[0].message))
-
         episode.step_count += 1
         finished = episode.step_count >= self.max_user_responses
         return episode, finished
@@ -181,7 +183,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self, episode: RPGEpisode
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = episode.scenario or "A mysterious adventure"
+        theme_input = episode.scenario_message or "A mysterious adventure"
         parameter_conversation: Conversation = [
             {
                 "role": "system",
@@ -240,7 +242,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
-    ) -> str | None:
+    ) -> GenerationResult:
         """Generate the initial roleplaying scenario using DM tools."""
         scenario_conversation: Conversation = [
             {
@@ -253,8 +255,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        results = await generation_wrapper.generate([scenario_conversation])
-        return results[0].content
+        results = await generation_wrapper.generate(
+            [scenario_conversation],
+            args=GenerationArgs(
+                max_tokens=1024, tools=[SPEAK_TOOL, PRESENT_CHOICES_TOOL]
+            ),
+        )
+        return results[0]
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole
@@ -275,15 +282,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        assert episode.scenario is not None
+        assert episode.scenario_message is not None
 
         # Add scenario to conversation
-        conversation.append(
-            {
-                "role": "user",
-                "content": episode.scenario,
-            }
-        )
+        conversation.append(episode.scenario_message.message)
 
         for action in episode.actions:
             if generating_role == "dungeon_master":

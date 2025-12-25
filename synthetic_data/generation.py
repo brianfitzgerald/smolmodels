@@ -127,7 +127,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         GenerationResult(
                             content=content,
                             tool_calls=tool_calls,
-                            stop_reason=choice.finish_reason or "stop",
+                            finish_reason=choice.finish_reason or "end_turn",
                         )
                     )
 
@@ -289,7 +289,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     GenerationResult(
                         content=content,
                         tool_calls=tool_calls,
-                        stop_reason=result.stop_reason or "end_turn",
+                        finish_reason=result.stop_reason,
                     )
                 )
 
@@ -363,7 +363,7 @@ class GeminiWrapper(GenerationWrapper):
                     GenerationResult(
                         content=result.text or "",
                         tool_calls=[],
-                        stop_reason="end_turn",
+                        finish_reason="end_turn",
                     )
                     for result in results
                 ]
