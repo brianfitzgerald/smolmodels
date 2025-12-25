@@ -205,7 +205,10 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         """
         raise NotImplementedError
 
-    async def initial_observation(self, sample: SampleT) -> EpisodeT:
+    async def initial_step(self, sample: SampleT):
+        """
+        Initial step of the task. Perform setup; cannot exit from here.
+        """
         raise NotImplementedError
 
     async def step(self) -> EpisodeT | None:

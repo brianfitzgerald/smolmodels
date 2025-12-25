@@ -432,18 +432,14 @@ async def process_multi_step_task(
         if not all_wrappers:
             raise ValueError("No wrappers registered in autoscaling manager")
 
-        # Set the generation wrapper in the episode
-        episode = await task.initial_observation(row)
+        await task.initial_step(row)
 
         # Run episode steps until completion
         while True:
-            step_result = await task.step(episode)
-            if (
-                step_result
-            ):  # If step_episode returns non-empty list, episode is complete
+            step_result = await task.step()
+            if step_result is None:
                 break
-
-        results.extend(output_rows)
+            results.append(step_result)
 
     return results
 

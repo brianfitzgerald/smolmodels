@@ -14,9 +14,9 @@ from synthetic_data.generation import (
 )
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
+    DUNGEON_MASTER_ACTION_PROMPT,
     GAME_PARAMETER_PROMPT,
-    ROLEPLAYING_PROMPT,
-    USER_ACTION_PROMPT,
+    PLAYER_ACTION_PROMPT,
 )
 from synthetic_data.tasks.roleplaying_tools import (
     ToolResult,
@@ -126,7 +126,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(f"Created {len(episode_data)} episodes")
         return Dataset.from_list(episode_data)
 
-    async def initial_observation(self, sample: None) -> RPGEpisode:
+    async def initial_step(self, sample: None):
         seed = hash(str(sample)) % (2**32)
         ep = RPGEpisode()
         ep.metadata = {
@@ -142,7 +142,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         }
 
         # Generate parameters and scenario in parallel
-        await asyncio.gather(
+        params, episode = await asyncio.gather(
             self._generate_parameters(ep),
             self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
         )
@@ -214,7 +214,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     )
 
     def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
-        template: Template = Template(ROLEPLAYING_PROMPT)
+        template: Template = Template(DUNGEON_MASTER_ACTION_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
             PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
@@ -222,68 +222,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return formatted_prompt
 
     def _user_action_system_prompt(self, episode: RPGEpisode) -> str:
-        template: Template = Template(USER_ACTION_PROMPT)
+        template: Template = Template(PLAYER_ACTION_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
             PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
         )
         return formatted_prompt
-
-    def _flip_conversation_roles(self, conversation: Conversation) -> Conversation:
-        """Flip user and assistant roles in a conversation while preserving system messages.
-
-        Note: When flipping assistant to user, we don't copy tool_calls since user messages
-        cannot have tool_calls. We also skip tool result messages since they don't make
-        sense in the flipped context.
-        """
-        flipped_conversation = []
-
-        # First pass: collect all tool results
-        all_tool_contents: list[str] = []
-        for message in conversation:
-            if message["role"] == "tool":
-                content = message.get("content", "")
-                if content:
-                    all_tool_contents.append(content)
-
-        # Second pass: process messages
-        for i, message in enumerate(conversation):
-            if message["role"] == "user":
-                flipped_conversation.append(
-                    {"role": "assistant", "content": message["content"]}  # type: ignore
-                )
-            elif message["role"] == "assistant":
-                # Don't copy tool_calls to user messages (users can't make tool calls)
-                content = message.get("content") or ""
-
-                # If no text content, check for tool results that follow this assistant message
-                if not content:
-                    # Collect tool results that immediately follow this assistant message
-                    following_tool_contents = []
-                    for j in range(i + 1, len(conversation)):
-                        if conversation[j]["role"] == "tool":
-                            tool_content = conversation[j].get("content", "")
-                            if tool_content:
-                                following_tool_contents.append(tool_content)
-                        else:
-                            break  # Stop at next non-tool message
-                    if following_tool_contents:
-                        content = "\n".join(following_tool_contents)
-
-                # Only add if there's meaningful content
-                if content:
-                    flipped_conversation.append(
-                        {
-                            "role": "user",
-                            "content": content,
-                        }
-                    )  # type: ignore
-            elif message["role"] == "tool":
-                # Skip tool result messages - we've extracted their content above
-                continue
-            else:
-                flipped_conversation.append(message)
-        return flipped_conversation
 
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper

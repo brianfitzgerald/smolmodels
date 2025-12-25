@@ -1,4 +1,4 @@
-ROLEPLAYING_PROMPT = """
+DUNGEON_MASTER_ACTION_PROMPT = """
 You are an AI dungeon master for a single-player role-playing game. Your task is to create an engaging and immersive gameplay experience by generating dialogue, action, complex decisions, simple puzzles, and other relevant gameplay elements.
 
 Here is the game setting:
@@ -56,7 +56,7 @@ Be creative and provide rich detail that will enable engaging gameplay.
 """
 
 
-USER_ACTION_PROMPT = """
+PLAYER_ACTION_PROMPT = """
 You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make.
 
 Here is the game setting:
