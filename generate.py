@@ -422,9 +422,9 @@ async def process_multi_step_task(
     task: BaseTask,
     autoscaling_manager: AutoscalingGenerationManager,
     batch_data: Any,
-) -> List[EpisodeT]:
+) -> List[Dict[str, Any]]:
     """Process a multi-step task (like roleplaying)"""
-    results: list[EpisodeT] = []
+    results: list[Dict[str, Any]] = []
 
     for i, row in enumerate(batch_data):
         # Create new episode - use the main generation wrapper
@@ -432,15 +432,15 @@ async def process_multi_step_task(
         if not all_wrappers:
             raise ValueError("No wrappers registered in autoscaling manager")
 
-        await task.initial_step(row)
-
         # Run episode steps until completion
         episode: EpisodeT = await task.initial_step(row)
         while True:
             episode, finished = await task.step(episode)
             if finished:
                 break
-            results.append(episode)
+
+        # Convert finished episode to dict for storage
+        results.append(task.format_episode(episode))
 
     return results
 
@@ -462,7 +462,7 @@ ALL_TASKS: Dict[TaskName, type[BaseTask | BaseTaskV1]] = {
 
 def main(
     task_name: TaskName | None = None,
-    save_every_n_batches: int = 5,
+    save_every_n_batches: int = 1,
     batch_size: int = 32,
     restart: bool = False,
     model: RemoteModel = "gpt-5-mini",

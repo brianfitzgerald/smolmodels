@@ -216,3 +216,9 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         Step the episode. Returns the episode and a boolean indicating if the episode is finished.
         """
         raise NotImplementedError
+
+    def format_episode(self, episode: EpisodeT) -> dict:
+        """
+        Convert a finished episode to a dictionary for storage in a dataset.
+        """
+        raise NotImplementedError
