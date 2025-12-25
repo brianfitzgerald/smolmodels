@@ -230,7 +230,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         return formatted_prompt
 
-    def _user_action_system_prompt(self, episode: RPGEpisode) -> str:
+    def _player_system_prompt(self, episode: RPGEpisode) -> str:
         template: Template = Template(PLAYER_ACTION_PROMPT)
         formatted_prompt = template.render(
             GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
@@ -266,7 +266,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         system_prompt = (
             self._game_master_system_prompt(episode)
             if generating_role == "dungeon_master"
-            else self._user_action_system_prompt(episode)
+            else self._player_system_prompt(episode)
         )
         conversation: Conversation = [
             {
@@ -274,6 +274,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": system_prompt,
             },
         ]
+
+        assert episode.scenario is not None
+
+        # Add scenario to conversation
+        conversation.append(
+            {
+                "role": "user",
+                "content": episode.scenario,
+            }
+        )
 
         for action in episode.actions:
             if generating_role == "dungeon_master":
