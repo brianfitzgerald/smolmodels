@@ -55,6 +55,7 @@ dev = [
     "rich>=13.9.2",
     "ty>=0.0.4",
     "marimo>=0.18.4",
+    "ipywidgets>=8.1.8",
 ]
 
 [tool.uv]

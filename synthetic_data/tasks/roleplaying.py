@@ -240,6 +240,29 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         return formatted_prompt
 
+    def _format_tool_calls_for_user_message(
+        self, tool_calls: list[Any] | None, existing_content: str = ""
+    ) -> str:
+        if not tool_calls:
+            return existing_content
+
+        serialized_tool_calls = [
+            tc
+            if isinstance(tc, dict)
+            else {
+                "id": tc.id,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in tool_calls
+        ]
+        return (
+            existing_content
+            + f"\n<tool_calls>{json.dumps(serialized_tool_calls)}</tool_calls>"
+        )
+
     async def _generate_scenario(
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ) -> GenerationResult:
@@ -289,14 +312,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         if generating_role == "player":
             # From player perspective, scenario (from DM) is a user message
             # Tool calls need to be formatted as content since user messages can't have tool_calls
-            scenario_content = scenario_msg.get("content", "")
-            tool_calls = scenario_msg.get("tool_calls")
-            if tool_calls:
-                # Serialize tool calls into content for user message
-                scenario_content = (
-                    scenario_content
-                    + f"\n<tool_calls>{json.dumps([tc if isinstance(tc, dict) else {'id': tc.id, 'function': {'name': tc.function.name, 'arguments': tc.function.arguments}} for tc in tool_calls])}</tool_calls>"
-                )
+            scenario_content = self._format_tool_calls_for_user_message(
+                scenario_msg.get("tool_calls"), scenario_msg.get("content", "")
+            )
             conversation.append({"role": "user", "content": scenario_content})
         else:
             # From DM perspective, scenario stays as assistant message
@@ -324,21 +342,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 # If user, format tool call in message content
                 # TODO determine better way to format this to not break tool call formatting
                 # in the fine-tuned model
-                serialized_tool_calls = [
-                    tc
-                    if isinstance(tc, dict)
-                    else {
-                        "id": tc.id,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ]
-                message["content"] = (
-                    message.get("content", "")
-                    + f"\n<tool_calls>{json.dumps(serialized_tool_calls)}</tool_calls>"
+                message["content"] = self._format_tool_calls_for_user_message(
+                    tool_calls, message.get("content", "")
                 )
 
             conversation.append(message)

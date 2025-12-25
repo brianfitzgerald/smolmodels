@@ -74,6 +74,10 @@ You have access to the following tools:
 3. **action**: Use this for physical actions your character takes in the world. Describe what you're doing and optionally specify a target.
 
 Generate a realistic player response. Stay in character and advance the story naturally. You may use multiple tools in a single response if appropriate.
-
 Keep your actions concise and purposeful. React to what the dungeon master has presented and make choices that fit your character.
+Always respond in first person from the perspective of the player character.
+
+Examples
+Dungeon Master: You are in a dark forest. You see a path ahead of you. Do you follow it or stay put?
+Player: I follow the path.
 """

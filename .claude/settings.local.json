@@ -18,7 +18,8 @@
       "Bash(grep:*)",
       "Bash(wc:*)",
       "Bash(pkill:*)",
-      "Bash(timeout 120 python:*)"
+      "Bash(timeout 120 python:*)",
+      "Bash(open:*)"
     ],
     "deny": [],
     "ask": []
