@@ -46,6 +46,19 @@ RemoteModel = Literal[
 ]
 
 
+def _extract_tool_call_ids(msg: dict[str, Any]) -> list[str]:
+    """Extract tool call IDs from an assistant message with tool_calls."""
+    tool_calls = msg.get("tool_calls", [])
+    ids = []
+    for tc in tool_calls:
+        if isinstance(tc, dict):
+            ids.append(tc.get("id", ""))
+        else:
+            # Pydantic object
+            ids.append(tc.id)
+    return ids
+
+
 def convert_openai_to_anthropic_messages(
     conversation: list[dict[str, Any]],
 ) -> list[MessageParam]:
@@ -59,14 +72,23 @@ def convert_openai_to_anthropic_messages(
     Anthropic uses:
     - {"role": "assistant", "content": [{"type": "tool_use", "id": "...", "name": "...", "input": {...}}]}
     - {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "...", "content": "..."}]}
+
+    Note: Anthropic requires a tool_result for every tool_use. If a user message follows
+    an assistant message with tool_use but doesn't have explicit tool results, we wrap
+    the user content as tool_results.
     """
     converted: list[MessageParam] = []
+    pending_tool_call_ids: list[str] = []
 
-    for msg in conversation:
+    for i, msg in enumerate(conversation):
         role = msg.get("role")
 
         if role == "tool":
             # Convert OpenAI tool result to Anthropic format
+            tool_call_id = msg.get("tool_call_id")
+            # Remove from pending if present
+            if tool_call_id in pending_tool_call_ids:
+                pending_tool_call_ids.remove(tool_call_id)
             converted.append(
                 cast(
                     MessageParam,
@@ -75,7 +97,7 @@ def convert_openai_to_anthropic_messages(
                         "content": [
                             {
                                 "type": "tool_result",
-                                "tool_use_id": msg.get("tool_call_id"),
+                                "tool_use_id": tool_call_id,
                                 "content": msg.get("content", ""),
                             }
                         ],
@@ -95,20 +117,32 @@ def convert_openai_to_anthropic_messages(
                     }
                 )
 
-            # Add tool_use blocks
+            # Add tool_use blocks and track their IDs
             tool_calls = msg.get("tool_calls", [])
             for tc in tool_calls:
-                tool_input = tc.get("function", {}).get("arguments", "{}")
+                # Handle both dict and Pydantic object formats
+                if isinstance(tc, dict):
+                    tool_id = tc.get("id")
+                    function_data = tc.get("function", {})
+                    tool_name = function_data.get("name") if isinstance(function_data, dict) else getattr(function_data, "name", None)
+                    tool_input = function_data.get("arguments", "{}") if isinstance(function_data, dict) else getattr(function_data, "arguments", "{}")
+                else:
+                    # Pydantic object (ChatCompletionMessageToolCall)
+                    tool_id = tc.id
+                    tool_name = tc.function.name
+                    tool_input = tc.function.arguments
+
                 if isinstance(tool_input, str):
                     tool_input = json.loads(tool_input)
                 content_blocks.append(
                     {
                         "type": "tool_use",
-                        "id": tc.get("id"),
-                        "name": tc.get("function", {}).get("name"),
+                        "id": tool_id,
+                        "name": tool_name,
                         "input": tool_input,
                     }
                 )
+                pending_tool_call_ids.append(tool_id)
 
             converted.append(
                 cast(
@@ -116,6 +150,28 @@ def convert_openai_to_anthropic_messages(
                     {
                         "role": "assistant",
                         "content": content_blocks,
+                    },
+                )
+            )
+        elif role == "user" and pending_tool_call_ids:
+            # User message following tool_use without explicit tool_results
+            # Wrap the user content as tool_results for Anthropic compatibility
+            content = msg.get("content", "")
+            tool_result_blocks = [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": content,
+                }
+                for tool_id in pending_tool_call_ids
+            ]
+            pending_tool_call_ids.clear()
+            converted.append(
+                cast(
+                    MessageParam,
+                    {
+                        "role": "user",
+                        "content": tool_result_blocks,
                     },
                 )
             )

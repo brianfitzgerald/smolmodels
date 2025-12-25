@@ -112,10 +112,10 @@ class TestRoleplayingGameMultiStepTask:
 
         conversation = task._format_conversation(episode, "player")
 
-        # Should have: system, scenario, dm action (as user), player action (as assistant)
+        # Should have: system, scenario (as user from player POV), dm action (as user), player action (as assistant)
         assert len(conversation) == 4
         assert conversation[0]["role"] == "system"
-        assert conversation[1]["role"] == "assistant"  # scenario message
+        assert conversation[1]["role"] == "user"  # scenario message (from DM, so user from player perspective)
         assert conversation[2]["role"] == "user"  # dm action from player perspective
         assert conversation[2]["content"] == "You find a hidden treasure chest!"
         assert conversation[3]["role"] == "assistant"  # player action

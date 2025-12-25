@@ -284,8 +284,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         assert episode.scenario_message is not None
 
-        # Add scenario to conversation
-        conversation.append(episode.scenario_message.message)
+        # Add scenario to conversation with proper role based on perspective
+        scenario_msg = episode.scenario_message.message
+        if generating_role == "player":
+            # From player perspective, scenario (from DM) is a user message
+            # Tool calls need to be formatted as content since user messages can't have tool_calls
+            scenario_content = scenario_msg.get("content", "")
+            tool_calls = scenario_msg.get("tool_calls")
+            if tool_calls:
+                # Serialize tool calls into content for user message
+                scenario_content = (
+                    scenario_content
+                    + f"\n<tool_calls>{json.dumps([tc if isinstance(tc, dict) else {'id': tc.id, 'function': {'name': tc.function.name, 'arguments': tc.function.arguments}} for tc in tool_calls])}</tool_calls>"
+                )
+            conversation.append({"role": "user", "content": scenario_content})
+        else:
+            # From DM perspective, scenario stays as assistant message
+            conversation.append(scenario_msg)
 
         for action in episode.actions:
             if generating_role == "dungeon_master":
@@ -309,9 +324,21 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 # If user, format tool call in message content
                 # TODO determine better way to format this to not break tool call formatting
                 # in the fine-tuned model
+                serialized_tool_calls = [
+                    tc
+                    if isinstance(tc, dict)
+                    else {
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        },
+                    }
+                    for tc in tool_calls
+                ]
                 message["content"] = (
                     message.get("content", "")
-                    + f"<tool_calls>{json.dumps(tool_calls)}</tool_calls>"
+                    + f"\n<tool_calls>{json.dumps(serialized_tool_calls)}</tool_calls>"
                 )
 
             conversation.append(message)

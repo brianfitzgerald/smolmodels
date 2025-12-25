@@ -16,7 +16,9 @@
       "Bash(uv sync:*)",
       "Bash(ty check:*)",
       "Bash(grep:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(pkill:*)",
+      "Bash(timeout 120 python:*)"
     ],
     "deny": [],
     "ask": []
