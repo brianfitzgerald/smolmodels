@@ -20,7 +20,7 @@ from synthetic_data.generation import (
     get_generation_wrapper,
 )
 from synthetic_data.generation_utils import GenerationResult, save_output_dataset
-from synthetic_data.tasks import BaseTask, BaseTaskV1, RunMode
+from synthetic_data.tasks import BaseTask, BaseTaskV1, EpisodeT, RunMode
 from synthetic_data.tasks.next_chapter import (
     GutenbergSummaryContinuation,
 )
@@ -422,9 +422,9 @@ async def process_multi_step_task(
     task: BaseTask,
     autoscaling_manager: AutoscalingGenerationManager,
     batch_data: Any,
-) -> List[Dict[str, Any]]:
+) -> List[EpisodeT]:
     """Process a multi-step task (like roleplaying)"""
-    results = []
+    results: list[EpisodeT] = []
 
     for i, row in enumerate(batch_data):
         # Create new episode - use the main generation wrapper
@@ -435,11 +435,12 @@ async def process_multi_step_task(
         await task.initial_step(row)
 
         # Run episode steps until completion
+        episode: EpisodeT = await task.initial_step(row)
         while True:
-            step_result = await task.step()
-            if step_result is None:
+            episode, finished = await task.step(episode)
+            if finished:
                 break
-            results.append(step_result)
+            results.append(episode)
 
     return results
 

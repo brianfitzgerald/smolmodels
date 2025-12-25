@@ -25,6 +25,7 @@ from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
     Message,
+    log_conversation,
     parse_xml_tags,
 )
 
@@ -126,7 +127,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info(f"Created {len(episode_data)} episodes")
         return Dataset.from_list(episode_data)
 
-    async def initial_step(self, sample: None):
+    async def initial_step(self, sample: None) -> RPGEpisode:
         seed = hash(str(sample)) % (2**32)
         ep = RPGEpisode()
         ep.metadata = {
@@ -151,28 +152,27 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ep.scenario = scenario
         return ep
 
-    async def step_episode(self, episode: RPGEpisode) -> RPGEpisode | None:
-        # Interleave user and DM actions
-        if episode.step_count < self.max_user_responses:
-            # Generate player action
-            conversation = self._format_conversation(episode, "player")
-            results = await self.generation_wrappers["player"].generate([conversation])
-            assert len(results) == 1
-            episode.actions.append(Action(role="player", message=results[0].message))
-            episode.step_count += 1
+    async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
+        # Generate dungeon master action
+        conversation = self._format_conversation(episode, "dungeon_master")
+        results = await self.generation_wrappers["dungeon_master"].generate(
+            [conversation]
+        )
+        assert len(results) == 1
+        episode.actions.append(
+            Action(role="dungeon_master", message=results[0].message)
+        )
 
-            # Generate dungeon master action
-            conversation = self._format_conversation(episode, "dungeon_master")
-            results = await self.generation_wrappers["dungeon_master"].generate(
-                [conversation]
-            )
-            assert len(results) == 1
-            episode.actions.append(
-                Action(role="dungeon_master", message=results[0].message)
-            )
-            episode.step_count += 1
+        # Generate player action
+        conversation = self._format_conversation(episode, "player")
+        log_conversation(conversation)
+        results = await self.generation_wrappers["player"].generate([conversation])
+        assert len(results) == 1
+        episode.actions.append(Action(role="player", message=results[0].message))
 
-        return episode
+        episode.step_count += 1
+        finished = episode.step_count >= self.max_user_responses
+        return episode, finished
 
     async def _generate_parameters(
         self, episode: RPGEpisode
@@ -260,7 +260,17 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         For the DM, generate with player actions as user actions, and DM actions as assistant actions.
         For the player, generate with DM actions as user actions, and player actions as assistant actions.
         """
-        conversation: Conversation = []
+        system_prompt = (
+            self._game_master_system_prompt(episode)
+            if generating_role == "dungeon_master"
+            else self._user_action_system_prompt(episode)
+        )
+        conversation: Conversation = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+        ]
 
         for action in episode.actions:
             if generating_role == "dungeon_master":

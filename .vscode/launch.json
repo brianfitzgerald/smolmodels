@@ -48,7 +48,7 @@
                 "--task_name",
                 "roleplaying_game",
                 "--batch_size",
-                "4"
+                "1"
             ],
         },
         {

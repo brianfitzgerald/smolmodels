@@ -205,14 +205,14 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
         """
         raise NotImplementedError
 
-    async def initial_step(self, sample: SampleT):
+    async def initial_step(self, sample: SampleT) -> EpisodeT:
         """
         Initial step of the task. Perform setup; cannot exit from here.
         """
         raise NotImplementedError
 
-    async def step(self) -> EpisodeT | None:
+    async def step(self, episode: EpisodeT) -> tuple[EpisodeT, bool]:
         """
-        Step the episode. Returns the episode if finished.
+        Step the episode. Returns the episode and a boolean indicating if the episode is finished.
         """
         raise NotImplementedError
