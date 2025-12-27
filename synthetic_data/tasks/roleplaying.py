@@ -90,7 +90,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     """
 
     seed_data_format = DatasetFormat.CUSTOM
-    output_dataset_name = "roleplaying_game_multi_step"
+    output_dataset_name = "roleplaying_game_multi_step_dev"
     output_dataset_org = "roborovski"
     output_dataset_format = DatasetFormat.PARQUET
 
