@@ -21,7 +21,6 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
-    PRESENT_CHOICES_TOOL,
     SPEAK_TOOL,
     ToolResult,
 )
@@ -179,23 +178,24 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         finished = episode.step_count >= self.max_user_responses
         return episode, finished
 
+    @staticmethod
+    def _serialize_tool_calls(tool_calls: list | None) -> list | None:
+        if not tool_calls:
+            return None
+        return [
+            {
+                "id": tc.id,
+                "type": tc.type,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in tool_calls
+        ]
+
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
-
-        def serialize_tool_calls(tool_calls: list | None) -> list | None:
-            if not tool_calls:
-                return None
-            return [
-                {
-                    "id": tc.id,
-                    "type": tc.type,
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                }
-                for tc in tool_calls
-            ]
 
         def serialize_message(msg: Message) -> dict:
             result = {
@@ -203,7 +203,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": msg.get("content", ""),
             }
             if "tool_calls" in msg:
-                result["tool_calls"] = serialize_tool_calls(msg["tool_calls"])
+                result["tool_calls"] = (
+                    RoleplayingGameMultiStepTask._serialize_tool_calls(
+                        msg["tool_calls"]
+                    )
+                )
             return result
 
         # Serialize scenario_message
@@ -211,7 +215,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         if episode.scenario_message:
             scenario_dict = {
                 "content": episode.scenario_message.content,
-                "tool_calls": serialize_tool_calls(episode.scenario_message.tool_calls),
+                "tool_calls": RoleplayingGameMultiStepTask._serialize_tool_calls(
+                    episode.scenario_message.tool_calls
+                ),
                 "finish_reason": episode.scenario_message.finish_reason,
             }
 
@@ -314,7 +320,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
         return (
             existing_content
-            + f"\n<tool_calls>{json.dumps(serialized_tool_calls)}</tool_calls>"
+            + f"\n<user_tool_calls>{json.dumps(serialized_tool_calls)}</user_tool_calls>"
         )
 
     async def _generate_scenario(

@@ -77,39 +77,6 @@ RANDOM_CHOICE_TOOL: ChatCompletionFunctionToolParam = {
     },
 }
 
-PRESENT_CHOICES_TOOL: ChatCompletionFunctionToolParam = {
-    "type": "function",
-    "function": {
-        "name": "present_choices",
-        "description": "Present a set of choices to the player. Use this when you want to give the player specific options to choose from.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "The question or situation prompting the choice",
-                },
-                "choices": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {"type": "string", "description": "Short identifier"},
-                            "description": {
-                                "type": "string",
-                                "description": "Description of this choice",
-                            },
-                        },
-                        "required": ["id", "description"],
-                    },
-                    "description": "List of choices available to the player",
-                },
-            },
-            "required": ["prompt", "choices"],
-        },
-    },
-}
-
 SPEAK_TOOL: ChatCompletionFunctionToolParam = {
     "type": "function",
     "function": {
@@ -143,11 +110,7 @@ ACTION_TOOL: ChatCompletionFunctionToolParam = {
             "properties": {
                 "description": {
                     "type": "string",
-                    "description": "Description of the action being taken",
-                },
-                "target": {
-                    "type": "string",
-                    "description": "Optional target of the action (object, NPC, location)",
+                    "description": "Description of the action being taken. Keep the description concise and describe in first person, such as 'Walk forward' or 'Look around'",
                 },
             },
             "required": ["description"],
@@ -156,14 +119,13 @@ ACTION_TOOL: ChatCompletionFunctionToolParam = {
 }
 
 # Tool collections by role
-DM_TOOLS = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, PRESENT_CHOICES_TOOL, SPEAK_TOOL]
+DM_TOOLS = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, SPEAK_TOOL]
 PLAYER_TOOLS = [ROLL_DICE_TOOL, SPEAK_TOOL, ACTION_TOOL]
 
 # All tools combined
 ALL_TOOLS: list[ChatCompletionFunctionToolParam] = [
     ROLL_DICE_TOOL,
     RANDOM_CHOICE_TOOL,
-    PRESENT_CHOICES_TOOL,
     SPEAK_TOOL,
     ACTION_TOOL,
 ]
@@ -278,9 +240,6 @@ TOOL_EXECUTORS = {
     "roll_dice": lambda args: execute_roll_dice(args["notation"], args["reason"]),
     "random_choice": lambda args: execute_random_choice(
         args["options"], args["reason"]
-    ),
-    "present_choices": lambda args: execute_present_choices(
-        args["prompt"], args["choices"]
     ),
     "speak": lambda args: execute_speak(
         args["character"], args["message"], args.get("tone")
