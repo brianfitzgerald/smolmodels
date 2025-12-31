@@ -1,4 +1,3 @@
-import asyncio
 import json
 import random
 from dataclasses import dataclass, field
@@ -9,7 +8,6 @@ from loguru import logger
 
 from synthetic_data.generation import (
     GenerationWrapper,
-    RemoteModel,
 )
 from synthetic_data.generation_utils import GenerationArgs, GenerationResult
 from synthetic_data.tasks import BaseTask, RunMode
@@ -20,6 +18,7 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
+    PLAYER_TOOLS,
     ToolResult,
 )
 from synthetic_data.utils import (
@@ -61,12 +60,9 @@ class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
-    scenario_message: GenerationResult | None = None
+    initial_scenario: GenerationResult | None = None
     actions: list[Action] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
-
-
-USE_DEV_MODELS = True
 
 
 def format_tool_result_for_conversation(result: ToolResult) -> dict[str, Any]:
@@ -101,13 +97,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self.max_user_responses = max_user_responses
         self.num_episodes = num_episodes
 
-        gen_model: RemoteModel = (
-            "claude-4-5-haiku" if USE_DEV_MODELS else "claude-4-5-sonnet"
-        )
-
-        self._add_generation_wrapper("dungeon_master", gen_model)
-        self._add_generation_wrapper("player", gen_model)
-        self._add_generation_wrapper("adventure_parameters", gen_model)
+        self._add_generation_wrapper("dungeon_master", "claude-4-5-sonnet")
+        self._add_generation_wrapper("player", "claude-4-5-sonnet")
+        self._add_generation_wrapper("adventure_parameters", "claude-4-5-haiku")
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -142,22 +134,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "max_user_responses": self.max_user_responses,
             "seed": seed,
         }
+        game_setting, player_character = await self._generate_setting_and_characters(ep)
 
-        # Generate parameters and scenario in parallel
-        (game_setting, player_character), scenario_result = await asyncio.gather(
-            self._generate_setting_and_characters(ep),
-            self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
-        )
+        assert game_setting is not None and player_character is not None
         ep.game_setting = game_setting
         ep.player_character = player_character
-        ep.scenario_message = scenario_result
+        ep.initial_scenario = await self._generate_initial_scenario(
+            game_setting, player_character, self.generation_wrappers["dungeon_master"]
+        )
         return ep
 
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
         # Generate player action
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
-        results = await self.generation_wrappers["player"].generate([conversation])
+        results = await self.generation_wrappers["player"].generate(
+            [conversation], args=GenerationArgs(max_tokens=1024, tools=PLAYER_TOOLS)
+        )
         assert len(results) == 1
         episode.actions.append(Action(role="player", message=results[0].message))
 
@@ -210,13 +203,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Serialize scenario_message
         scenario_dict = None
-        if episode.scenario_message:
+        if episode.initial_scenario:
             scenario_dict = {
-                "content": episode.scenario_message.content,
+                "content": episode.initial_scenario.content,
                 "tool_calls": RoleplayingGameMultiStepTask._serialize_tool_calls(
-                    episode.scenario_message.tool_calls
+                    episode.initial_scenario.tool_calls
                 ),
-                "finish_reason": episode.scenario_message.finish_reason,
+                "finish_reason": episode.initial_scenario.finish_reason,
             }
 
         # Serialize actions
@@ -241,7 +234,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self, episode: RPGEpisode
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = episode.scenario_message or "A mysterious adventure"
+        theme_input = episode.initial_scenario or "A mysterious adventure"
         parameter_conversation: Conversation = [
             {
                 "role": "system",
@@ -305,17 +298,17 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             + f"\n<user_tool_calls>{json.dumps(serialized_tool_calls)}</user_tool_calls>"
         )
 
-    async def _generate_scenario(
-        self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
+    async def _generate_initial_scenario(
+        self,
+        game_setting: str,
+        player_character: str,
+        generation_wrapper: GenerationWrapper,
     ) -> GenerationResult:
         """Generate the initial roleplaying scenario using DM tools."""
-        assert episode.game_setting is not None and episode.player_character is not None
         scenario_conversation: Conversation = [
             {
                 "role": "system",
-                "content": dm_action_prompt(
-                    episode.game_setting, episode.player_character
-                ),
+                "content": dm_action_prompt(game_setting, player_character),
             },
             {
                 "role": "user",
@@ -355,10 +348,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        assert episode.scenario_message is not None
+        assert episode.initial_scenario is not None
 
         # Add scenario to conversation with proper role based on perspective
-        scenario_msg = episode.scenario_message.message
+        scenario_msg = episode.initial_scenario.message
         if generating_role == "player":
             # From player perspective, scenario (from DM) is a user message
             # Tool calls need to be formatted as content since user messages can't have tool_calls

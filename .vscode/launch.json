@@ -16,7 +16,7 @@
             "program": "evaluate.py",
         },
         {
-            "name": "Generate - Roleplaying Game",
+            "name": "Generate - RPG",
             "type": "debugpy",
             "request": "launch",
             "program": "generate.py",
@@ -28,7 +28,7 @@
             ],
         },
         {
-            "name": "Roleplaying Viewer",
+            "name": "Viewer - RPG",
             "type": "debugpy",
             "request": "launch",
             "program": "scripts/roleplay_conv_viewer.py",

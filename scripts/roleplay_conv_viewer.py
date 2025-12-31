@@ -114,12 +114,6 @@ def episode_to_html(episode: dict, index: int) -> str:
                 else:
                     metadata[field] = episode[field]
 
-    # Handle flat parquet schema - use 'scenario' field if scenario_message is empty
-    if not scenario_message and "scenario" in episode:
-        scenario_text = episode.get("scenario", "")
-        if scenario_text and scenario_text != "No scenario generated":
-            scenario_message = {"message": {"content": scenario_text}}
-
     # Format metadata
     metadata_html = ""
     if metadata:
@@ -127,20 +121,6 @@ def episode_to_html(episode: dict, index: int) -> str:
         for key, value in metadata.items():
             metadata_items.append(f"<li><strong>{key}:</strong> {value}</li>")
         metadata_html = f'<ul class="metadata-list">{"".join(metadata_items)}</ul>'
-
-    # Format scenario message
-    scenario_html = ""
-    if scenario_message:
-        msg = scenario_message.get("message", scenario_message)
-        scenario_html = f"""
-        <div class="message dm-message">
-            <div class="message-header">
-                <span class="role-badge dm-badge">Dungeon Master</span>
-                <span class="message-type">Initial Scenario</span>
-            </div>
-            {format_message_html(msg)}
-        </div>
-        """
 
     # Format actions
     actions_html = []
