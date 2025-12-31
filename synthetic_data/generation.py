@@ -10,7 +10,7 @@ import google.genai.types
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import AnthropicError, AsyncAnthropic
 from anthropic import NotGiven as AnthropicNotGiven
-from anthropic.types.message import Message
+from anthropic.types.message import Message as AnthropicMessage
 from anthropic.types.message_param import MessageParam
 from anthropic.types.text_block import TextBlock
 from anthropic.types.tool_use_block import ToolUseBlock
@@ -125,8 +125,11 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
                     generation_results.append(
                         GenerationResult(
-                            content=content,
-                            tool_calls=tool_calls,
+                            message={
+                                "role": "assistant",
+                                "content": content or "",
+                                "tool_calls": tool_calls,
+                            },
                             finish_reason=choice.finish_reason or "end_turn",
                         )
                     )
@@ -258,7 +261,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 )
                 completion_requests.append(request)
 
-            results: list[Message] = await asyncio.gather(*completion_requests)
+            results: list[AnthropicMessage] = await asyncio.gather(*completion_requests)
             generation_results = []
 
             for result in results:
@@ -287,8 +290,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
                 generation_results.append(
                     GenerationResult(
-                        content=content,
-                        tool_calls=tool_calls,
+                        message={
+                            "role": "assistant",
+                            "content": content or "",
+                            "tool_calls": tool_calls,
+                        },
                         finish_reason=result.stop_reason,
                     )
                 )
@@ -360,9 +366,13 @@ class GeminiWrapper(GenerationWrapper):
                     return []
 
                 return [
+                    # TODO fix for new format
                     GenerationResult(
-                        content=result.text or "",
-                        tool_calls=[],
+                        message={
+                            "role": "assistant",
+                            "content": result.text or "",
+                            "tool_calls": [],
+                        },
                         finish_reason="end_turn",
                     )
                     for result in results

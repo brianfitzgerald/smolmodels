@@ -171,6 +171,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     @staticmethod
     def _serialize_tool_calls(tool_calls: list | None) -> list | None:
+        """Serialize tool call strings to a list of dicts."""
         if not tool_calls:
             return None
         return [
