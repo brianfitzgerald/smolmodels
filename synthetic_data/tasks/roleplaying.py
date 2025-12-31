@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from datasets import Dataset
-from jinja2 import Template
 from loguru import logger
 
 from synthetic_data.generation import (
@@ -15,9 +14,9 @@ from synthetic_data.generation import (
 from synthetic_data.generation_utils import GenerationArgs, GenerationResult
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
-    DUNGEON_MASTER_ACTION_PROMPT,
-    GAME_PARAMETER_PROMPT,
-    PLAYER_ACTION_PROMPT,
+    dm_action_prompt,
+    game_parameter_prompt,
+    player_action_prompt,
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
@@ -146,7 +145,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Generate parameters and scenario in parallel
         (game_setting, player_character), scenario_result = await asyncio.gather(
-            self._generate_parameters(ep),
+            self._generate_setting_and_characters(ep),
             self._generate_scenario(ep, self.generation_wrappers["dungeon_master"]),
         )
         ep.game_setting = game_setting
@@ -238,7 +237,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "metadata": episode.metadata,
         }
 
-    async def _generate_parameters(
+    async def _generate_setting_and_characters(
         self, episode: RPGEpisode
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
@@ -246,7 +245,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         parameter_conversation: Conversation = [
             {
                 "role": "system",
-                "content": GAME_PARAMETER_PROMPT,
+                "content": game_parameter_prompt(),
             },
             {
                 "role": "user",
@@ -283,22 +282,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     )
         return None, None
 
-    def _game_master_system_prompt(self, episode: RPGEpisode) -> str:
-        template: Template = Template(DUNGEON_MASTER_ACTION_PROMPT)
-        formatted_prompt = template.render(
-            GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
-            PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
-        )
-        return formatted_prompt
-
-    def _player_system_prompt(self, episode: RPGEpisode) -> str:
-        template: Template = Template(PLAYER_ACTION_PROMPT)
-        formatted_prompt = template.render(
-            GAME_SETTING=episode.game_setting or "A mysterious and unknown world",
-            PLAYER_CHARACTER=episode.player_character or "A brave adventurer",
-        )
-        return formatted_prompt
-
     def _format_tool_calls_for_user_message(
         self, tool_calls: list[Any] | None, existing_content: str = ""
     ) -> str:
@@ -326,10 +309,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self, episode: RPGEpisode, generation_wrapper: GenerationWrapper
     ) -> GenerationResult:
         """Generate the initial roleplaying scenario using DM tools."""
+        assert episode.game_setting is not None and episode.player_character is not None
         scenario_conversation: Conversation = [
             {
                 "role": "system",
-                "content": self._game_master_system_prompt(episode),
+                "content": dm_action_prompt(
+                    episode.game_setting, episode.player_character
+                ),
             },
             {
                 "role": "user",
@@ -350,15 +336,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         For the DM, generate with player actions as user actions, and DM actions as assistant actions.
         For the player, generate with DM actions as user actions, and player actions as assistant actions.
         """
-        system_prompt = (
-            self._game_master_system_prompt(episode)
-            if generating_role == "dungeon_master"
-            else self._player_system_prompt(episode)
+
+        assert episode.game_setting is not None
+        assert episode.player_character is not None
+
+        player_system_prompt = player_action_prompt(
+            episode.game_setting, episode.player_character
+        )
+        dm_system_prompt = dm_action_prompt(
+            episode.game_setting, episode.player_character
         )
         conversation: Conversation = [
             {
                 "role": "system",
-                "content": system_prompt,
+                "content": dm_system_prompt
+                if generating_role == "dungeon_master"
+                else player_system_prompt,
             },
         ]
 

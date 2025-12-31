@@ -10,34 +10,10 @@
             "args": []
         },
         {
-            "name": "Train - TRL",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "train_trl.py",
-            "justMyCode": false,
-            "args": [
-                "--config",
-                "qwen-math",
-                "--notebook_mode"
-            ]
-        },
-        {
             "name": "Evaluate",
             "type": "debugpy",
             "request": "launch",
             "program": "evaluate.py",
-        },
-        {
-            "name": "Generate - Gutenberg NCP",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "generate.py",
-            "args": [
-                "--task_name",
-                "gutenberg_summary_continuation",
-                "--batch_size",
-                "4"
-            ],
         },
         {
             "name": "Generate - Roleplaying Game",
@@ -52,24 +28,22 @@
             ],
         },
         {
-            "name": "vLLM Server",
+            "name": "Roleplaying Viewer",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/run_vllm.py",
-            "justMyCode": false,
-            "args": [
-                "--run",
-                "01-09-17-46-208302-llama-3.2-3b-instruct-openo1-composite-1e-5",
-                // "--model",
-                // "meta-llama/Llama-3.2-3B-Instruct"
-            ]
+            "program": "scripts/roleplay_conv_viewer.py",
         },
         {
-            "name": "llama.cpp Inference",
+            "name": "Generate - Gutenberg NCP",
             "type": "debugpy",
             "request": "launch",
-            "program": "gguf_inference.py",
-            "justMyCode": false,
+            "program": "generate.py",
+            "args": [
+                "--task_name",
+                "gutenberg_summary_continuation",
+                "--batch_size",
+                "4"
+            ],
         },
         {
             "name": "Gradio UI",

@@ -1,21 +1,12 @@
-DUNGEON_MASTER_ACTION_PROMPT = """
+def dm_action_prompt(game_setting: str, player_character: str) -> str:
+    return f"""
 You are an AI dungeon master for a single-player role-playing game. Your task is to create an engaging and immersive gameplay experience by generating dialogue, action, complex decisions, simple puzzles, and other relevant gameplay elements.
 
 Here is the game setting:
-{{GAME_SETTING}}
+{game_setting}
 
 Here is the information about the player character:
-{{PLAYER_CHARACTER}}
-
-You have access to the following tools to create an interactive experience:
-
-1. **roll_dice**: Use this for any random chance events, skill checks, combat rolls, or when randomness is needed. Provide standard dice notation (e.g., "1d20", "2d6+3") and a reason for the roll.
-
-2. **random_choice**: Use this when an outcome should be randomly determined from multiple possibilities (e.g., which NPC approaches, what weather occurs).
-
-3. **present_choices**: Use this to give the player specific options to choose from at decision points. Include a prompt and a list of choices with descriptions.
-
-4. **speak**: Use this for NPC dialogue. Specify the character name, their message, and optionally a tone or emotion.
+{player_character}
 
 Your responsibilities as dungeon master:
 1. Create vivid descriptions of environments, characters, and situations
@@ -31,17 +22,16 @@ Important guidelines:
 - Be flexible and adapt to unexpected player actions using the "yes, and" principle
 - Use appropriate pacing between action and character development
 - Encourage role-playing by providing opportunities for the player to showcase their character
-
-Begin with a brief introduction of the game world and the player character's current situation.
 """
 
 
-GAME_PARAMETER_PROMPT = """
+def game_parameter_prompt() -> str:
+    return """
 You are a creative game designer tasked with generating parameters for a roleplaying scenario.
 
 Generate two pieces of content:
-1. A detailed GAME_SETTING (2-3 paragraphs) describing the world, its genre, atmosphere, and key locations
-2. A PLAYER_CHARACTER description (1-2 paragraphs) describing the main character's background, abilities, and personality
+1. A detailed game_setting (2-3 paragraphs) describing the world, its genre, atmosphere, and key locations
+2. A player_character description (1-2 paragraphs) describing the main character's background, abilities, and personality
 
 Wrap your output in the appropriate XML tags:
 <game_setting>
@@ -56,14 +46,15 @@ Be creative and provide rich detail that will enable engaging gameplay.
 """
 
 
-PLAYER_ACTION_PROMPT = """
+def player_action_prompt(game_setting: str, player_character: str) -> str:
+    return f"""
 You are simulating a player in a roleplaying game. Based on the scenario and the dungeon master's response, generate a realistic player response that a human player might make.
 
 Here is the game setting:
-{{GAME_SETTING}}
+{game_setting}
 
 Here is the information about the player character:
-{{PLAYER_CHARACTER}}
+{player_character}
 
 You have access to the following tools:
 
