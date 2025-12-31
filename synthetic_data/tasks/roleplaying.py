@@ -21,7 +21,6 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
-    SPEAK_TOOL,
     ToolResult,
 )
 from synthetic_data.utils import (
@@ -340,9 +339,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         results = await generation_wrapper.generate(
             [scenario_conversation],
-            args=GenerationArgs(
-                max_tokens=1024, tools=[SPEAK_TOOL, PRESENT_CHOICES_TOOL]
-            ),
+            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
         return results[0]
 
