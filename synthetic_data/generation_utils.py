@@ -1,16 +1,13 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, cast
 
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
-from openai.types.chat.chat_completion_message_tool_call import (
-    ChatCompletionMessageToolCall,
-)
 from pydantic import BaseModel
 
 from synthetic_data.utils import (
@@ -124,8 +121,16 @@ def convert_openai_to_anthropic_messages(
                 if isinstance(tc, dict):
                     tool_id = tc.get("id")
                     function_data = tc.get("function", {})
-                    tool_name = function_data.get("name") if isinstance(function_data, dict) else getattr(function_data, "name", None)
-                    tool_input = function_data.get("arguments", "{}") if isinstance(function_data, dict) else getattr(function_data, "arguments", "{}")
+                    tool_name = (
+                        function_data.get("name")
+                        if isinstance(function_data, dict)
+                        else getattr(function_data, "name", None)
+                    )
+                    tool_input = (
+                        function_data.get("arguments", "{}")
+                        if isinstance(function_data, dict)
+                        else getattr(function_data, "arguments", "{}")
+                    )
                 else:
                     # Pydantic object (ChatCompletionMessageToolCall)
                     tool_id = tc.id
@@ -241,20 +246,8 @@ FinishReason = Literal[
 class GenerationResult:
     """Result from a generation call that may include tool calls."""
 
-    content: str | None
-    tool_calls: list[ChatCompletionMessageToolCall] = field(default_factory=list)
+    message: Message
     finish_reason: FinishReason = "end_turn"
-
-    @property
-    def message(self) -> Message:
-        """Return a Message dict for compatibility with code expecting message format."""
-        msg: Message = {
-            "role": "assistant",
-            "content": self.content or "",
-        }
-        if self.tool_calls:
-            msg["tool_calls"] = self.tool_calls
-        return msg
 
 
 class GenWrapperArgs(BaseModel):
@@ -285,7 +278,7 @@ class GenerationWrapper(ABC):
 
     @abstractmethod
     async def generate(
-        self, conversations: list[Conversation], args: GenerationArgs | None = None
+        self, conversation: Conversation, args: GenerationArgs | None = None
     ) -> list[GenerationResult]:
         """
         Generate completions for the given conversations.

@@ -1,7 +1,7 @@
 import json
 import random
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from datasets import Dataset
 from loguru import logger
@@ -19,9 +19,9 @@ from synthetic_data.tasks.roleplaying_prompts import (
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
     PLAYER_TOOLS,
-    ToolResult,
 )
 from synthetic_data.utils import (
+    ContentBlock,
     Conversation,
     DatasetFormat,
     Message,
@@ -63,15 +63,6 @@ class RPGEpisode:
     initial_scenario: GenerationResult | None = None
     actions: list[Action] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
-
-
-def format_tool_result_for_conversation(result: ToolResult) -> dict[str, Any]:
-    """Format a tool result for inclusion in the conversation."""
-    return {
-        "role": "tool",
-        "tool_call_id": result.tool_call_id,
-        "content": json.dumps(result.content) if result.success else result.error,
-    }
 
 
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
@@ -149,7 +140,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
         results = await self.generation_wrappers["player"].generate(
-            [conversation], args=GenerationArgs(max_tokens=1024, tools=PLAYER_TOOLS)
+            conversation, args=GenerationArgs(max_tokens=1024, tools=PLAYER_TOOLS)
         )
         assert len(results) == 1
         episode.actions.append(Action(role="player", message=results[0].message))
@@ -157,7 +148,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
-            [conversation],
+            conversation,
             args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
         assert len(results) == 1
@@ -187,46 +178,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
-
-        def serialize_message(msg: Message) -> dict:
-            result = {
-                "role": msg.get("role", ""),
-                "content": msg.get("content", ""),
-            }
-            if "tool_calls" in msg:
-                result["tool_calls"] = (
-                    RoleplayingGameMultiStepTask._serialize_tool_calls(
-                        msg["tool_calls"]
-                    )
-                )
-            return result
-
-        # Serialize scenario_message
-        scenario_dict = None
-        if episode.initial_scenario:
-            scenario_dict = {
-                "content": episode.initial_scenario.content,
-                "tool_calls": RoleplayingGameMultiStepTask._serialize_tool_calls(
-                    episode.initial_scenario.tool_calls
-                ),
-                "finish_reason": episode.initial_scenario.finish_reason,
-            }
-
-        # Serialize actions
-        actions_list = [
-            {
-                "role": action.role,
-                "message": serialize_message(action.message),
-            }
-            for action in episode.actions
-        ]
-
         return {
             "step_count": episode.step_count,
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
-            "scenario_message": scenario_dict,
-            "actions": actions_list,
+            "actions": [action.message for action in episode.actions],
             "metadata": episode.metadata,
         }
 
@@ -238,11 +194,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         parameter_conversation: Conversation = [
             {
                 "role": "system",
-                "content": game_parameter_prompt(),
+                "content": [{"type": "text", "text": game_parameter_prompt()}],
             },
             {
                 "role": "user",
-                "content": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
+                    }
+                ],
             },
         ]
 
@@ -252,7 +213,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         for attempt in range(MAX_PARSE_RETRIES):
             results = await self.generation_wrappers["adventure_parameters"].generate(
-                [parameter_conversation]
+                parameter_conversation,
             )
             try:
                 content = results[0].content or ""
@@ -276,27 +237,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return None, None
 
     def _format_tool_calls_for_user_message(
-        self, tool_calls: list[Any] | None, existing_content: str = ""
-    ) -> str:
+        self,
+        tool_calls: list[ContentBlock] | None,
+        message_content: list[ContentBlock] | None,
+    ) -> list[ContentBlock]:
+        """Format tool calls for a user message. Needed as user messages can't have tool_calls in most inference APIs."""
         if not tool_calls:
-            return existing_content
+            return message_content or []
 
-        serialized_tool_calls = [
-            tc
-            if isinstance(tc, dict)
-            else {
-                "id": tc.id,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
+        serialized_tool_calls: list[ContentBlock] = [
+            ContentBlock(
+                type="text",
+                text=json.dumps(tc["input"]),
+            )
             for tc in tool_calls
         ]
-        return (
-            existing_content
-            + f"\n<user_tool_calls>{json.dumps(serialized_tool_calls)}</user_tool_calls>"
-        )
+        return (message_content or []) + serialized_tool_calls
 
     async def _generate_initial_scenario(
         self,
@@ -308,16 +264,26 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         scenario_conversation: Conversation = [
             {
                 "role": "system",
-                "content": dm_action_prompt(game_setting, player_character),
+                "content": [
+                    {
+                        "type": "text",
+                        "text": dm_action_prompt(game_setting, player_character),
+                    }
+                ],
             },
             {
                 "role": "user",
-                "content": "Begin the adventure. Set the scene and introduce the player to their situation.",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Begin the adventure. Set the scene and introduce the player to their situation.",
+                    }
+                ],
             },
         ]
 
         results = await generation_wrapper.generate(
-            [scenario_conversation],
+            scenario_conversation,
             args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
         return results[0]
@@ -342,9 +308,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation: Conversation = [
             {
                 "role": "system",
-                "content": dm_system_prompt
-                if generating_role == "dungeon_master"
-                else player_system_prompt,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": dm_system_prompt
+                        if generating_role == "dungeon_master"
+                        else player_system_prompt,
+                    }
+                ],
             },
         ]
 
@@ -356,9 +327,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             # From player perspective, scenario (from DM) is a user message
             # Tool calls need to be formatted as content since user messages can't have tool_calls
             scenario_content = self._format_tool_calls_for_user_message(
-                scenario_msg.get("tool_calls"), scenario_msg.get("content", "")
+                scenario_msg.get("tool_calls"),
+                scenario_msg.get("content", []),
             )
-            conversation.append({"role": "user", "content": scenario_content})
+            conversation.append(
+                {
+                    "role": "user",
+                    "content": scenario_content,
+                }
+            )
         else:
             # From DM perspective, scenario stays as assistant message
             conversation.append(scenario_msg)
@@ -373,20 +350,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
             message: Message = {
                 "role": role,
-                "content": action.message.get("content", ""),
+                "content": action.message.get("content", []),
             }
 
             tool_calls = action.message.get("tool_calls")
             # Only assistant messages can have tool_calls in the OpenAI API format
             if tool_calls and role == "assistant":
-                # If assistant, add tool calls
-                message["tool_calls"] = tool_calls
-            elif tool_calls:
-                # If user, format tool call in message content
-                # TODO determine better way to format this to not break tool call formatting
-                # in the fine-tuned model
                 message["content"] = self._format_tool_calls_for_user_message(
-                    tool_calls, message.get("content", "")
+                    tool_calls, message.get("content", [])
                 )
 
             conversation.append(message)

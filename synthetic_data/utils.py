@@ -10,15 +10,28 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 import pandas as pd
 from loguru import logger
-from openai.types.chat import ChatCompletionMessageToolCall
 from pydantic.dataclasses import dataclass
 from tabulate import tabulate
 
 
+class ContentBlock(TypedDict, total=False):
+    type: Literal["text", "thinking", "tool_use"]
+
+    # text block
+    text: Optional[str] = None
+
+    # thinking block
+    thinking: Optional[str] = None
+
+    # tool use block
+    id: str
+    input: object
+    name: str
+
+
 class Message(TypedDict, total=False):
-    role: Literal["system", "user", "assistant", "tool", "function"]
-    content: str
-    tool_calls: Optional[List[ChatCompletionMessageToolCall]] = None
+    role: Literal["system", "user", "assistant"]
+    content: list[ContentBlock]
 
 
 Conversation = List[Message]
