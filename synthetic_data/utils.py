@@ -14,23 +14,49 @@ from pydantic.dataclasses import dataclass
 from tabulate import tabulate
 
 
-class ContentBlock(TypedDict, total=False):
-    type: Literal["text", "thinking", "tool_use"]
+class TextBlock(TypedDict):
+    type: Literal["text"]
+    text: str
 
-    # text block
-    text: Optional[str] = None
 
-    # thinking block
-    thinking: Optional[str] = None
+class ThinkingBlock(TypedDict):
+    type: Literal["thinking"]
+    thinking: str
 
-    # tool use block
+
+class ToolUseBlock(TypedDict):
+    type: Literal["tool_use"]
     id: str
     input: object
     name: str
 
 
+class ToolResultBlock(TypedDict, total=False):
+    tool_use_id: str
+    type: Literal["tool_result"]
+    content: str
+    is_error: bool
+
+
+class InputSchema(TypedDict, total=False):
+    type: Literal["object"]
+    properties: Optional[dict[str, object]]
+    required: Optional[list[str]]
+
+
+class ToolParam(TypedDict, total=False):
+    input_schema: InputSchema
+    name: str
+
+    description: str
+    type: Literal["custom"]
+
+
+ContentBlock = Union[TextBlock, ThinkingBlock, ToolUseBlock, ToolResultBlock]
+
+
 class Message(TypedDict, total=False):
-    role: Literal["system", "user", "assistant"]
+    role: Literal["system", "user", "assistant", "tool"]
     content: list[ContentBlock]
 
 

@@ -25,6 +25,7 @@ from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
     Message,
+    TextBlock,
     log_conversation,
     parse_xml_tags,
 )
@@ -160,22 +161,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         finished = episode.step_count >= self.max_user_responses
         return episode, finished
 
-    @staticmethod
-    def _serialize_tool_calls(tool_calls: list | None) -> list | None:
-        if not tool_calls:
-            return None
-        return [
-            {
-                "id": tc.id,
-                "type": tc.type,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in tool_calls
-        ]
-
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
         return {
@@ -191,19 +176,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
         theme_input = episode.initial_scenario or "A mysterious adventure"
+        system_text_block: TextBlock = {"type": "text", "text": game_parameter_prompt()}
+        user_text_block: TextBlock = {
+            "type": "text",
+            "text": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
+        }
         parameter_conversation: Conversation = [
             {
                 "role": "system",
-                "content": [{"type": "text", "text": game_parameter_prompt()}],
+                "content": [system_text_block],
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
-                    }
-                ],
+                "content": [user_text_block],
             },
         ]
 
@@ -216,7 +201,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 parameter_conversation,
             )
             try:
-                content = results[0].content or ""
+                content = results[0].message.get("content", [])[0].get("text", "")
                 parsed_tags = parse_xml_tags(
                     content, required_tags=["game_setting", "player_character"]
                 )
@@ -236,23 +221,21 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     )
         return None, None
 
-    def _format_tool_calls_for_user_message(
+    def _convert_tool_calls_to_text_blocks(
         self,
-        tool_calls: list[ContentBlock] | None,
-        message_content: list[ContentBlock] | None,
+        content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
-        """Format tool calls for a user message. Needed as user messages can't have tool_calls in most inference APIs."""
-        if not tool_calls:
-            return message_content or []
-
-        serialized_tool_calls: list[ContentBlock] = [
-            ContentBlock(
-                type="text",
-                text=json.dumps(tc["input"]),
-            )
-            for tc in tool_calls
-        ]
-        return (message_content or []) + serialized_tool_calls
+        out_blocks: list[ContentBlock] = []
+        for block in content_blocks:
+            if block["type"] == "tool_use":
+                text_block: TextBlock = {
+                    "type": "text",
+                    "text": json.dumps(block["input"]),
+                }
+                out_blocks.append(text_block)
+            else:
+                out_blocks.append(block)
+        return out_blocks
 
     async def _generate_initial_scenario(
         self,
@@ -261,24 +244,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         generation_wrapper: GenerationWrapper,
     ) -> GenerationResult:
         """Generate the initial roleplaying scenario using DM tools."""
+        system_text_block: TextBlock = {
+            "type": "text",
+            "text": dm_action_prompt(game_setting, player_character),
+        }
+        user_text_block: TextBlock = {
+            "type": "text",
+            "text": "Begin the adventure. Set the scene and introduce the player to their situation.",
+        }
         scenario_conversation: Conversation = [
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": dm_action_prompt(game_setting, player_character),
-                    }
-                ],
+                "content": [system_text_block],
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Begin the adventure. Set the scene and introduce the player to their situation.",
-                    }
-                ],
+                "content": [user_text_block],
             },
         ]
 
@@ -305,17 +286,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         dm_system_prompt = dm_action_prompt(
             episode.game_setting, episode.player_character
         )
+        system_text_block: TextBlock = {
+            "type": "text",
+            "text": dm_system_prompt
+            if generating_role == "dungeon_master"
+            else player_system_prompt,
+        }
         conversation: Conversation = [
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": dm_system_prompt
-                        if generating_role == "dungeon_master"
-                        else player_system_prompt,
-                    }
-                ],
+                "content": [system_text_block],
             },
         ]
 
@@ -326,9 +306,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         if generating_role == "player":
             # From player perspective, scenario (from DM) is a user message
             # Tool calls need to be formatted as content since user messages can't have tool_calls
-            scenario_content = self._format_tool_calls_for_user_message(
-                scenario_msg.get("tool_calls"),
-                scenario_msg.get("content", []),
+            scenario_content = self._convert_tool_calls_to_text_blocks(
+                scenario_msg["content"],
             )
             conversation.append(
                 {
@@ -356,8 +335,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             tool_calls = action.message.get("tool_calls")
             # Only assistant messages can have tool_calls in the OpenAI API format
             if tool_calls and role == "assistant":
-                message["content"] = self._format_tool_calls_for_user_message(
-                    tool_calls, message.get("content", [])
+                message["content"] = self._convert_tool_calls_to_text_blocks(
+                    message["content"]
                 )
 
             conversation.append(message)

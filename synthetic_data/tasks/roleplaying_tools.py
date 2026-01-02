@@ -9,12 +9,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from openai.types.chat.chat_completion_function_tool_param import (
-    ChatCompletionFunctionToolParam,
-)
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
+
+from synthetic_data.utils import ToolParam
 
 # Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
 DICE_PATTERN = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
@@ -30,100 +29,88 @@ class ToolResult:
     error: str | None = None
 
 
-# Tool Schema Definitions (OpenAI format - ChatCompletionToolParam)
+# Tool Schema Definitions (Anthropic format - ToolParam)
 
-ROLL_DICE_TOOL: ChatCompletionFunctionToolParam = {
-    "type": "function",
-    "function": {
-        "name": "roll_dice",
-        "description": "Roll dice using standard RPG notation. Use this for any random chance events, skill checks, combat, or when randomness is needed.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "notation": {
-                    "type": "string",
-                    "description": "Dice notation like '2d6+3' (roll 2 six-sided dice and add 3), '1d20' (roll one 20-sided die), '3d8-2' (roll 3 eight-sided dice and subtract 2). Format: [count]d[sides][+/-modifier]",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation of what this roll is for (e.g., 'attack roll', 'perception check', 'damage')",
-                },
+ROLL_DICE_TOOL: ToolParam = {
+    "name": "roll_dice",
+    "description": "Roll dice using standard RPG notation. Use this for any random chance events, skill checks, combat, or when randomness is needed.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "notation": {
+                "type": "string",
+                "description": "Dice notation like '2d6+3' (roll 2 six-sided dice and add 3), '1d20' (roll one 20-sided die), '3d8-2' (roll 3 eight-sided dice and subtract 2). Format: [count]d[sides][+/-modifier]",
             },
-            "required": ["notation", "reason"],
+            "reason": {
+                "type": "string",
+                "description": "Brief explanation of what this roll is for (e.g., 'attack roll', 'perception check', 'damage')",
+            },
         },
+        "required": ["notation", "reason"],
     },
 }
 
-RANDOM_CHOICE_TOOL: ChatCompletionFunctionToolParam = {
-    "type": "function",
-    "function": {
-        "name": "random_choice",
-        "description": "Randomly select one option from a list. Use this when the outcome should be randomly determined from multiple possibilities.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of options to randomly choose from",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation of what this choice determines",
-                },
+RANDOM_CHOICE_TOOL: ToolParam = {
+    "name": "random_choice",
+    "description": "Randomly select one option from a list. Use this when the outcome should be randomly determined from multiple possibilities.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "options": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of options to randomly choose from",
             },
-            "required": ["options", "reason"],
+            "reason": {
+                "type": "string",
+                "description": "Brief explanation of what this choice determines",
+            },
         },
+        "required": ["options", "reason"],
     },
 }
 
-SPEAK_TOOL: ChatCompletionFunctionToolParam = {
-    "type": "function",
-    "function": {
-        "name": "speak",
-        "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "character": {
-                    "type": "string",
-                    "description": "Name of the character speaking",
-                },
-                "message": {"type": "string", "description": "What the character says"},
-                "tone": {
-                    "type": "string",
-                    "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
-                },
+SPEAK_TOOL: ToolParam = {
+    "name": "speak",
+    "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "character": {
+                "type": "string",
+                "description": "Name of the character speaking",
             },
-            "required": ["character", "message"],
+            "message": {"type": "string", "description": "What the character says"},
+            "tone": {
+                "type": "string",
+                "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
+            },
         },
+        "required": ["character", "message"],
     },
 }
 
-ACTION_TOOL: ChatCompletionFunctionToolParam = {
-    "type": "function",
-    "function": {
-        "name": "action",
-        "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "description": "Description of the action being taken. Keep the description concise and describe in first person, such as 'Walk forward' or 'Look around'",
-                },
+ACTION_TOOL: ToolParam = {
+    "name": "action",
+    "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {
+                "type": "string",
+                "description": "Description of the action being taken. Keep the description concise and describe in first person, such as 'Walk forward' or 'Look around'",
             },
-            "required": ["description"],
         },
+        "required": ["description"],
     },
 }
 
 # Tool collections by role
-DM_TOOLS = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, SPEAK_TOOL]
-PLAYER_TOOLS = [SPEAK_TOOL, ACTION_TOOL]
+DM_TOOLS: list[ToolParam] = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, SPEAK_TOOL]
+PLAYER_TOOLS: list[ToolParam] = [SPEAK_TOOL, ACTION_TOOL]
 
 # All tools combined
-ALL_TOOLS: list[ChatCompletionFunctionToolParam] = [
+ALL_TOOLS: list[ToolParam] = [
     ROLL_DICE_TOOL,
     RANDOM_CHOICE_TOOL,
     SPEAK_TOOL,

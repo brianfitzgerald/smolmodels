@@ -2,18 +2,19 @@ import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional, cast
+from typing import Any, Callable, Dict, Literal, Optional, cast
 
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 from pydantic import BaseModel
 
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
     Message,
+    ToolParam,
+    ToolUseBlock,
 )
 
 MAX_RETRIES = 10
@@ -234,7 +235,8 @@ class GenerationArgs(BaseModel):
     n_retries: int = MAX_RETRIES
     prefill: str | None = None
     thinking_budget: int | None = None
-    tools: list[ChatCompletionToolParam] | None = None
+    tools: list[ToolParam] | None = None
+    tool_use_executor: Callable[[ToolUseBlock], str] | None = None
 
 
 FinishReason = Literal[

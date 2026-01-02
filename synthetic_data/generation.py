@@ -7,8 +7,7 @@ from typing import Optional
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import AnthropicError, AsyncAnthropic
 from anthropic import NotGiven as AnthropicNotGiven
-from anthropic.types.text_block import TextBlock
-from anthropic.types.tool_use_block import ToolUseBlock
+from anthropic.types.message import Message as AnthropicMessage
 from loguru import logger
 from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -24,6 +23,8 @@ from synthetic_data.generation_utils import (
 from synthetic_data.utils import (
     Conversation,
     Message,
+    TextBlock,
+    ToolUseBlock,
     get_class_name,
 )
 
@@ -103,21 +104,21 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     if args.prefill and content:
                         content = args.prefill + content
 
+                    text_block: TextBlock = {"type": "text", "text": content}
                     message: Message = {
                         "role": "assistant",
-                        "content": [{"type": "text", "text": content}],
+                        "content": [text_block],
                     }
 
                     if message.get("tool_calls"):
                         for tool_call in message.get("tool_calls", []):
-                            message["content"].append(
-                                {
-                                    "type": "tool_use",
-                                    "id": tool_call["id"],
-                                    "name": tool_call["function"]["name"],
-                                    "input": tool_call["function"]["arguments"],
-                                }
-                            )
+                            tool_use_block: ToolUseBlock = {
+                                "type": "tool_use",
+                                "id": tool_call["id"],
+                                "name": tool_call["function"]["name"],
+                                "input": tool_call["function"]["arguments"],
+                            }
+                            message["content"].append(tool_use_block)
 
                     generation_results.append(
                         GenerationResult(
@@ -212,19 +213,24 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
             # Anthropic passes system messages as the first message in the conversation
             if conversation[0]["role"] == "system":
-                system_msg = conversation[0]["content"][0]["text"]
+                first_content_block = conversation[0]["content"][0]
+                if first_content_block.get("type") == "text":
+                    text_block: TextBlock = first_content_block  # type: ignore[assignment]
+                    system_msg = text_block["text"]
                 conversation = conversation[1:]
 
             # TODO tool response blocks are user messages with tool_use blocks as content,
             # reformat before inference
 
             if args.prefill:
+                prefill_text_block: TextBlock = {"type": "text", "text": args.prefill}
+                assistant_message: Message = {
+                    "role": "assistant",
+                    "content": [prefill_text_block],
+                }
                 conversation = [
                     *conversation,
-                    {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": args.prefill}],
-                    },
+                    assistant_message,
                 ]
 
             # Convert tools from OpenAI format to Anthropic format if provided
@@ -232,14 +238,14 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             if args.tools:
                 anthropic_tools = [
                     {
-                        "name": tool["function"]["name"],
-                        "description": tool["function"].get("description", ""),
-                        "input_schema": tool["function"].get("parameters", {}),
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "input_schema": tool["input_schema"],
                     }
                     for tool in args.tools
                 ]
 
-            request = self.client.messages.create(
+            request = await self.client.messages.create(
                 model=self.gen_wrapper_args.model_id,
                 messages=conversation,
                 system=system_msg,
@@ -250,45 +256,40 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 tools=anthropic_tools,
             )
 
-            results: list[Message] = await request
-            generation_results = []
+            result_message: AnthropicMessage = await request
 
             message: Message = {
                 "role": "assistant",
                 "content": [],
             }
 
-            for result in results:
-                for block in result.content:
-                    if isinstance(block, TextBlock):
-                        block_text = block.text
-                        if args.prefill and block_text:
-                            block_text = args.prefill + block_text
-                        message["content"].append(
-                            {
-                                "type": "text",
-                                "text": block_text,
-                            }
-                        )
-                    elif isinstance(block, ToolUseBlock):
-                        # Convert Anthropic tool use to OpenAI format
-                        message["content"].append(
-                            {
-                                "type": "tool_use",
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input,
-                            }
-                        )
+            for block in result_message.content:
+                if block["type"] == "text":
+                    block_text = block.text
+                    if args.prefill and block_text:
+                        block_text = args.prefill + block_text
+                    text_block: TextBlock = {
+                        "type": "text",
+                        "text": block_text,
+                    }
+                    message["content"].append(text_block)
+                elif block["type"] == "tool_use":
+                    tool_use_block: ToolUseBlock = {
+                        "type": "tool_use",
+                        "id": block["id"],
+                        "name": block["name"],
+                        "input": block["input"],
+                    }
+                    message["content"].append(tool_use_block)
+                elif block["type"] == "tool_result":
+                    # TODO execute tools here if we get a tool use block
+                    message["content"].append(block)
 
-                generation_results.append(
-                    GenerationResult(
-                        message=message,
-                        finish_reason=result.stop_reason,
-                    )
+            return [
+                GenerationResult(
+                    message=message, finish_reason=result_message.stop_reason
                 )
-
-            return generation_results
+            ]
 
         except AnthropicError as e:
             logger.error(f"Error while generating: {e}")
