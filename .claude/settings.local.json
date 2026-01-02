@@ -19,7 +19,8 @@
       "Bash(wc:*)",
       "Bash(pkill:*)",
       "Bash(timeout 120 python:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(uv run python:*)"
     ],
     "deny": [],
     "ask": []

@@ -245,7 +245,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     for tool in args.tools
                 ]
 
-            request = await self.client.messages.create(
+            request = self.client.messages.create(
                 model=self.gen_wrapper_args.model_id,
                 messages=conversation,
                 system=system_msg,
@@ -264,7 +264,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             }
 
             for block in result_message.content:
-                if block["type"] == "text":
+                if block.type == "text":
                     block_text = block.text
                     if args.prefill and block_text:
                         block_text = args.prefill + block_text
@@ -273,15 +273,15 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                         "text": block_text,
                     }
                     message["content"].append(text_block)
-                elif block["type"] == "tool_use":
+                elif block.type == "tool_use":
                     tool_use_block: ToolUseBlock = {
                         "type": "tool_use",
-                        "id": block["id"],
-                        "name": block["name"],
-                        "input": block["input"],
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
                     }
                     message["content"].append(tool_use_block)
-                elif block["type"] == "tool_result":
+                elif block.type == "tool_result":
                     # TODO execute tools here if we get a tool use block
                     message["content"].append(block)
 

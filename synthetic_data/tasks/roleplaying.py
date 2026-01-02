@@ -16,10 +16,7 @@ from synthetic_data.tasks.roleplaying_prompts import (
     game_parameter_prompt,
     player_action_prompt,
 )
-from synthetic_data.tasks.roleplaying_tools import (
-    DM_TOOLS,
-    PLAYER_TOOLS,
-)
+# Tools temporarily disabled - see roleplaying_tools.py for definitions
 from synthetic_data.utils import (
     ContentBlock,
     Conversation,
@@ -141,7 +138,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
         results = await self.generation_wrappers["player"].generate(
-            conversation, args=GenerationArgs(max_tokens=1024, tools=PLAYER_TOOLS)
+            conversation, args=GenerationArgs(max_tokens=1024)
         )
         assert len(results) == 1
         episode.actions.append(Action(role="player", message=results[0].message))
@@ -150,7 +147,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
             conversation,
-            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
+            args=GenerationArgs(max_tokens=1024),
         )
         assert len(results) == 1
         episode.actions.append(
@@ -265,7 +262,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         results = await generation_wrapper.generate(
             scenario_conversation,
-            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
+            args=GenerationArgs(max_tokens=1024),
         )
         return results[0]
 
@@ -327,17 +324,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 # Player perspective: dungeon_master -> user, player -> assistant
                 role = "user" if action.role == "dungeon_master" else "assistant"
 
+            content = action.message.get("content", [])
+            # Convert tool_use blocks to text blocks when role is "user"
+            # since user messages can't contain tool_use blocks in the Anthropic API
+            if role == "user":
+                content = self._convert_tool_calls_to_text_blocks(content)
+
             message: Message = {
                 "role": role,
-                "content": action.message.get("content", []),
+                "content": content,
             }
-
-            tool_calls = action.message.get("tool_calls")
-            # Only assistant messages can have tool_calls in the OpenAI API format
-            if tool_calls and role == "assistant":
-                message["content"] = self._convert_tool_calls_to_text_blocks(
-                    message["content"]
-                )
 
             conversation.append(message)
 
