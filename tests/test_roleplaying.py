@@ -52,17 +52,14 @@ class TestRoleplayingGameMultiStepTask:
         """Test conversation formatting from dungeon master's perspective."""
         # Create a scenario message for the episode
         scenario_result = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "You find yourself at the entrance of a dark forest.",
-                "tool_calls": [],
-            },
+            content="You find yourself at the entrance of a dark forest.",
+            tool_calls=[],
         )
 
         episode = RPGEpisode(
             game_setting="A dark forest",
             player_character="A brave warrior",
-            initial_scenario=scenario_result,
+            scenario_message=scenario_result,
         )
         player_message: Message = {
             "role": "user",
@@ -91,17 +88,14 @@ class TestRoleplayingGameMultiStepTask:
     def test_format_conversation_player_perspective(self, task):
         """Test conversation formatting from player's perspective."""
         scenario_result = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "You find yourself at the entrance of a dark forest.",
-                "tool_calls": [],
-            },
+            content="You find yourself at the entrance of a dark forest.",
+            tool_calls=[],
         )
 
         episode = RPGEpisode(
             game_setting="A dark forest",
             player_character="A brave warrior",
-            initial_scenario=scenario_result,
+            scenario_message=scenario_result,
         )
         player_message: Message = {
             "role": "user",
@@ -150,9 +144,7 @@ class TestGenerateParameters:
 
         # Create mock response with XML tags
         mock_response = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": """Here are the game parameters:
+            content="""Here are the game parameters:
 <game_setting>
 A mystical forest where ancient trees whisper secrets to those who listen.
 The air is thick with magic and danger lurks in every shadow.
@@ -162,8 +154,7 @@ The air is thick with magic and danger lurks in every shadow.
 Aelindra, a young elven mage seeking to uncover the truth about her missing mentor.
 She is skilled in illusion magic but struggles with combat spells.
 </player_character>""",
-                "tool_calls": [],
-            },
+            tool_calls=[],
         )
 
         mock_wrapper = AsyncMock()
@@ -172,9 +163,7 @@ She is skilled in illusion magic but struggles with combat spells.
         task.generation_wrappers["adventure_parameters"] = mock_wrapper
 
         episode = RPGEpisode()
-        game_setting, player_character = await task._generate_setting_and_characters(
-            episode
-        )
+        game_setting, player_character = await task._generate_parameters(episode)
 
         assert game_setting is not None
         assert "mystical forest" in game_setting
@@ -203,18 +192,12 @@ class TestStepEpisode:
         task = task_with_mocks
 
         player_response = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "I draw my sword and approach cautiously.",
-                "tool_calls": [],
-            },
+            content="I draw my sword and approach cautiously.",
+            tool_calls=[],
         )
         dm_response = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "As you approach, the goblin notices you and hisses menacingly.",
-                "tool_calls": [],
-            },
+            content="As you approach, the goblin notices you and hisses menacingly.",
+            tool_calls=[],
         )
 
         player_wrapper = AsyncMock()
@@ -228,20 +211,17 @@ class TestStepEpisode:
         task.generation_wrappers["player"] = player_wrapper
         task.generation_wrappers["dungeon_master"] = dm_wrapper
 
-        # Create episode with initial_scenario set
+        # Create episode with scenario_message set
         scenario_result = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "You enter a goblin-infested cave.",
-                "tool_calls": [],
-            },
+            content="You enter a goblin-infested cave.",
+            tool_calls=[],
         )
 
         episode = RPGEpisode(
             step_count=0,
             game_setting="A goblin-infested cave",
             player_character="A dwarven fighter",
-            initial_scenario=scenario_result,
+            scenario_message=scenario_result,
         )
 
         updated_episode, finished = await task.step(episode)
@@ -259,13 +239,7 @@ class TestStepEpisode:
         task = task_with_mocks
         task.max_user_responses = 1  # Set low so we finish after one step
 
-        mock_response = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "Action",
-                "tool_calls": [],
-            },
-        )
+        mock_response = GenerationResult(content="Action", tool_calls=[])
         mock_wrapper = AsyncMock()
         mock_wrapper.generate = AsyncMock(return_value=[mock_response])
         mock_wrapper.provider_name = "mock"
@@ -274,18 +248,13 @@ class TestStepEpisode:
         task.generation_wrappers["dungeon_master"] = mock_wrapper
 
         scenario_result = GenerationResult(
-            message={
-                "role": "assistant",
-                "content": "The adventure begins.",
-                "tool_calls": [],
-            },
+            content="The adventure begins.",
+            tool_calls=[],
         )
 
         episode = RPGEpisode(
             step_count=0,
-            game_setting="test",
-            player_character="test",
-            initial_scenario=scenario_result,
+            scenario_message=scenario_result,
         )
 
         updated_episode, finished = await task.step(episode)

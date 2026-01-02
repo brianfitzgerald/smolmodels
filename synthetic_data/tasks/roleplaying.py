@@ -1,7 +1,7 @@
 import json
 import random
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from datasets import Dataset
 from loguru import logger
@@ -9,10 +9,7 @@ from loguru import logger
 from synthetic_data.generation import (
     GenerationWrapper,
 )
-from synthetic_data.generation_utils import (
-    GenerationArgs,
-    GenerationResult,
-)
+from synthetic_data.generation_utils import GenerationArgs, GenerationResult
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     dm_action_prompt,
@@ -23,7 +20,6 @@ from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
     PLAYER_TOOLS,
     ToolResult,
-    execute_tool_calls,
 )
 from synthetic_data.utils import (
     Conversation,
@@ -34,6 +30,7 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
+MAX_TOOL_ITERATIONS = 5
 
 GAME_SETTINGS = [
     "forest",
@@ -68,22 +65,13 @@ class RPGEpisode:
     metadata: dict = field(default_factory=dict)
 
 
-def format_tool_result_for_conversation(result: ToolResult) -> Message:
+def format_tool_result_for_conversation(result: ToolResult) -> dict[str, Any]:
     """Format a tool result for inclusion in the conversation."""
-    return cast(
-        Message,
-        {
-            "role": "tool",
-            "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.content) if result.success else result.error,
-        },
-    )
-
-
-def create_tool_executor(tool_calls: list) -> list[Message]:
-    """Execute tool calls and return formatted results for conversation."""
-    results = execute_tool_calls(tool_calls)
-    return [format_tool_result_for_conversation(r) for r in results]
+    return {
+        "role": "tool",
+        "tool_call_id": result.tool_call_id,
+        "content": json.dumps(result.content) if result.success else result.error,
+    }
 
 
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
@@ -161,21 +149,18 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
         results = await self.generation_wrappers["player"].generate(
-            [conversation],
-            GenerationArgs(
-                max_tokens=1024, tools=PLAYER_TOOLS, tool_executor=create_tool_executor
-            ),
+            [conversation], args=GenerationArgs(max_tokens=1024, tools=PLAYER_TOOLS)
         )
+        assert len(results) == 1
         episode.actions.append(Action(role="player", message=results[0].message))
 
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
             [conversation],
-            GenerationArgs(
-                max_tokens=1024, tools=DM_TOOLS, tool_executor=create_tool_executor
-            ),
+            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
+        assert len(results) == 1
         episode.actions.append(
             Action(role="dungeon_master", message=results[0].message)
         )
@@ -221,9 +206,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         scenario_dict = None
         if episode.initial_scenario:
             scenario_dict = {
-                "content": episode.initial_scenario.message.get("content", ""),
+                "content": episode.initial_scenario.content,
                 "tool_calls": RoleplayingGameMultiStepTask._serialize_tool_calls(
-                    episode.initial_scenario.message.get("tool_calls")
+                    episode.initial_scenario.tool_calls
                 ),
                 "finish_reason": episode.initial_scenario.finish_reason,
             }
@@ -271,7 +256,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 [parameter_conversation]
             )
             try:
-                content = results[0].message.get("content", "")
+                content = results[0].content or ""
                 parsed_tags = parse_xml_tags(
                     content, required_tags=["game_setting", "player_character"]
                 )
@@ -334,9 +319,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         results = await generation_wrapper.generate(
             [scenario_conversation],
-            GenerationArgs(
-                max_tokens=1024, tools=DM_TOOLS, tool_executor=create_tool_executor
-            ),
+            args=GenerationArgs(max_tokens=1024, tools=DM_TOOLS),
         )
         return results[0]
 

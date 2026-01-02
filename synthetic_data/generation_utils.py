@@ -2,12 +2,12 @@ import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, cast
+from typing import Any, Dict, Literal, Optional, cast
 
 from anthropic.types.message_param import MessageParam
 from datasets import Dataset, concatenate_datasets
 from loguru import logger
-from openai.types.chat import ChatCompletionMessageToolCall, ChatCompletionToolParam
+from openai.types.chat import ChatCompletionToolParam
 from pydantic import BaseModel
 
 from synthetic_data.utils import (
@@ -17,8 +17,6 @@ from synthetic_data.utils import (
 )
 
 MAX_RETRIES = 10
-MAX_TOOL_ITERATIONS = 5
-
 
 # Used for role playing tasks
 GenerationRole = Literal["dungeon_master", "player", "adventure_parameters"]
@@ -72,67 +70,75 @@ def convert_openai_to_anthropic_messages(
     - {"role": "assistant", "content": [{"type": "tool_use", "id": "...", "name": "...", "input": {...}}]}
     - {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "...", "content": "..."}]}
 
-    Important: Per Anthropic spec, all tool_result blocks must be in a single user message.
+    Note: Anthropic requires a tool_result for every tool_use. If a user message follows
+    an assistant message with tool_use but doesn't have explicit tool results, we wrap
+    the user content as tool_results.
     """
     converted: list[MessageParam] = []
-    pending_tool_results: list[dict[str, Any]] = []
     pending_tool_call_ids: list[str] = []
 
-    def flush_tool_results():
-        """Add accumulated tool results as a single user message."""
-        if pending_tool_results:
-            converted.append(
-                cast(
-                    MessageParam,
-                    {"role": "user", "content": list(pending_tool_results)},
-                )
-            )
-            pending_tool_results.clear()
-
-    for msg in conversation:
+    for i, msg in enumerate(conversation):
         role = msg.get("role")
 
         if role == "tool":
-            # Accumulate tool results (will be flushed as single message)
+            # Convert OpenAI tool result to Anthropic format
             tool_call_id = msg.get("tool_call_id")
+            # Remove from pending if present
             if tool_call_id in pending_tool_call_ids:
                 pending_tool_call_ids.remove(tool_call_id)
-            pending_tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tool_call_id,
-                    "content": msg.get("content", ""),
-                }
+            converted.append(
+                cast(
+                    MessageParam,
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool_call_id,
+                                "content": msg.get("content", ""),
+                            }
+                        ],
+                    },
+                )
             )
-
         elif role == "assistant" and "tool_calls" in msg:
-            # Flush any pending tool results before assistant message
-            flush_tool_results()
-
+            # Convert OpenAI assistant with tool_calls to Anthropic format
             content_blocks: list[dict[str, Any]] = []
-            if msg.get("content"):
-                content_blocks.append({"type": "text", "text": msg["content"]})
 
-            for tc in msg.get("tool_calls", []):
+            # Add text content if present
+            if msg.get("content"):
+                content_blocks.append(
+                    {
+                        "type": "text",
+                        "text": msg["content"],
+                    }
+                )
+
+            # Add tool_use blocks and track their IDs
+            tool_calls = msg.get("tool_calls", [])
+            for tc in tool_calls:
+                # Handle both dict and Pydantic object formats
                 if isinstance(tc, dict):
                     tool_id = tc.get("id")
-                    func = tc.get("function", {})
+                    function_data = tc.get("function", {})
                     tool_name = (
-                        func.get("name") if isinstance(func, dict) else func.name
+                        function_data.get("name")
+                        if isinstance(function_data, dict)
+                        else getattr(function_data, "name", None)
                     )
                     tool_input = (
-                        func.get("arguments", "{}")
-                        if isinstance(func, dict)
-                        else func.arguments
+                        function_data.get("arguments", "{}")
+                        if isinstance(function_data, dict)
+                        else getattr(function_data, "arguments", "{}")
                     )
                 else:
+                    # Pydantic object (ChatCompletionMessageToolCall)
                     tool_id = tc.id
                     tool_name = tc.function.name
                     tool_input = tc.function.arguments
 
                 if isinstance(tool_input, str):
                     tool_input = json.loads(tool_input)
-
                 content_blocks.append(
                     {
                         "type": "tool_use",
@@ -144,29 +150,40 @@ def convert_openai_to_anthropic_messages(
                 pending_tool_call_ids.append(tool_id)
 
             converted.append(
-                cast(MessageParam, {"role": "assistant", "content": content_blocks})
+                cast(
+                    MessageParam,
+                    {
+                        "role": "assistant",
+                        "content": content_blocks,
+                    },
+                )
             )
-
         elif role == "user" and pending_tool_call_ids:
             # User message following tool_use without explicit tool_results
-            flush_tool_results()
+            # Wrap the user content as tool_results for Anthropic compatibility
             content = msg.get("content", "")
             tool_result_blocks = [
-                {"type": "tool_result", "tool_use_id": tid, "content": content}
-                for tid in pending_tool_call_ids
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": content,
+                }
+                for tool_id in pending_tool_call_ids
             ]
             pending_tool_call_ids.clear()
             converted.append(
-                cast(MessageParam, {"role": "user", "content": tool_result_blocks})
+                cast(
+                    MessageParam,
+                    {
+                        "role": "user",
+                        "content": tool_result_blocks,
+                    },
+                )
             )
-
         else:
-            # Flush pending tool results before any other message
-            flush_tool_results()
+            # Pass through other messages unchanged
             converted.append(cast(MessageParam, msg))
 
-    # Flush any remaining tool results
-    flush_tool_results()
     return converted
 
 
@@ -218,11 +235,6 @@ class GenerationArgs(BaseModel):
     prefill: str | None = None
     thinking_budget: int | None = None
     tools: list[ChatCompletionToolParam] | None = None
-    tool_executor: (
-        Callable[[list[ChatCompletionMessageToolCall]], list[Message]] | None
-    ) = None
-    max_tool_iterations: int = MAX_TOOL_ITERATIONS
-    """Maximum number of tool call iterations before stopping."""
 
 
 FinishReason = Literal[
@@ -255,7 +267,7 @@ class GenWrapperArgs(BaseModel):
 
 class GenerationWrapper(ABC):
     """
-    Abstract base class for various ways of generating data.
+    Abstract method for various ways of generating data.
     """
 
     provider_name: str
@@ -266,16 +278,12 @@ class GenerationWrapper(ABC):
 
     @abstractmethod
     async def generate(
-        self,
-        conversations: list[Conversation],
-        args: GenerationArgs | None = None,
+        self, conversations: list[Conversation], args: GenerationArgs | None = None
     ) -> list[GenerationResult]:
         """
         Generate completions for the given conversations.
         If args is provided, it will override the args in the wrapper.
         Tools can be provided via args.tools for tool-calling support.
-        If args.tool_executor is provided and the model returns tool_use, the tool_executor
-        will be called and the conversation will continue until a non-tool response.
         Returns GenerationResult objects that may contain content and/or tool calls.
         """
         pass
