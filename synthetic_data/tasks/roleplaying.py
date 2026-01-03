@@ -62,7 +62,6 @@ class RPGEpisode:
     step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
-    initial_scenario: GenerationResult | None = None
     actions: list[Action] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -132,16 +131,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         assert game_setting is not None and player_character is not None
         ep.game_setting = game_setting
         ep.player_character = player_character
-        ep.initial_scenario = await self._generate_initial_scenario(
-            game_setting, player_character, self.generation_wrappers["dungeon_master"]
-        )
         return ep
 
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
         # Generate player action
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
-        results = await self.generation_wrappers["player"].generate(
+        result = await self.generation_wrappers["player"].generate(
             conversation,
             args=GenerationArgs(
                 max_tokens=1024,
@@ -149,12 +145,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tool_use_executor=execute_tool_use_block,
             ),
         )
-        assert len(results) == 1
-        episode.actions.append(Action(role="player", message=results[0].message))
+        # Get the assistant message from the conversation (last message added by generate)
+        assistant_message = result.conversation[-1]
+        episode.actions.append(Action(role="player", message=assistant_message))
 
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
-        results = await self.generation_wrappers["dungeon_master"].generate(
+        result = await self.generation_wrappers["dungeon_master"].generate(
             conversation,
             args=GenerationArgs(
                 max_tokens=1024,
@@ -162,10 +159,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tool_use_executor=execute_tool_use_block,
             ),
         )
-        assert len(results) == 1
-        episode.actions.append(
-            Action(role="dungeon_master", message=results[0].message)
-        )
+        # Get the assistant message from the conversation (last message added by generate)
+        dm_message = result.conversation[-1]
+        episode.actions.append(Action(role="dungeon_master", message=dm_message))
 
         episode.step_count += 1
         finished = episode.step_count >= self.max_user_responses
@@ -185,7 +181,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self, episode: RPGEpisode
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = episode.initial_scenario or "A mysterious adventure"
+        theme_input = "A mysterious adventure"
         system_text_block: TextBlock = {"type": "text", "text": game_parameter_prompt()}
         user_text_block: TextBlock = {
             "type": "text",
@@ -207,11 +203,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
 
         for attempt in range(MAX_PARSE_RETRIES):
-            results = await self.generation_wrappers["adventure_parameters"].generate(
+            result = await self.generation_wrappers["adventure_parameters"].generate(
                 parameter_conversation,
             )
             try:
-                content = results[0].message.get("content", [])[0].get("text", "")
+                # Get the assistant message from the conversation (last message added by generate)
+                assistant_message = result.conversation[-1]
+                content = assistant_message.get("content", [])[0].get("text", "")
                 parsed_tags = parse_xml_tags(
                     content, required_tags=["game_setting", "player_character"]
                 )
@@ -275,7 +273,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        results = await generation_wrapper.generate(
+        result = await generation_wrapper.generate(
             scenario_conversation,
             args=GenerationArgs(
                 max_tokens=1024,
@@ -283,7 +281,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tool_use_executor=execute_tool_use_block,
             ),
         )
-        return results[0]
+        return result
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole
@@ -315,26 +313,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
-        assert episode.initial_scenario is not None
-
-        # Add scenario to conversation with proper role based on perspective
-        scenario_msg = episode.initial_scenario.message
-        if generating_role == "player":
-            # From player perspective, scenario (from DM) is a user message
-            # Tool calls need to be formatted as content since user messages can't have tool_calls
-            scenario_content = self._convert_tool_calls_to_text_blocks(
-                scenario_msg["content"],
-            )
-            conversation.append(
-                {
-                    "role": "user",
-                    "content": scenario_content,
-                }
-            )
-        else:
-            # From DM perspective, scenario stays as assistant message
-            conversation.append(scenario_msg)
-
         for action in episode.actions:
             if generating_role == "dungeon_master":
                 # DM perspective: player -> user, dm -> assistant
@@ -343,7 +321,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 # Player perspective: dungeon_master -> user, player -> assistant
                 role = "user" if action.role == "dungeon_master" else "assistant"
 
-            content = action.message.get("content", [])
+            content = action.message["content"]
             # Convert tool_use blocks to text blocks when role is "user"
             # since user messages can't contain tool_use blocks in the Anthropic API
             if role == "user":

@@ -6,30 +6,18 @@ Supports both Dungeon Master and Player roles with native API tool calling.
 import json
 import random
 import re
-from dataclasses import dataclass
-from typing import Any
 
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
 
-from synthetic_data.utils import ToolParam, ToolUseBlock
+from synthetic_data.utils import ToolParam, ToolResultBlock, ToolUseBlock
+
+ToolOutput = dict[str, str | int | list[str] | bool]
 
 # Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
 DICE_PATTERN = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
 
-
-@dataclass
-class ToolResult:
-    """Result of executing a tool."""
-
-    tool_call_id: str
-    content: dict[str, Any]
-    success: bool = True
-    error: str | None = None
-
-
-# Tool Schema Definitions (Anthropic format - ToolParam)
 
 ROLL_DICE_TOOL: ToolParam = {
     "name": "roll_dice",
@@ -134,93 +122,65 @@ def parse_dice_notation(notation: str) -> tuple[int, int, int] | None:
     return num_dice, num_sides, modifier
 
 
-def execute_roll_dice(notation: str, reason: str) -> ToolResult:
+def execute_roll_dice(notation: str, reason: str) -> dict:
     """Execute a dice roll and return the result."""
     parsed = parse_dice_notation(notation)
     if parsed is None:
-        return ToolResult(
-            tool_call_id="",
-            content={},
-            success=False,
-            error=f"Invalid dice notation: {notation}",
-        )
+        return {
+            "error": f"Invalid dice notation: {notation}",
+            "success": False,
+        }
 
     num_dice, num_sides, modifier = parsed
     rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
     total = sum(rolls) + modifier
 
-    return ToolResult(
-        tool_call_id="",
-        content={
-            "notation": notation,
-            "reason": reason,
-            "rolls": rolls,
-            "modifier": modifier,
-            "total": total,
-        },
-    )
+    return {
+        "notation": notation,
+        "reason": reason,
+        "rolls": rolls,
+        "modifier": modifier,
+        "total": total,
+    }
 
 
-def execute_random_choice(options: list[str], reason: str) -> ToolResult:
+def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
     """Execute a random choice from options."""
     if not options:
-        return ToolResult(
-            tool_call_id="",
-            content={},
-            success=False,
-            error="No options provided",
-        )
+        return {
+            "error": "No options provided",
+            "success": False,
+        }
 
     chosen = random.choice(options)
-    return ToolResult(
-        tool_call_id="",
-        content={
-            "reason": reason,
-            "options": options,
-            "chosen": chosen,
-            "index": options.index(chosen),
-        },
-    )
+    return {
+        "reason": reason,
+        "options": options,
+        "chosen": chosen,
+        "index": options.index(chosen),
+    }
 
 
-def execute_present_choices(prompt: str, choices: list[dict[str, str]]) -> ToolResult:
-    """Present choices to the player."""
-    return ToolResult(
-        tool_call_id="",
-        content={
-            "prompt": prompt,
-            "choices": choices,
-            "awaiting_player_choice": True,
-        },
-    )
-
-
-def execute_speak(character: str, message: str, tone: str | None = None) -> ToolResult:
+def execute_speak(character: str, message: str, tone: str | None = None) -> ToolOutput:
     """Execute a speak action."""
-    result: dict[str, Any] = {
+    result: ToolOutput = {
         "character": character,
         "message": message,
     }
     if tone:
         result["tone"] = tone
-    return ToolResult(
-        tool_call_id="",
-        content=result,
-    )
+    return result
 
 
-def execute_action(description: str, target: str | None = None) -> ToolResult:
+def execute_action(description: str, target: str | None = None) -> ToolOutput:
     """Execute a player action."""
-    result: dict[str, Any] = {
+    result: ToolOutput = {
         "description": description,
         "executed": True,
     }
     if target:
         result["target"] = target
-    return ToolResult(
-        tool_call_id="",
-        content=result,
-    )
+    return result
 
 
 TOOL_EXECUTORS = {
@@ -240,28 +200,26 @@ def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolResult:
     tool_name = tool_call.function.name
     executor = TOOL_EXECUTORS.get(tool_name)
     if executor is None:
-        return ToolResult(
-            tool_call_id=tool_call.id,
-            content={},
-            success=False,
-            error=f"Unknown tool: {tool_name}",
-        )
+        return {
+            "error": f"Unknown tool: {tool_name}",
+            "success": False,
+        }
 
     # Parse the arguments from JSON string
     arguments = json.loads(tool_call.function.arguments)
     result = executor(arguments)
-    result.tool_call_id = tool_call.id
+    result["tool_call_id"] = tool_call.id
     return result
 
 
 def execute_tool_calls(
     tool_calls: list[ChatCompletionMessageToolCall],
-) -> list[ToolResult]:
+) -> list[ToolOutput]:
     """Execute multiple tool calls and return results."""
     return [execute_tool_call(tc) for tc in tool_calls]
 
 
-def execute_tool_use_block(tool_use: ToolUseBlock) -> str:
+def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
     """
     Execute a tool_use block and return the result as a JSON string.
 
@@ -273,7 +231,12 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> str:
 
     executor = TOOL_EXECUTORS.get(tool_name)
     if executor is None:
-        return json.dumps({"error": f"Unknown tool: {tool_name}", "success": False})
+        return ToolResultBlock(
+            type="tool_result",
+            tool_use_id=tool_use.get("id", ""),
+            content=f"Unknown tool: {tool_name}",
+            is_error=True,
+        )
 
     try:
         # tool_input might be a dict or might need parsing
@@ -283,6 +246,16 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> str:
             args = tool_input
 
         result = executor(args)
-        return json.dumps(result.content)
+        return ToolResultBlock(
+            type="tool_result",
+            tool_use_id=tool_use.get("id", ""),
+            content=json.dumps(result.content),
+            is_error=result.success,
+        )
     except Exception as e:
-        return json.dumps({"error": str(e), "success": False})
+        return ToolResultBlock(
+            type="tool_result",
+            tool_use_id=tool_use.get("id", ""),
+            content=str(e),
+            is_error=True,
+        )

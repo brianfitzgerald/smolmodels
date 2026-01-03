@@ -241,13 +241,13 @@ class AutoscalingGenerationManager:
         total_tokens = sum(
             len(str(conv)) // 4 for conv in conversations
         )  # Rough token estimation
-        total_tokens += sum(len(str(result)) // 4 for result in results)
+        total_tokens += sum(len(str(result.content)) // 4 for result in results)
 
         # Record throughput
         duration = end_time - start_time
         self.throughput_monitor.record_request(provider, total_tokens, duration)
 
-        return results
+        return [result for result in results]
 
 
 async def run_task(

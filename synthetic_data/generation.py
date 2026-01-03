@@ -89,7 +89,6 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                     logger.error(results)
                     raise ValueError("No completions returned")
 
-                generation_results = []
                 for result in results:
                     if not result.choices:
                         continue
@@ -117,6 +116,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                                 "input": tool_call.function.arguments,
                             }
                             message["content"].append(tool_use_block)
+
+                    # Add the assistant message to the conversation
+                    conversation.append(message)
 
                 return GenerationResult(
                     conversation=conversation, finish_reason="end_turn"
@@ -207,14 +209,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 "model_id is required for AnthropicGenerationWrapper"
             )
 
-            system_msg = ANTHROPIC_NOT_GIVEN
-            if conversation and conversation[0].get("role") == "system":
-                first_block = conversation[0].get("content", [{}])[0]
-                if first_block.get("type") == "text":
-                    text_block: TextBlock = first_block  # type: ignore[assignment]
-                    system_msg = text_block["text"]
-                conversation = conversation[1:]
-
             # Setup working conversation with optional prefill
             if args.prefill:
                 prefill_message: Message = {
@@ -224,16 +218,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 conversation.append(prefill_message)
 
             # Convert tools to Anthropic format if provided
-            anthropic_tools: list | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
-            if args.tools:
-                anthropic_tools = [
-                    {
-                        "name": t.get("name", ""),
-                        "description": t.get("description", ""),
-                        "input_schema": t.get("input_schema", {}),
-                    }
-                    for t in args.tools
-                ]
+            tools: list | AnthropicNotGiven = args.tools or ANTHROPIC_NOT_GIVEN
+
+            # System message is the first message with role "system", so remove
+            system_msg = ANTHROPIC_NOT_GIVEN
+            if conversation and conversation[0].get("role") == "system":
+                system_msg = conversation[0].get("content", [{}])[0].get("text", "")
+                conversation = conversation[1:]
 
             result: AnthropicMessage | None = await self.client.messages.create(
                 model=self.gen_wrapper_args.model_id,
@@ -243,7 +234,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 if args.temperature is not None
                 else ANTHROPIC_NOT_GIVEN,
                 max_tokens=args.max_tokens,
-                tools=anthropic_tools,
+                tools=tools,
             )
 
             # Convert Anthropic blocks to internal block format
@@ -285,6 +276,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                                 "content": f"Error: {e}",
                             }
                             tool_result_blocks.append(error_result)
+
+            # Add the assistant message to the conversation
+            assistant_message: Message = {
+                "role": "assistant",
+                "content": assistant_message_blocks,
+            }
+            conversation.append(assistant_message)
 
             if tool_result_blocks:
                 conversation.append({"role": "user", "content": tool_result_blocks})
