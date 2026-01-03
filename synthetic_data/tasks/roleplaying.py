@@ -217,8 +217,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 )
                 game_setting = parsed_tags["game_setting"]
                 player_character = parsed_tags["player_character"]
-                logger.debug(f"\nGame setting:\n{game_setting}")
-                logger.debug(f"\nPlayer character:\n{player_character}")
                 return game_setting, player_character
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
@@ -238,9 +236,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             if block["type"] == "tool_use":
+                block_sanitized = block.copy()
+                del block_sanitized["type"]
+                del block_sanitized["id"]
+                tool_call_json_str = json.dumps(block_sanitized)
                 text_block: TextBlock = {
                     "type": "text",
-                    "text": json.dumps(block["input"]),
+                    "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
                 }
                 out_blocks.append(text_block)
             else:

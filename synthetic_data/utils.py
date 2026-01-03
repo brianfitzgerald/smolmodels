@@ -380,7 +380,7 @@ def log_to_file(
 def log_conversation(conversation: Conversation) -> None:
     """
     Log a Conversation to the console using loguru with colored output based on roles.
-    Handles tool calls and tool results with proper formatting.
+    Handles the new message format with ContentBlock lists (text, thinking, tool_use, tool_result).
 
     Args:
         conversation: The conversation to log
@@ -390,82 +390,86 @@ def log_conversation(conversation: Conversation) -> None:
         "system": "\033[36m",  # Cyan
         "user": "\033[32m",  # Green
         "assistant": "\033[34m",  # Blue
-        "function": "\033[33m",  # Yellow
         "tool": "\033[35m",  # Magenta
-        "tool_call": "\033[93m",  # Bright Yellow
+        "tool_use": "\033[93m",  # Bright Yellow
+        "thinking": "\033[95m",  # Bright Magenta
         "unknown": "\033[31m",  # Red
     }
     reset_color = "\033[0m"
     dim_color = "\033[2m"  # Dim text for metadata
 
     # Build the complete log message
-    log_lines = []
+    log_lines: list[str] = []
     log_lines.append(f"\n{'=' * 60}")
 
     for i, message in enumerate(conversation, 1):
         role = message.get("role", "unknown")
-        content = message.get("content", "")
-        tool_calls = message.get("tool_calls")
-        tool_call_id = message.get("tool_call_id")
-
-        if isinstance(content, str):
-            content_str = content
-        elif content is None:
-            content_str = ""
-        else:
-            content_str = str(content)
+        content = message.get("content", [])
 
         # Get color for role, default to red for unknown roles
         color = role_colors.get(role, role_colors["unknown"])
 
-        # Build header with role and optional tool_call_id for tool results
-        header = f"[{i}] {role.upper()}"
-        if role == "tool" and tool_call_id:
-            header += f" {dim_color}(tool_call_id: {tool_call_id}){reset_color}{color}"
-
         # Add the message header
+        header = f"[{i}] {role.upper()}"
         log_lines.append(f"\n{color}{header}{reset_color}\n")
+        for block in content:
+            block_type = block.get("type", "unknown")
 
-        # Add content if present
-        if content_str:
-            log_lines.append(f"{color}{content_str}{reset_color}\n")
+            if block_type == "text":
+                text_content = block.get("text", "")
+                if text_content:
+                    log_lines.append(f"{color}{text_content}{reset_color}\n")
 
-        # Format and display tool calls if present
-        if tool_calls:
-            tool_color = role_colors["tool_call"]
-            log_lines.append(f"{tool_color}Tool Calls:{reset_color}\n")
-            for tc in tool_calls:
-                # Handle both dict-like and object-like tool calls
-                if hasattr(tc, "function"):
-                    # OpenAI ChatCompletionMessageToolCall object
-                    tc_id = tc.id
-                    func_name = tc.function.name
-                    func_args = tc.function.arguments
-                else:
-                    # Dict format
-                    tc_id = tc.get("id", "unknown")
-                    func = tc.get("function", {})
-                    func_name = func.get("name", "unknown")
-                    func_args = func.get("arguments", "{}")
+            elif block_type == "thinking":
+                thinking_content = block.get("thinking", "")
+                if thinking_content:
+                    thinking_color = role_colors["thinking"]
+                    log_lines.append(f"{thinking_color}[THINKING]{reset_color}\n")
+                    log_lines.append(f"{dim_color}{thinking_content}{reset_color}\n")
 
-                # Pretty print the arguments
+            elif block_type == "tool_use":
+                tool_color = role_colors["tool_use"]
+                tool_id = block.get("id", "unknown")
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+
+                # Pretty print the tool input
                 try:
-                    if isinstance(func_args, str):
-                        args_dict = json.loads(func_args)
+                    if isinstance(tool_input, str):
+                        args_dict = json.loads(tool_input)
                     else:
-                        args_dict = func_args
+                        args_dict = tool_input
                     args_str = json.dumps(args_dict, indent=2)
                 except (json.JSONDecodeError, TypeError):
-                    args_str = str(func_args)
+                    args_str = str(tool_input)
 
-                log_lines.append(f"{tool_color}  [{tc_id}] {func_name}({reset_color}\n")
-                # Indent the arguments
-                indented_args = "\n".join(
-                    f"    {line}" for line in args_str.split("\n")
+                log_lines.append(
+                    f"{tool_color}[TOOL USE] [{tool_id}] {tool_name}({reset_color}\n"
                 )
+                # Indent the arguments
+                indented_args = "\n".join(f"  {line}" for line in args_str.split("\n"))
                 log_lines.append(f"{dim_color}{indented_args}{reset_color}\n")
-                log_lines.append(f"{tool_color}  ){reset_color}\n")
+                log_lines.append(f"{tool_color}){reset_color}\n")
 
+            elif block_type == "tool_result":
+                tool_use_id = block.get("tool_use_id", "unknown")
+                result_content = block.get("content", "")
+                is_error = block.get("is_error", False)
+
+                result_color = (
+                    "\033[31m" if is_error else "\033[32m"
+                )  # Red for error, green for success
+                log_lines.append(
+                    f"{result_color}[TOOL RESULT] {dim_color}(tool_use_id: {tool_use_id}){reset_color}\n"
+                )
+                if result_content:
+                    log_lines.append(f"{result_color}{result_content}{reset_color}\n")
+
+            else:
+                # Unknown block type - just stringify it
+                log_lines.append(
+                    f"{dim_color}[{block_type.upper()}] {block}{reset_color}\n"
+                )
     log_lines.append(f"{'=' * 60}\n")
     output = "".join(log_lines)
     logger.info(output)

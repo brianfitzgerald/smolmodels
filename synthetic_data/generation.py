@@ -1,9 +1,8 @@
 import asyncio
-import json
 import os
 import traceback
 from dataclasses import dataclass, fields
-from typing import Optional
+from typing import Optional, cast
 
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import AnthropicError, AsyncAnthropic
@@ -239,13 +238,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 conversation = conversation[1:]
 
             # Setup working conversation with optional prefill
-            working_conversation: list[Message] = list(conversation)
+            conversation: list[Message] = list(conversation)
             if args.prefill:
                 prefill_message: Message = {
                     "role": "assistant",
                     "content": [{"type": "text", "text": args.prefill}],  # ty:ignore[invalid-argument-type]
                 }
-                working_conversation.append(prefill_message)
+                conversation.append(prefill_message)
 
             # Convert tools to Anthropic format if provided
             anthropic_tools: list | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
@@ -261,92 +260,65 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
             # Tool execution loop
             all_content: list[ContentBlock] = []
-            result: AnthropicMessage | None = None
-            for iteration in range(MAX_TOOL_ITERATIONS):
-                result = await self.client.messages.create(
-                    model=self.gen_wrapper_args.model_id,
-                    messages=working_conversation,  # type: ignore[arg-type]
-                    system=system_msg,
-                    temperature=args.temperature
-                    if args.temperature is not None
-                    else ANTHROPIC_NOT_GIVEN,
-                    max_tokens=args.max_tokens,
-                    tools=anthropic_tools,
-                )
+            result: AnthropicMessage | None = await self.client.messages.create(
+                model=self.gen_wrapper_args.model_id,
+                messages=conversation,  # type: ignore[arg-type]
+                system=system_msg,
+                temperature=args.temperature
+                if args.temperature is not None
+                else ANTHROPIC_NOT_GIVEN,
+                max_tokens=args.max_tokens,
+                tools=anthropic_tools,
+            )
 
-                # Parse response content
-                message_content: list[ContentBlock] = []
-                for block in result.content:
-                    if block.type == "text":
-                        text = block.text  # type: ignore[attr-defined]
-                        if iteration == 0 and args.prefill and text:
-                            text = args.prefill + text
-                        text_block_content: TextBlock = {"type": "text", "text": text}
-                        message_content.append(text_block_content)
-                    elif block.type == "tool_use":
-                        tool_use: ToolUseBlock = {
-                            "type": "tool_use",
-                            "id": block.id,  # type: ignore[attr-defined]
-                            "name": block.name,  # type: ignore[attr-defined]
-                            "input": block.input,  # type: ignore[attr-defined]
-                        }
-                        message_content.append(tool_use)
-
-                # Handle tool execution
-                if result.stop_reason == "tool_use" and args.tool_use_executor:
-                    assistant_msg: Message = {
-                        "role": "assistant",
-                        "content": message_content,
+            # Parse response content
+            message_content: list[ContentBlock] = []
+            for block in result.content:
+                if block.type == "text":
+                    text_block_content: TextBlock = {"type": "text", "text": block.text}
+                    message_content.append(text_block_content)
+                elif block.type == "tool_use":
+                    tool_use: ToolUseBlock = {
+                        "type": "tool_use",
+                        "id": block.id,  # type: ignore[attr-defined]
+                        "name": block.name,  # type: ignore[attr-defined]
+                        "input": block.input,  # type: ignore[attr-defined]
                     }
-                    working_conversation.append(assistant_msg)
+                    message_content.append(tool_use)
 
-                    # Execute tools and collect results
-                    tool_result_blocks: list[ContentBlock] = []
-                    for block in message_content:
-                        if block.get("type") == "tool_use":
-                            tool_block: ToolUseBlock = block  # type: ignore[assignment]
-                            try:
-                                result_content = args.tool_use_executor(tool_block)
-                                tool_result: ToolResultBlock = {
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_block["id"],
-                                    "content": result_content,
-                                }
-                                tool_result_blocks.append(tool_result)
-                            except Exception as e:
-                                logger.error(f"Tool execution error: {e}")
-                                error_result: ToolResultBlock = {
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_block["id"],
-                                    "content": f"Error: {e}",
-                                }
-                                tool_result_blocks.append(error_result)
+            # Handle tool execution
+            if result.stop_reason == "tool_use" and args.tool_use_executor:
+                assistant_msg: Message = {
+                    "role": "assistant",
+                    "content": message_content,
+                }
 
-                    user_msg: Message = {
-                        "role": "user",
-                        "content": tool_result_blocks,
-                    }
-                    working_conversation.append(user_msg)
-
-                    # Convert tool_use blocks to text for final content
-                    for b in message_content:
-                        if b.get("type") == "tool_use":
-                            tool_text: TextBlock = {
-                                "type": "text",
-                                "text": json.dumps(b.get("input", {})),
+                # Execute tools and collect results
+                tool_result_blocks: list[ContentBlock] = []
+                for block in message_content:
+                    if block.get("type") == "tool_use":
+                        try:
+                            tool_block = cast(ToolUseBlock, block)
+                            result_content = args.tool_use_executor(tool_block)
+                            tool_result: ToolResultBlock = {
+                                "type": "tool_result",
+                                "tool_use_id": tool_block["id"],
+                                "content": result_content,
                             }
-                            all_content.append(tool_text)
-                        else:
-                            all_content.append(b)
-                    continue
+                            tool_result_blocks.append(tool_result)
+                        except Exception as e:
+                            logger.error(f"Tool execution error: {e}")
+                            error_result: ToolResultBlock = {
+                                "type": "tool_result",
+                                "tool_use_id": tool_block["id"],
+                                "content": f"Error: {e}",
+                            }
+                            tool_result_blocks.append(error_result)
 
-                # No tool calls - collect final content and break
-                all_content.extend(message_content)
-                break
-
-            if result is None:
-                logger.error("No response from Anthropic API")
-                return []
+                user_msg: Message = {
+                    "role": "user",
+                    "content": tool_result_blocks,
+                }
 
             return [
                 GenerationResult(

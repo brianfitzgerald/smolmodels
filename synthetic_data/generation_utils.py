@@ -14,6 +14,7 @@ from synthetic_data.utils import (
     DatasetFormat,
     Message,
     ToolParam,
+    ToolResultBlock,
     ToolUseBlock,
 )
 
@@ -236,7 +237,7 @@ class GenerationArgs(BaseModel):
     prefill: str | None = None
     thinking_budget: int | None = None
     tools: list[ToolParam] | None = None
-    tool_use_executor: Callable[[ToolUseBlock], str] | None = None
+    tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
 
 
 FinishReason = Literal[
