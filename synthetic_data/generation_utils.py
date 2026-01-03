@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from synthetic_data.utils import (
     Conversation,
     DatasetFormat,
-    Message,
     ToolParam,
     ToolResultBlock,
     ToolUseBlock,
@@ -241,15 +240,19 @@ class GenerationArgs(BaseModel):
 
 
 FinishReason = Literal[
-    "end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"
+    "end_turn",
+    "max_tokens",
+    "stop_sequence",
+    "tool_use",
+    "pause_turn",
+    "refusal",
+    "error",
 ]
 
 
 @dataclass
 class GenerationResult:
-    """Result from a generation call that may include tool calls."""
-
-    message: Message
+    conversation: Conversation
     finish_reason: FinishReason = "end_turn"
 
 
@@ -282,7 +285,7 @@ class GenerationWrapper(ABC):
     @abstractmethod
     async def generate(
         self, conversation: Conversation, args: GenerationArgs | None = None
-    ) -> list[GenerationResult]:
+    ) -> GenerationResult:
         """
         Generate completions for the given conversations.
         If args is provided, it will override the args in the wrapper.

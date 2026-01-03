@@ -2,7 +2,7 @@ import asyncio
 import os
 import traceback
 from dataclasses import dataclass, fields
-from typing import Optional, cast
+from typing import Optional
 
 from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
 from anthropic import AnthropicError, AsyncAnthropic
@@ -25,17 +25,11 @@ from synthetic_data.utils import (
     Conversation,
     Message,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     get_class_name,
 )
-
-MAX_TOOL_ITERATIONS = 10  # Prevent infinite tool loops
-
-MOCK_SNIPPET = """
-def solution(problem_input):
-    return []
-"""
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
@@ -62,7 +56,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
     async def generate(
         self, conversation: Conversation, args: GenerationArgs | None = None
-    ) -> list[GenerationResult]:
+    ) -> GenerationResult:
         self.n_retries = MAX_RETRIES
         args = args or self.gen_wrapper_args.default_generation_args
 
@@ -124,30 +118,15 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                             }
                             message["content"].append(tool_use_block)
 
-                    # Map OpenAI finish reasons to our internal format
-                    finish_reason_map = {
-                        "stop": "end_turn",
-                        "length": "max_tokens",
-                        "tool_calls": "tool_use",
-                        "content_filter": "refusal",
-                        "function_call": "tool_use",
-                    }
-                    finish_reason = finish_reason_map.get(
-                        choice.finish_reason or "stop", "end_turn"
-                    )
-
-                    generation_results.append(
-                        GenerationResult(
-                            message=message,
-                            finish_reason=finish_reason,  # type: ignore[arg-type]
-                        )
-                    )
-
-                return generation_results
+                return GenerationResult(
+                    conversation=conversation, finish_reason="end_turn"
+                )
 
             except LengthFinishReasonError as e:
                 logger.error(f"Max length error: {e}")
-                return []
+                return GenerationResult(
+                    conversation=conversation, finish_reason="max_tokens"
+                )
             except Exception as e:
                 logger.error(
                     f"Error while generating: {e}, retries left: {self.n_retries}"
@@ -221,14 +200,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
     async def generate(
         self, conversation: Conversation, args: GenerationArgs | None = None
-    ) -> list[GenerationResult]:
+    ) -> GenerationResult:
         args = args or self.gen_wrapper_args.default_generation_args
         try:
             assert self.gen_wrapper_args.model_id is not None, (
                 "model_id is required for AnthropicGenerationWrapper"
             )
 
-            # Extract system message if present
             system_msg = ANTHROPIC_NOT_GIVEN
             if conversation and conversation[0].get("role") == "system":
                 first_block = conversation[0].get("content", [{}])[0]
@@ -238,7 +216,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 conversation = conversation[1:]
 
             # Setup working conversation with optional prefill
-            conversation: list[Message] = list(conversation)
             if args.prefill:
                 prefill_message: Message = {
                     "role": "assistant",
@@ -258,11 +235,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     for t in args.tools
                 ]
 
-            # Tool execution loop
-            all_content: list[ContentBlock] = []
             result: AnthropicMessage | None = await self.client.messages.create(
                 model=self.gen_wrapper_args.model_id,
-                messages=conversation,  # type: ignore[arg-type]
+                messages=conversation,
                 system=system_msg,
                 temperature=args.temperature
                 if args.temperature is not None
@@ -271,65 +246,54 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 tools=anthropic_tools,
             )
 
-            # Parse response content
-            message_content: list[ContentBlock] = []
+            # Convert Anthropic blocks to internal block format
+            assistant_message_blocks: list[ContentBlock] = []
             for block in result.content:
                 if block.type == "text":
                     text_block_content: TextBlock = {"type": "text", "text": block.text}
-                    message_content.append(text_block_content)
+                    assistant_message_blocks.append(text_block_content)
                 elif block.type == "tool_use":
                     tool_use: ToolUseBlock = {
                         "type": "tool_use",
-                        "id": block.id,  # type: ignore[attr-defined]
-                        "name": block.name,  # type: ignore[attr-defined]
-                        "input": block.input,  # type: ignore[attr-defined]
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
                     }
-                    message_content.append(tool_use)
+                    assistant_message_blocks.append(tool_use)
+                elif block.type == "thinking":
+                    thinking_block: ThinkingBlock = {
+                        "type": "thinking",
+                        "thinking": block.thinking,
+                    }
+                    assistant_message_blocks.append(thinking_block)
+                else:
+                    logger.error(f"Unknown block type: {block.type}")
+                    continue
 
-            # Handle tool execution
-            if result.stop_reason == "tool_use" and args.tool_use_executor:
-                assistant_msg: Message = {
-                    "role": "assistant",
-                    "content": message_content,
-                }
-
-                # Execute tools and collect results
-                tool_result_blocks: list[ContentBlock] = []
-                for block in message_content:
-                    if block.get("type") == "tool_use":
+            tool_result_blocks: list[ContentBlock] = []
+            if result.stop_reason == "tool_use" and args.tool_use_executor is not None:
+                for block in assistant_message_blocks:
+                    if block["type"] == "tool_use":
                         try:
-                            tool_block = cast(ToolUseBlock, block)
-                            result_content = args.tool_use_executor(tool_block)
-                            tool_result: ToolResultBlock = {
-                                "type": "tool_result",
-                                "tool_use_id": tool_block["id"],
-                                "content": result_content,
-                            }
-                            tool_result_blocks.append(tool_result)
+                            result_block = args.tool_use_executor(block)
+                            tool_result_blocks.append(result_block)
                         except Exception as e:
                             logger.error(f"Tool execution error: {e}")
                             error_result: ToolResultBlock = {
                                 "type": "tool_result",
-                                "tool_use_id": tool_block["id"],
+                                "tool_use_id": block["id"],
                                 "content": f"Error: {e}",
                             }
                             tool_result_blocks.append(error_result)
 
-                user_msg: Message = {
-                    "role": "user",
-                    "content": tool_result_blocks,
-                }
+            if tool_result_blocks:
+                conversation.append({"role": "user", "content": tool_result_blocks})
 
-            return [
-                GenerationResult(
-                    message={"role": "assistant", "content": all_content or []},
-                    finish_reason=result.stop_reason or "end_turn",
-                )
-            ]
+            return GenerationResult(conversation=conversation, finish_reason="end_turn")
 
         except AnthropicError as e:
             logger.error(f"Error while generating: {e}")
-            return []
+            return GenerationResult(conversation=conversation, finish_reason="error")
 
 
 GEMINI_ROLE_MAP = {
