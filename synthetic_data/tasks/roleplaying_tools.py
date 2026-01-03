@@ -13,7 +13,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
 )
 
-from synthetic_data.utils import ToolParam
+from synthetic_data.utils import ToolParam, ToolUseBlock
 
 # Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
 DICE_PATTERN = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
@@ -259,3 +259,30 @@ def execute_tool_calls(
 ) -> list[ToolResult]:
     """Execute multiple tool calls and return results."""
     return [execute_tool_call(tc) for tc in tool_calls]
+
+
+def execute_tool_use_block(tool_use: ToolUseBlock) -> str:
+    """
+    Execute a tool_use block and return the result as a JSON string.
+
+    This function matches the signature expected by GenerationArgs.tool_use_executor:
+    Callable[[ToolUseBlock], str]
+    """
+    tool_name = tool_use.get("name", "")
+    tool_input = tool_use.get("input", {})
+
+    executor = TOOL_EXECUTORS.get(tool_name)
+    if executor is None:
+        return json.dumps({"error": f"Unknown tool: {tool_name}", "success": False})
+
+    try:
+        # tool_input might be a dict or might need parsing
+        if isinstance(tool_input, str):
+            args = json.loads(tool_input)
+        else:
+            args = tool_input
+
+        result = executor(args)
+        return json.dumps(result.content)
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False})

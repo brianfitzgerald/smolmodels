@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import traceback
 from dataclasses import dataclass, fields
@@ -21,12 +22,16 @@ from synthetic_data.generation_utils import (
     RemoteModel,
 )
 from synthetic_data.utils import (
+    ContentBlock,
     Conversation,
     Message,
     TextBlock,
+    ToolResultBlock,
     ToolUseBlock,
     get_class_name,
 )
+
+MAX_TOOL_ITERATIONS = 10  # Prevent infinite tool loops
 
 MOCK_SNIPPET = """
 def solution(problem_input):
@@ -65,7 +70,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         # Convert tools to OpenAI format if provided
         openai_tools = NOT_GIVEN
         if args.tools:
-            openai_tools = args.tools
+            openai_tools = args.tools  # type: ignore[assignment]
         while True:
             completion_requests = []
             temperature = args.temperature
@@ -74,7 +79,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
             request = self.oai_client.chat.completions.create(
                 model=self.model_name,
-                messages=conversation,
+                messages=conversation,  # type: ignore[arg-type]
                 temperature=temperature,
                 max_completion_tokens=args.max_tokens,
                 extra_body=self.extra_body,
@@ -97,8 +102,8 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         continue
 
                     choice = result.choices[0]
-                    message = choice.message
-                    content = message.content
+                    oai_message = choice.message
+                    content = oai_message.content or ""
 
                     # Prepend prefill to content for consistency with Anthropic behavior
                     if args.prefill and content:
@@ -110,22 +115,36 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         "content": [text_block],
                     }
 
-                    if message.get("tool_calls"):
-                        for tool_call in message.get("tool_calls", []):
+                    if oai_message.tool_calls:
+                        for tool_call in oai_message.tool_calls:
                             tool_use_block: ToolUseBlock = {
                                 "type": "tool_use",
-                                "id": tool_call["id"],
-                                "name": tool_call["function"]["name"],
-                                "input": tool_call["function"]["arguments"],
+                                "id": tool_call.id,
+                                "name": tool_call.function.name,
+                                "input": tool_call.function.arguments,
                             }
                             message["content"].append(tool_use_block)
+
+                    # Map OpenAI finish reasons to our internal format
+                    finish_reason_map = {
+                        "stop": "end_turn",
+                        "length": "max_tokens",
+                        "tool_calls": "tool_use",
+                        "content_filter": "refusal",
+                        "function_call": "tool_use",
+                    }
+                    finish_reason = finish_reason_map.get(
+                        choice.finish_reason or "stop", "end_turn"
+                    )
 
                     generation_results.append(
                         GenerationResult(
                             message=message,
-                            finish_reason=choice.finish_reason or "end_turn",
+                            finish_reason=finish_reason,  # type: ignore[arg-type]
                         )
                     )
+
+                return generation_results
 
             except LengthFinishReasonError as e:
                 logger.error(f"Max length error: {e}")
@@ -209,85 +228,130 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             assert self.gen_wrapper_args.model_id is not None, (
                 "model_id is required for AnthropicGenerationWrapper"
             )
-            system_msg = ANTHROPIC_NOT_GIVEN
 
-            # Anthropic passes system messages as the first message in the conversation
-            if conversation[0]["role"] == "system":
-                first_content_block = conversation[0]["content"][0]
-                if first_content_block.get("type") == "text":
-                    text_block: TextBlock = first_content_block  # type: ignore[assignment]
+            # Extract system message if present
+            system_msg = ANTHROPIC_NOT_GIVEN
+            if conversation and conversation[0].get("role") == "system":
+                first_block = conversation[0].get("content", [{}])[0]
+                if first_block.get("type") == "text":
+                    text_block: TextBlock = first_block  # type: ignore[assignment]
                     system_msg = text_block["text"]
                 conversation = conversation[1:]
 
-            # TODO tool response blocks are user messages with tool_use blocks as content,
-            # reformat before inference
-
+            # Setup working conversation with optional prefill
+            working_conversation: list[Message] = list(conversation)
             if args.prefill:
-                prefill_text_block: TextBlock = {"type": "text", "text": args.prefill}
-                assistant_message: Message = {
+                prefill_message: Message = {
                     "role": "assistant",
-                    "content": [prefill_text_block],
+                    "content": [{"type": "text", "text": args.prefill}],  # ty:ignore[invalid-argument-type]
                 }
-                conversation = [
-                    *conversation,
-                    assistant_message,
-                ]
+                working_conversation.append(prefill_message)
 
-            # Convert tools from OpenAI format to Anthropic format if provided
+            # Convert tools to Anthropic format if provided
             anthropic_tools: list | AnthropicNotGiven = ANTHROPIC_NOT_GIVEN
             if args.tools:
                 anthropic_tools = [
                     {
-                        "name": tool["name"],
-                        "description": tool["description"],
-                        "input_schema": tool["input_schema"],
+                        "name": t.get("name", ""),
+                        "description": t.get("description", ""),
+                        "input_schema": t.get("input_schema", {}),
                     }
-                    for tool in args.tools
+                    for t in args.tools
                 ]
 
-            request = self.client.messages.create(
-                model=self.gen_wrapper_args.model_id,
-                messages=conversation,
-                system=system_msg,
-                temperature=args.temperature
-                if args.temperature is not None
-                else ANTHROPIC_NOT_GIVEN,
-                max_tokens=args.max_tokens,
-                tools=anthropic_tools,
-            )
+            # Tool execution loop
+            all_content: list[ContentBlock] = []
+            result: AnthropicMessage | None = None
+            for iteration in range(MAX_TOOL_ITERATIONS):
+                result = await self.client.messages.create(
+                    model=self.gen_wrapper_args.model_id,
+                    messages=working_conversation,  # type: ignore[arg-type]
+                    system=system_msg,
+                    temperature=args.temperature
+                    if args.temperature is not None
+                    else ANTHROPIC_NOT_GIVEN,
+                    max_tokens=args.max_tokens,
+                    tools=anthropic_tools,
+                )
 
-            result_message: AnthropicMessage = await request
+                # Parse response content
+                message_content: list[ContentBlock] = []
+                for block in result.content:
+                    if block.type == "text":
+                        text = block.text  # type: ignore[attr-defined]
+                        if iteration == 0 and args.prefill and text:
+                            text = args.prefill + text
+                        text_block_content: TextBlock = {"type": "text", "text": text}
+                        message_content.append(text_block_content)
+                    elif block.type == "tool_use":
+                        tool_use: ToolUseBlock = {
+                            "type": "tool_use",
+                            "id": block.id,  # type: ignore[attr-defined]
+                            "name": block.name,  # type: ignore[attr-defined]
+                            "input": block.input,  # type: ignore[attr-defined]
+                        }
+                        message_content.append(tool_use)
 
-            message: Message = {
-                "role": "assistant",
-                "content": [],
-            }
-
-            for block in result_message.content:
-                if block.type == "text":
-                    block_text = block.text
-                    if args.prefill and block_text:
-                        block_text = args.prefill + block_text
-                    text_block: TextBlock = {
-                        "type": "text",
-                        "text": block_text,
+                # Handle tool execution
+                if result.stop_reason == "tool_use" and args.tool_use_executor:
+                    assistant_msg: Message = {
+                        "role": "assistant",
+                        "content": message_content,
                     }
-                    message["content"].append(text_block)
-                elif block.type == "tool_use":
-                    tool_use_block: ToolUseBlock = {
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
+                    working_conversation.append(assistant_msg)
+
+                    # Execute tools and collect results
+                    tool_result_blocks: list[ContentBlock] = []
+                    for block in message_content:
+                        if block.get("type") == "tool_use":
+                            tool_block: ToolUseBlock = block  # type: ignore[assignment]
+                            try:
+                                result_content = args.tool_use_executor(tool_block)
+                                tool_result: ToolResultBlock = {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_block["id"],
+                                    "content": result_content,
+                                }
+                                tool_result_blocks.append(tool_result)
+                            except Exception as e:
+                                logger.error(f"Tool execution error: {e}")
+                                error_result: ToolResultBlock = {
+                                    "type": "tool_result",
+                                    "tool_use_id": tool_block["id"],
+                                    "content": f"Error: {e}",
+                                }
+                                tool_result_blocks.append(error_result)
+
+                    user_msg: Message = {
+                        "role": "user",
+                        "content": tool_result_blocks,
                     }
-                    message["content"].append(tool_use_block)
-                elif block.type == "tool_result":
-                    # TODO execute tools here if we get a tool use block
-                    message["content"].append(block)
+                    working_conversation.append(user_msg)
+
+                    # Convert tool_use blocks to text for final content
+                    for b in message_content:
+                        if b.get("type") == "tool_use":
+                            tool_text: TextBlock = {
+                                "type": "text",
+                                "text": json.dumps(b.get("input", {})),
+                            }
+                            all_content.append(tool_text)
+                        else:
+                            all_content.append(b)
+                    continue
+
+                # No tool calls - collect final content and break
+                all_content.extend(message_content)
+                break
+
+            if result is None:
+                logger.error("No response from Anthropic API")
+                return []
 
             return [
                 GenerationResult(
-                    message=message, finish_reason=result_message.stop_reason
+                    message={"role": "assistant", "content": all_content or []},
+                    finish_reason=result.stop_reason or "end_turn",
                 )
             ]
 

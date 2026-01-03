@@ -16,7 +16,11 @@ from synthetic_data.tasks.roleplaying_prompts import (
     game_parameter_prompt,
     player_action_prompt,
 )
-# Tools temporarily disabled - see roleplaying_tools.py for definitions
+from synthetic_data.tasks.roleplaying_tools import (
+    DM_TOOLS,
+    PLAYER_TOOLS,
+    execute_tool_use_block,
+)
 from synthetic_data.utils import (
     ContentBlock,
     Conversation,
@@ -138,7 +142,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
         results = await self.generation_wrappers["player"].generate(
-            conversation, args=GenerationArgs(max_tokens=1024)
+            conversation,
+            args=GenerationArgs(
+                max_tokens=1024,
+                tools=PLAYER_TOOLS,
+                tool_use_executor=execute_tool_use_block,
+            ),
         )
         assert len(results) == 1
         episode.actions.append(Action(role="player", message=results[0].message))
@@ -147,7 +156,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         conversation = self._format_conversation(episode, "dungeon_master")
         results = await self.generation_wrappers["dungeon_master"].generate(
             conversation,
-            args=GenerationArgs(max_tokens=1024),
+            args=GenerationArgs(
+                max_tokens=1024,
+                tools=DM_TOOLS,
+                tool_use_executor=execute_tool_use_block,
+            ),
         )
         assert len(results) == 1
         episode.actions.append(
@@ -262,7 +275,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         results = await generation_wrapper.generate(
             scenario_conversation,
-            args=GenerationArgs(max_tokens=1024),
+            args=GenerationArgs(
+                max_tokens=1024,
+                tools=DM_TOOLS,
+                tool_use_executor=execute_tool_use_block,
+            ),
         )
         return results[0]
 

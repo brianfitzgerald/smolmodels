@@ -20,7 +20,8 @@
       "Bash(pkill:*)",
       "Bash(timeout 120 python:*)",
       "Bash(open:*)",
-      "Bash(uv run python:*)"
+      "Bash(uv run python:*)",
+      "Bash(LOG_LEVEL=DEBUG uv run python:*)"
     ],
     "deny": [],
     "ask": []
