@@ -134,6 +134,28 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return ep
 
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
+        # On the first turn, DM goes first to set the scene
+        # After that, player goes first, then DM responds
+        if episode.step_count == 0:
+            # Generate dungeon master action to set the scene
+            conversation = self._format_conversation(episode, "dungeon_master")
+            log_conversation(conversation)
+            result = await self.generation_wrappers["dungeon_master"].generate(
+                conversation,
+                args=GenerationArgs(
+                    max_tokens=1024,
+                    tools=DM_TOOLS,
+                    tool_use_executor=execute_tool_use_block,
+                ),
+            )
+            # Get the assistant message from the conversation (last message added by generate)
+            dm_message = result.conversation[-1]
+            episode.actions.append(Action(role="dungeon_master", message=dm_message))
+
+            episode.step_count += 1
+            finished = episode.step_count >= self.max_user_responses
+            return episode, finished
+
         # Generate player action
         conversation = self._format_conversation(episode, "player")
         log_conversation(conversation)
@@ -243,6 +265,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
                 }
                 out_blocks.append(text_block)
+            elif block["type"] == "tool_result":
+                # Convert tool_result to text block for cross-perspective viewing
+                text_block: TextBlock = {
+                    "type": "text",
+                    "text": f"<tool_result>{block.get('content', '')}</tool_result>",
+                }
+                out_blocks.append(text_block)
             else:
                 out_blocks.append(block)
         return out_blocks
@@ -313,6 +342,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             },
         ]
 
+        # If generating for DM and no actions yet, add a user message to start the game
+        if generating_role == "dungeon_master" and not episode.actions:
+            content_block: TextBlock = {
+                "type": "text",
+                "text": "Begin the adventure. Set the opening scene.",
+            }
+            conversation.append({"role": "user", "content": [content_block]})
+
         for action in episode.actions:
             if generating_role == "dungeon_master":
                 # DM perspective: player -> user, dm -> assistant
@@ -322,10 +359,21 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 role = "user" if action.role == "dungeon_master" else "assistant"
 
             content = action.message["content"]
-            # Convert tool_use blocks to text blocks when role is "user"
+
+            # Convert tool_use and tool_result blocks when role is "user"
             # since user messages can't contain tool_use blocks in the Anthropic API
             if role == "user":
                 content = self._convert_tool_calls_to_text_blocks(content)
+            else:
+                # For assistant messages, filter out tool_result blocks
+                # (they can only be in user messages per Anthropic API)
+                content = [
+                    block for block in content if block.get("type") != "tool_result"
+                ]
+
+            # Skip messages with empty content (except final assistant message)
+            if not content:
+                continue
 
             message: Message = {
                 "role": role,

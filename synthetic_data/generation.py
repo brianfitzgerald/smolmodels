@@ -1,4 +1,4 @@
-import asyncio
+import json
 import os
 import traceback
 from dataclasses import dataclass, fields
@@ -14,6 +14,7 @@ from openai.types.chat.chat_completion import ChatCompletion
 
 from synthetic_data.generation_utils import (
     MAX_RETRIES,
+    FinishReason,
     GenerationArgs,
     GenerationResult,
     GenerationWrapper,
@@ -54,90 +55,285 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self.model_name = default_args.model_id or "gpt-4o-mini"
         self.extra_body = {}
 
+    def _convert_tools_to_openai_format(self, tools: list) -> list:
+        """Convert Anthropic-format tools to OpenAI format."""
+        openai_tools = []
+        for tool in tools:
+            openai_tool = {
+                "type": "function",
+                "function": {
+                    "name": tool.get("name"),
+                    "description": tool.get("description"),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            }
+            openai_tools.append(openai_tool)
+        return openai_tools
+
+    def _convert_conversation_to_openai_format(
+        self, conversation: Conversation
+    ) -> list:
+        """Convert internal conversation format to OpenAI format.
+
+        Internal format uses:
+        - assistant messages with tool_use blocks
+        - user messages with tool_result blocks
+
+        OpenAI format uses:
+        - assistant messages with tool_calls field (no tool_use in content)
+        - tool role messages for tool results
+        """
+        openai_messages = []
+
+        for msg in conversation:
+            role = msg["role"]
+            content = msg.get("content", [])
+
+            if role == "assistant":
+                # Check if there are tool_use blocks
+                tool_uses = [
+                    block for block in content if block.get("type") == "tool_use"
+                ]
+                text_blocks = [
+                    block for block in content if block.get("type") == "text"
+                ]
+
+                if tool_uses:
+                    # Create OpenAI tool_calls format
+                    tool_calls = []
+                    for tool_use in tool_uses:
+                        tool_input = tool_use.get("input", {})
+                        if not isinstance(tool_input, str):
+                            tool_input = json.dumps(tool_input)
+
+                        tool_calls.append(
+                            {
+                                "id": tool_use.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": tool_use.get("name"),
+                                    "arguments": tool_input,
+                                },
+                            }
+                        )
+
+                    # Create assistant message with tool_calls
+                    oai_msg = {
+                        "role": "assistant",
+                        "content": text_blocks[0].get("text") if text_blocks else None,
+                        "tool_calls": tool_calls,
+                    }
+                    openai_messages.append(oai_msg)
+                else:
+                    # Regular assistant message
+                    text = text_blocks[0].get("text") if text_blocks else ""
+                    openai_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": text,
+                        }
+                    )
+
+            elif role == "user":
+                # Check if there are tool_result blocks
+                tool_results = [
+                    block for block in content if block.get("type") == "tool_result"
+                ]
+                text_blocks = [
+                    block for block in content if block.get("type") == "text"
+                ]
+
+                if tool_results:
+                    # Create tool role messages for each result
+                    for tool_result in tool_results:
+                        openai_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_result.get("tool_use_id"),
+                                "content": tool_result.get("content", ""),
+                            }
+                        )
+                else:
+                    # Regular user message
+                    text = text_blocks[0].get("text") if text_blocks else ""
+                    openai_messages.append(
+                        {
+                            "role": "user",
+                            "content": text,
+                        }
+                    )
+
+            else:  # system or other roles
+                # Pass through
+                if content:
+                    text = content[0].get("text") if content else ""
+                    openai_messages.append(
+                        {
+                            "role": role,
+                            "content": text,
+                        }
+                    )
+
+        return openai_messages
+
     async def generate(
         self, conversation: Conversation, args: GenerationArgs | None = None
     ) -> GenerationResult:
-        self.n_retries = MAX_RETRIES
         args = args or self.gen_wrapper_args.default_generation_args
+        max_tool_iterations = 10  # Prevent infinite loops
+        iteration = 0
 
-        # Convert tools to OpenAI format if provided
-        openai_tools = NOT_GIVEN
-        if args.tools:
-            openai_tools = args.tools  # type: ignore[assignment]
-        while True:
-            completion_requests = []
-            temperature = args.temperature
-            if self.gen_wrapper_args.is_reasoning_model:
-                temperature = NOT_GIVEN
+        try:
+            # Setup working conversation with optional prefill
+            if args.prefill:
+                prefill_text_block: TextBlock = {"type": "text", "text": args.prefill}
+                prefill_message: Message = {
+                    "role": "assistant",
+                    "content": [prefill_text_block],
+                }
+                conversation.append(prefill_message)
 
-            request = self.oai_client.chat.completions.create(
-                model=self.model_name,
-                messages=conversation,  # type: ignore[arg-type]
-                temperature=temperature,
-                max_completion_tokens=args.max_tokens,
-                extra_body=self.extra_body,
-                seed=args.seed,
-                tools=openai_tools,
-            )
-            completion_requests.append(request)
+            # Convert tools to OpenAI format if provided
+            openai_tools = NOT_GIVEN
+            if args.tools:
+                openai_tools = self._convert_tools_to_openai_format(args.tools)  # type: ignore[assignment]
 
-            try:
-                results: list[ChatCompletion] = await asyncio.gather(
-                    *completion_requests
+            # Tool use loop: continue until we get a non-tool_use response
+            while iteration < max_tool_iterations:
+                iteration += 1
+
+                temperature = args.temperature
+                if self.gen_wrapper_args.is_reasoning_model:
+                    temperature = NOT_GIVEN
+
+                # Convert conversation to OpenAI format
+                openai_conversation = self._convert_conversation_to_openai_format(
+                    conversation
                 )
-                if not results:
-                    logger.error(results)
-                    raise ValueError("No completions returned")
 
-                for result in results:
-                    if not result.choices:
+                result: ChatCompletion = await self.oai_client.chat.completions.create(
+                    model=self.model_name,
+                    messages=openai_conversation,  # type: ignore[arg-type]
+                    temperature=temperature,
+                    max_completion_tokens=args.max_tokens,
+                    extra_body=self.extra_body,
+                    seed=args.seed,
+                    tools=openai_tools,
+                )
+
+                if not result.choices:
+                    logger.error("No choices returned from OpenAI API")
+                    return GenerationResult(
+                        conversation=conversation, finish_reason="error"
+                    )
+
+                choice = result.choices[0]
+                oai_message = choice.message
+
+                # Build content blocks
+                assistant_message_blocks: list[ContentBlock] = []
+
+                # Add text content if present
+                if oai_message.content:
+                    content_text = oai_message.content
+                    # Prepend prefill to content for consistency with Anthropic behavior
+                    if args.prefill and iteration == 1:
+                        content_text = args.prefill + content_text
+
+                    text_block: TextBlock = {"type": "text", "text": content_text}
+                    assistant_message_blocks.append(text_block)
+
+                # Add tool calls if present
+                if oai_message.tool_calls:
+                    for tool_call in oai_message.tool_calls:
+                        # Parse arguments if they're a string
+                        tool_input = tool_call.function.arguments
+                        if isinstance(tool_input, str):
+                            import json
+
+                            try:
+                                tool_input = json.loads(tool_input)
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"Failed to parse tool arguments: {tool_input}"
+                                )
+
+                        tool_use_block: ToolUseBlock = {
+                            "type": "tool_use",
+                            "id": tool_call.id,
+                            "name": tool_call.function.name,
+                            "input": tool_input,
+                        }
+                        assistant_message_blocks.append(tool_use_block)
+
+                # Add the assistant message to the conversation
+                if assistant_message_blocks:
+                    assistant_message: Message = {
+                        "role": "assistant",
+                        "content": assistant_message_blocks,
+                    }
+                    conversation.append(assistant_message)
+                else:
+                    logger.warning("Received empty assistant response from API")
+                    return GenerationResult(
+                        conversation=conversation, finish_reason="error"
+                    )
+
+                # Check if we need to execute tools
+                if oai_message.tool_calls and args.tool_use_executor is not None:
+                    # Execute all tool_use blocks and collect results
+                    tool_result_blocks: list[ContentBlock] = []
+                    for block in assistant_message_blocks:
+                        if block["type"] == "tool_use":
+                            try:
+                                result_block = args.tool_use_executor(block)
+                                tool_result_blocks.append(result_block)
+                            except Exception as e:
+                                logger.error(f"Tool execution error: {e}")
+                                error_result: ToolResultBlock = {
+                                    "type": "tool_result",
+                                    "tool_use_id": block["id"],
+                                    "content": f"Error: {str(e)}",
+                                    "is_error": True,
+                                }
+                                tool_result_blocks.append(error_result)
+
+                    # Add tool results to conversation and continue the loop
+                    if tool_result_blocks:
+                        conversation.append(
+                            {"role": "user", "content": tool_result_blocks}
+                        )
+                        # Continue the loop to get model's response using the tool results
                         continue
 
-                    choice = result.choices[0]
-                    oai_message = choice.message
-                    content = oai_message.content or ""
-
-                    # Prepend prefill to content for consistency with Anthropic behavior
-                    if args.prefill and content:
-                        content = args.prefill + content
-
-                    text_block: TextBlock = {"type": "text", "text": content}
-                    message: Message = {
-                        "role": "assistant",
-                        "content": [text_block],
-                    }
-
-                    if oai_message.tool_calls:
-                        for tool_call in oai_message.tool_calls:
-                            tool_use_block: ToolUseBlock = {
-                                "type": "tool_use",
-                                "id": tool_call.id,
-                                "name": tool_call.function.name,
-                                "input": tool_call.function.arguments,
-                            }
-                            message["content"].append(tool_use_block)
-
-                    # Add the assistant message to the conversation
-                    conversation.append(message)
-
+                # If we reach here, either no tool calls or no executor
+                # Map OpenAI finish_reason to our FinishReason type
+                finish_reason_map: dict[str, FinishReason] = {
+                    "stop": "end_turn",
+                    "length": "max_tokens",
+                    "tool_calls": "tool_use",
+                    "content_filter": "refusal",
+                }
+                finish_reason: FinishReason = finish_reason_map.get(
+                    choice.finish_reason, "end_turn"
+                )
                 return GenerationResult(
-                    conversation=conversation, finish_reason="end_turn"
+                    conversation=conversation, finish_reason=finish_reason
                 )
 
-            except LengthFinishReasonError as e:
-                logger.error(f"Max length error: {e}")
-                return GenerationResult(
-                    conversation=conversation, finish_reason="max_tokens"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Error while generating: {e}, retries left: {self.n_retries}"
-                )
-                traceback.print_exc()
-                await asyncio.sleep(1)
-                self.n_retries -= 1
-                if self.n_retries <= 0:
-                    raise e
+            # Max iterations reached
+            logger.warning(f"Max tool use iterations ({max_tool_iterations}) reached")
+            return GenerationResult(conversation=conversation, finish_reason="end_turn")
+
+        except LengthFinishReasonError as e:
+            logger.error(f"Max length error: {e}")
+            return GenerationResult(
+                conversation=conversation, finish_reason="max_tokens"
+            )
+        except Exception as e:
+            logger.error(f"Error while generating: {e}")
+            traceback.print_exc()
+            return GenerationResult(conversation=conversation, finish_reason="error")
 
 
 def _get_model_id(base_url: str):
@@ -204,6 +400,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
         self, conversation: Conversation, args: GenerationArgs | None = None
     ) -> GenerationResult:
         args = args or self.gen_wrapper_args.default_generation_args
+        max_tool_iterations = 10  # Prevent infinite loops
+        iteration = 0
+
         try:
             assert self.gen_wrapper_args.model_id is not None, (
                 "model_id is required for AnthropicGenerationWrapper"
@@ -226,67 +425,117 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 system_msg = conversation[0].get("content", [{}])[0].get("text", "")
                 conversation = conversation[1:]
 
-            result: AnthropicMessage | None = await self.client.messages.create(
-                model=self.gen_wrapper_args.model_id,
-                messages=conversation,
-                system=system_msg,
-                temperature=args.temperature
-                if args.temperature is not None
-                else ANTHROPIC_NOT_GIVEN,
-                max_tokens=args.max_tokens,
-                tools=tools,
-            )
+            # Anthropic API requires at least one message
+            if not conversation:
+                logger.error("Empty conversation after removing system message")
+                return GenerationResult(conversation=[], finish_reason="error")
 
-            # Convert Anthropic blocks to internal block format
-            assistant_message_blocks: list[ContentBlock] = []
-            for block in result.content:
-                if block.type == "text":
-                    text_block_content: TextBlock = {"type": "text", "text": block.text}
-                    assistant_message_blocks.append(text_block_content)
-                elif block.type == "tool_use":
-                    tool_use: ToolUseBlock = {
-                        "type": "tool_use",
-                        "id": block.id,
-                        "name": block.name,
-                        "input": block.input,
+            # Tool use loop: continue until we get a non-tool_use response
+            while iteration < max_tool_iterations:
+                iteration += 1
+
+                # Prepare thinking parameter if specified
+                thinking_param = ANTHROPIC_NOT_GIVEN
+                if args.thinking_budget is not None:
+                    thinking_param = {
+                        "type": "enabled",
+                        "budget_tokens": args.thinking_budget,
                     }
-                    assistant_message_blocks.append(tool_use)
-                elif block.type == "thinking":
-                    thinking_block: ThinkingBlock = {
-                        "type": "thinking",
-                        "thinking": block.thinking,
+
+                result: AnthropicMessage = await self.client.messages.create(
+                    model=self.gen_wrapper_args.model_id,
+                    messages=conversation,
+                    system=system_msg,
+                    temperature=args.temperature
+                    if args.temperature is not None
+                    else ANTHROPIC_NOT_GIVEN,
+                    max_tokens=args.max_tokens,
+                    tools=tools,
+                    thinking=thinking_param,
+                )
+
+                # Convert Anthropic blocks to internal block format
+                assistant_message_blocks: list[ContentBlock] = []
+                for block in result.content:
+                    if block.type == "text":
+                        text_block_content: TextBlock = {
+                            "type": "text",
+                            "text": block.text,
+                        }
+                        assistant_message_blocks.append(text_block_content)
+                    elif block.type == "tool_use":
+                        tool_use: ToolUseBlock = {
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        }
+                        assistant_message_blocks.append(tool_use)
+                    elif block.type == "thinking":
+                        thinking_block: ThinkingBlock = {
+                            "type": "thinking",
+                            "thinking": block.thinking,
+                        }
+                        assistant_message_blocks.append(thinking_block)
+                    else:
+                        logger.error(f"Unknown block type: {block.type}")
+                        continue
+
+                # Add the assistant message to the conversation
+                # Only add if there's content (Anthropic API requires non-empty messages)
+                if assistant_message_blocks:
+                    assistant_message: Message = {
+                        "role": "assistant",
+                        "content": assistant_message_blocks,
                     }
-                    assistant_message_blocks.append(thinking_block)
+                    conversation.append(assistant_message)
                 else:
-                    logger.error(f"Unknown block type: {block.type}")
-                    continue
+                    logger.warning("Received empty assistant response from API")
+                    return GenerationResult(
+                        conversation=conversation, finish_reason="error"
+                    )
 
-            tool_result_blocks: list[ContentBlock] = []
-            if result.stop_reason == "tool_use" and args.tool_use_executor is not None:
-                for block in assistant_message_blocks:
-                    if block["type"] == "tool_use":
-                        try:
-                            result_block = args.tool_use_executor(block)
-                            tool_result_blocks.append(result_block)
-                        except Exception as e:
-                            logger.error(f"Tool execution error: {e}")
-                            error_result: ToolResultBlock = {
-                                "type": "tool_result",
-                                "tool_use_id": block["id"],
-                                "content": f"Error: {e}",
-                            }
-                            tool_result_blocks.append(error_result)
+                # Check if we need to execute tools
+                if (
+                    result.stop_reason == "tool_use"
+                    and args.tool_use_executor is not None
+                ):
+                    # Execute all tool_use blocks and collect results
+                    tool_result_blocks: list[ContentBlock] = []
+                    for block in assistant_message_blocks:
+                        if block["type"] == "tool_use":
+                            try:
+                                result_block = args.tool_use_executor(block)
+                                tool_result_blocks.append(result_block)
+                            except Exception as e:
+                                logger.error(f"Tool execution error: {e}")
+                                error_result: ToolResultBlock = {
+                                    "type": "tool_result",
+                                    "tool_use_id": block["id"],
+                                    "content": f"Error: {str(e)}",
+                                    "is_error": True,
+                                }
+                                tool_result_blocks.append(error_result)
 
-            # Add the assistant message to the conversation
-            assistant_message: Message = {
-                "role": "assistant",
-                "content": assistant_message_blocks,
-            }
-            conversation.append(assistant_message)
+                    # Add tool results to conversation and continue the loop
+                    if tool_result_blocks:
+                        conversation.append(
+                            {"role": "user", "content": tool_result_blocks}
+                        )
+                        # Continue the loop to get Claude's response using the tool results
+                        continue
 
-            if tool_result_blocks:
-                conversation.append({"role": "user", "content": tool_result_blocks})
+                # If we reach here, either:
+                # 1. stop_reason is not "tool_use", or
+                # 2. tool_use_executor is None
+                # In both cases, we're done
+                finish_reason = result.stop_reason  # type: ignore[assignment]
+                return GenerationResult(
+                    conversation=conversation, finish_reason=finish_reason
+                )
 
+            # Max iterations reached
+            logger.warning(f"Max tool use iterations ({max_tool_iterations}) reached")
             return GenerationResult(conversation=conversation, finish_reason="end_turn")
 
         except AnthropicError as e:

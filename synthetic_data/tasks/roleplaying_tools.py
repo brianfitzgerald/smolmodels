@@ -195,7 +195,7 @@ TOOL_EXECUTORS = {
 }
 
 
-def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolResult:
+def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolOutput:
     """Execute a tool call and return the result."""
     tool_name = tool_call.function.name
     executor = TOOL_EXECUTORS.get(tool_name)
@@ -246,11 +246,15 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
             args = tool_input
 
         result = executor(args)
+
+        # Check if result indicates an error
+        is_error = not result.get("success", True) or "error" in result
+
         return ToolResultBlock(
             type="tool_result",
             tool_use_id=tool_use.get("id", ""),
-            content=json.dumps(result.content),
-            is_error=result.success,
+            content=json.dumps(result),
+            is_error=is_error,
         )
     except Exception as e:
         return ToolResultBlock(
