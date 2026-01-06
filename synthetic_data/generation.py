@@ -4,10 +4,7 @@ import traceback
 from dataclasses import dataclass, fields
 from typing import Optional
 
-from anthropic import NOT_GIVEN as ANTHROPIC_NOT_GIVEN
-from anthropic import AnthropicError, AsyncAnthropic
-from anthropic import NotGiven as AnthropicNotGiven
-from anthropic.types.message import Message as AnthropicMessage
+from anthropic import AsyncAnthropic
 from loguru import logger
 from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -26,10 +23,10 @@ from synthetic_data.utils import (
     Conversation,
     Message,
     TextBlock,
-    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     get_class_name,
+    log_conversation,
 )
 
 
@@ -395,102 +392,183 @@ class AnthropicGenerationWrapper(GenerationWrapper):
         self.client = AsyncAnthropic(
             api_key=api_key,
         )
+        self.model_name = args.model_id or "claude-sonnet-4-20250514"
+
+    def _normalize_conversation(self, messages: list[Message]) -> list[Message]:
+        """Normalize conversation for Anthropic API requirements.
+
+        Anthropic API requires:
+        1. Strictly alternating user/assistant messages
+        2. Conversation must start with a user message
+
+        This function:
+        - Merges consecutive messages of the same role
+        - Ensures the conversation starts with a user message
+        """
+        if not messages:
+            return messages
+
+        # First, merge consecutive messages of the same role
+        merged: list[Message] = []
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", [])
+
+            if merged and merged[-1].get("role") == role:
+                # Merge with previous message of same role
+                existing_content = list(merged[-1].get("content", []))
+                existing_content.extend(content)
+                merged[-1] = {"role": role, "content": existing_content}  # type: ignore[typeddict-item]
+            else:
+                # Add as new message (copy to avoid mutation)
+                merged.append({"role": role, "content": list(content)})  # type: ignore[typeddict-item]
+
+        # Ensure conversation starts with user message
+        if merged and merged[0].get("role") == "assistant":
+            # Insert a placeholder user message at the start
+            placeholder: Message = {
+                "role": "user",
+                "content": [{"type": "text", "text": "Continue."}],  # type: ignore[list-item]
+            }
+            merged.insert(0, placeholder)
+
+        return merged
 
     async def generate(
         self, conversation: Conversation, args: GenerationArgs | None = None
     ) -> GenerationResult:
         args = args or self.gen_wrapper_args.default_generation_args
-        max_tool_iterations = 10  # Prevent infinite loops
+        max_tool_iterations = 10
         iteration = 0
 
         try:
-            assert self.gen_wrapper_args.model_id is not None, (
-                "model_id is required for AnthropicGenerationWrapper"
-            )
+            # Extract system message if present (Anthropic uses separate system param)
+            system_content: str | None = None
+            messages_for_api: list[Message] = []
 
-            # Setup working conversation with optional prefill
+            for msg in conversation:
+                if msg["role"] == "system":
+                    # Extract text from system message
+                    content = msg.get("content", [])
+                    if content and content[0].get("type") == "text":
+                        system_content = content[0].get("text", "")
+                else:
+                    messages_for_api.append(msg)
+
+            # Normalize conversation for Anthropic requirements (alternating roles, starts with user)
+            messages_for_api = self._normalize_conversation(messages_for_api)
+            log_conversation(messages_for_api)
+
+            # Handle prefill by adding a partial assistant message
             if args.prefill:
+                prefill_text_block: TextBlock = {"type": "text", "text": args.prefill}
                 prefill_message: Message = {
                     "role": "assistant",
-                    "content": [{"type": "text", "text": args.prefill}],  # ty:ignore[invalid-argument-type]
+                    "content": [prefill_text_block],
                 }
-                conversation.append(prefill_message)
-
-            # Convert tools to Anthropic format if provided
-            tools: list | AnthropicNotGiven = args.tools or ANTHROPIC_NOT_GIVEN
-
-            # System message is the first message with role "system", so remove
-            system_msg = ANTHROPIC_NOT_GIVEN
-            if conversation and conversation[0].get("role") == "system":
-                system_msg = conversation[0].get("content", [{}])[0].get("text", "")
-                conversation = conversation[1:]
-
-            # Anthropic API requires at least one message
-            if not conversation:
-                logger.error("Empty conversation after removing system message")
-                return GenerationResult(conversation=[], finish_reason="error")
+                messages_for_api.append(prefill_message)
 
             # Tool use loop: continue until we get a non-tool_use response
             while iteration < max_tool_iterations:
                 iteration += 1
 
-                # Prepare thinking parameter if specified
-                thinking_param = ANTHROPIC_NOT_GIVEN
-                if args.thinking_budget is not None:
-                    thinking_param = {
-                        "type": "enabled",
-                        "budget_tokens": args.thinking_budget,
-                    }
+                # Build API request kwargs
+                request_kwargs: dict = {
+                    "model": self.model_name,
+                    "max_tokens": args.max_tokens,
+                    "messages": messages_for_api,
+                }
 
-                result: AnthropicMessage = await self.client.messages.create(
-                    model=self.gen_wrapper_args.model_id,
-                    messages=conversation,
-                    system=system_msg,
-                    temperature=args.temperature
-                    if args.temperature is not None
-                    else ANTHROPIC_NOT_GIVEN,
-                    max_tokens=args.max_tokens,
-                    tools=tools,
-                    thinking=thinking_param,
+                if system_content:
+                    request_kwargs["system"] = system_content
+
+                if args.temperature is not None:
+                    request_kwargs["temperature"] = args.temperature
+
+                if args.stop:
+                    request_kwargs["stop_sequences"] = args.stop
+
+                if args.tools:
+                    request_kwargs["tools"] = args.tools
+
+                # Log request for debugging
+                logger.debug(
+                    f"Anthropic API request: model={request_kwargs.get('model')}, "
+                    f"num_messages={len(request_kwargs.get('messages', []))}, "
+                    f"message_roles={[m.get('role') for m in request_kwargs.get('messages', [])]}"
                 )
 
-                # Convert Anthropic blocks to internal block format
+                # Make the API call
+                result = await self.client.messages.create(**request_kwargs)
+
+                # Log raw response for debugging
+                logger.debug(
+                    f"Anthropic API response: stop_reason={result.stop_reason}, "
+                    f"content_count={len(result.content)}, "
+                    f"usage={result.usage}"
+                )
+
+                # Build content blocks from response
                 assistant_message_blocks: list[ContentBlock] = []
+
                 for block in result.content:
                     if block.type == "text":
-                        text_block_content: TextBlock = {
-                            "type": "text",
-                            "text": block.text,
-                        }
-                        assistant_message_blocks.append(text_block_content)
+                        text_content = block.text
+                        # Prepend prefill to first text block for consistency
+                        if args.prefill and iteration == 1:
+                            text_content = args.prefill + text_content
+
+                        text_block: TextBlock = {"type": "text", "text": text_content}
+                        assistant_message_blocks.append(text_block)
+
                     elif block.type == "tool_use":
-                        tool_use: ToolUseBlock = {
+                        tool_use_block: ToolUseBlock = {
                             "type": "tool_use",
                             "id": block.id,
                             "name": block.name,
                             "input": block.input,
                         }
-                        assistant_message_blocks.append(tool_use)
-                    elif block.type == "thinking":
-                        thinking_block: ThinkingBlock = {
-                            "type": "thinking",
-                            "thinking": block.thinking,
-                        }
-                        assistant_message_blocks.append(thinking_block)
+                        assistant_message_blocks.append(tool_use_block)
                     else:
-                        logger.error(f"Unknown block type: {block.type}")
-                        continue
+                        # Handle other block types (e.g., thinking blocks from extended thinking)
+                        logger.debug(f"Skipping unhandled block type: {block.type}")
 
                 # Add the assistant message to the conversation
-                # Only add if there's content (Anthropic API requires non-empty messages)
                 if assistant_message_blocks:
                     assistant_message: Message = {
                         "role": "assistant",
                         "content": assistant_message_blocks,
                     }
+                    messages_for_api.append(assistant_message)
                     conversation.append(assistant_message)
+                elif iteration > 1:
+                    # Empty response after tool use is valid - model has nothing to add
+                    # The previous tool_use response was the actual output
+                    logger.debug(
+                        f"Empty response after tool use (iteration {iteration}), "
+                        f"treating as complete"
+                    )
+                    # Map Anthropic stop_reason to our FinishReason type
+                    finish_reason_map: dict[str, FinishReason] = {
+                        "end_turn": "end_turn",
+                        "max_tokens": "max_tokens",
+                        "stop_sequence": "stop_sequence",
+                        "tool_use": "tool_use",
+                    }
+                    finish_reason: FinishReason = finish_reason_map.get(
+                        result.stop_reason or "end_turn", "end_turn"
+                    )
+                    return GenerationResult(
+                        conversation=conversation, finish_reason=finish_reason
+                    )
                 else:
-                    logger.warning("Received empty assistant response from API")
+                    # Empty response on first iteration is an error
+                    logger.warning(
+                        f"Received empty assistant response from Anthropic API. "
+                        f"stop_reason={result.stop_reason}, "
+                        f"content_types={[b.type for b in result.content]}, "
+                        f"model={result.model}"
+                    )
                     return GenerationResult(
                         conversation=conversation, finish_reason="error"
                     )
@@ -502,10 +580,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 ):
                     # Execute all tool_use blocks and collect results
                     tool_result_blocks: list[ContentBlock] = []
+
                     for block in assistant_message_blocks:
                         if block["type"] == "tool_use":
                             try:
-                                result_block = args.tool_use_executor(block)
+                                result_block = args.tool_use_executor(block)  # type: ignore[arg-type]
                                 tool_result_blocks.append(result_block)
                             except Exception as e:
                                 logger.error(f"Tool execution error: {e}")
@@ -517,19 +596,26 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                                 }
                                 tool_result_blocks.append(error_result)
 
-                    # Add tool results to conversation and continue the loop
+                    # Add tool results as a user message and continue the loop
                     if tool_result_blocks:
-                        conversation.append(
-                            {"role": "user", "content": tool_result_blocks}
-                        )
-                        # Continue the loop to get Claude's response using the tool results
+                        tool_result_message: Message = {
+                            "role": "user",
+                            "content": tool_result_blocks,
+                        }
+                        messages_for_api.append(tool_result_message)
+                        conversation.append(tool_result_message)
                         continue
 
-                # If we reach here, either:
-                # 1. stop_reason is not "tool_use", or
-                # 2. tool_use_executor is None
-                # In both cases, we're done
-                finish_reason = result.stop_reason  # type: ignore[assignment]
+                # Map Anthropic stop_reason to our FinishReason type
+                finish_reason_map: dict[str, FinishReason] = {
+                    "end_turn": "end_turn",
+                    "max_tokens": "max_tokens",
+                    "stop_sequence": "stop_sequence",
+                    "tool_use": "tool_use",
+                }
+                finish_reason: FinishReason = finish_reason_map.get(
+                    result.stop_reason or "end_turn", "end_turn"
+                )
                 return GenerationResult(
                     conversation=conversation, finish_reason=finish_reason
                 )
@@ -538,8 +624,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
             logger.warning(f"Max tool use iterations ({max_tool_iterations}) reached")
             return GenerationResult(conversation=conversation, finish_reason="end_turn")
 
-        except AnthropicError as e:
-            logger.error(f"Error while generating: {e}")
+        except Exception as e:
+            logger.error(f"Error while generating with Anthropic: {e}")
+            traceback.print_exc()
             return GenerationResult(conversation=conversation, finish_reason="error")
 
 

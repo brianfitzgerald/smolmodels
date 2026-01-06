@@ -56,7 +56,7 @@ python util_scripts.py test_openai_api
 ### Generation
 
 ```bash
-python generate.py --task_name roleplaying_game --batch_size 1
+uv run generate.py --task_name roleplaying_game --batch_size 1
 ```
 
 # Utils

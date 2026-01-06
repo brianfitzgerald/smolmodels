@@ -122,6 +122,19 @@ def episode_to_html(episode: dict, index: int) -> str:
             metadata_items.append(f"<li><strong>{key}:</strong> {value}</li>")
         metadata_html = f'<ul class="metadata-list">{"".join(metadata_items)}</ul>'
 
+    # Format scenario message
+    scenario_html = ""
+    if scenario_message and scenario_message.get("content"):
+        scenario_html = f"""
+        <div class="message dm-message">
+            <div class="message-header">
+                <span class="role-badge dm-badge">Dungeon Master</span>
+                <span class="message-type">Scenario</span>
+            </div>
+            {format_message_html(scenario_message)}
+        </div>
+        """
+
     # Format actions
     actions_html = []
     for i, action in enumerate(actions):

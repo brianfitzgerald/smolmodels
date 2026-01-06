@@ -27,7 +27,6 @@ from synthetic_data.utils import (
     DatasetFormat,
     Message,
     TextBlock,
-    log_conversation,
     parse_xml_tags,
 )
 
@@ -139,7 +138,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         if episode.step_count == 0:
             # Generate dungeon master action to set the scene
             conversation = self._format_conversation(episode, "dungeon_master")
-            log_conversation(conversation)
             result = await self.generation_wrappers["dungeon_master"].generate(
                 conversation,
                 args=GenerationArgs(
@@ -158,7 +156,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Generate player action
         conversation = self._format_conversation(episode, "player")
-        log_conversation(conversation)
+
         result = await self.generation_wrappers["player"].generate(
             conversation,
             args=GenerationArgs(

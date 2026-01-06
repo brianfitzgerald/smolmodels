@@ -40,8 +40,9 @@ pyright
 ### Data Generation and Synthetic Tasks
 ```bash
 # Generate synthetic data using various tasks
-python generate.py --task_name=roleplaying_game --model_name=gpt-4o-mini
-python generate.py --task_name=gutenberg_backtranslation_from_txt --model_name=claude-3-5
+# Available tasks: roleplaying_game, gutenberg_summary_continuation
+python generate.py --task_name=roleplaying_game --batch_size=32
+python generate.py --task_name=gutenberg_summary_continuation --restart=True
 
 # Download existing datasets
 python util_scripts.py download_dataset gutenberg_backtranslate_from_txt
@@ -50,14 +51,16 @@ python util_scripts.py download_dataset gutenberg_backtranslate_from_txt
 ### Training Models
 ```bash
 # Train models using TRL wrapper with predefined configurations
-python train_trl.py --config=dolphin --wandb=True
-python train_trl.py --config=creative_writing --notebook_mode=False
+# Available configs: llama, dolphin, codecontests, codecontests_sft, codecontests_cot_sft,
+#   codecontests_cot_dpo, ultrafeedback, gutenberg, grpo_math, connections, txt_bt, writing, writing_dpo
+python trl_wrapper/train_trl.py --config=dolphin --wandb=True
+python trl_wrapper/train_trl.py --config=gutenberg --notebook_mode=False
 ```
 
 ### Evaluation
 ```bash
-# Run evaluations on models
-python evaluate.py --model_name=gpt-4o-mini --eval_task=eq_bench_writing
+# Run evaluations on models (eval_task: eq_bench_writing)
+python evaluate.py --gen_source=gpt-4o-mini --eval_task_name=eq_bench_writing --batch_size=8
 ```
 
 ### Modal (Cloud Computing)
@@ -98,14 +101,16 @@ python util_scripts.py test_openai_api
 ### Key Design Patterns
 
 **Task-Based Generation**: All synthetic data generation follows a common pattern:
-1. Inherit from `BaseTask` in `synthetic_data/tasks/__init__.py`
+1. Inherit from `BaseTask` or `BaseTaskV1` in `synthetic_data/tasks/__init__.py`
 2. Implement required methods: `format_input_conversation()`, `format_output_rows()`, `generate()`
 3. Define dataset formats, columns, and generation parameters
-4. Support for different generation models and autoscaling (see `RoleplayingGame` for advanced example)
+4. Support for different generation models and autoscaling (see `RoleplayingGameMultiStepTask` for advanced example with tool calling)
 
-**Multi-Model Generation**: The generation system supports using different models for different steps of the same task. For example, `RoleplayingGame` uses one model for initial scenario generation and a different (typically faster/cheaper) model for follow-up question generation, with independent autoscaling for each model.
+**Multi-Model Generation**: The generation system supports using different models for different steps of the same task. For example, `RoleplayingGameMultiStepTask` uses separate models for the dungeon master and player roles, with the ability to use different models (like haiku for faster parameter generation) and independent generation wrappers for each role.
 
-**Configuration-Driven Training**: Training configurations are centralized in `CONFIGS` dictionary in `trl_wrapper/wrapper_config.py`, allowing easy experimentation with different model sizes, datasets, and hyperparameters.
+**Native Tool Calling**: The generation wrappers (`OpenAIGenerationWrapper`, `AnthropicGenerationWrapper`) support native tool calling, allowing tasks to define tools and handle tool use/result blocks in conversations. This is demonstrated in the roleplaying task with DM_TOOLS and PLAYER_TOOLS.
+
+**Configuration-Driven Training**: Training configurations are centralized in the `CONFIGS` dictionary in `trl_wrapper/trainer_wrapper.py`, allowing easy experimentation with different model sizes, datasets, and hyperparameters. Each configuration is a `WrapperConfig` instance defined in `trl_wrapper/wrapper_config.py`.
 
 **Modular Data Modules**: Dataset handling is abstracted through data modules in `dataset/` that handle loading, preprocessing, and batching for different data types (conversations, code contests, writing tasks).
 
@@ -138,9 +143,12 @@ python util_scripts.py test_openai_api
 
 ### Key Files to Understand
 
-- `synthetic_data/generation.py`: Generation wrapper system and model configurations
-- `synthetic_data/tasks/__init__.py`: Base task interface that all generation tasks implement
-- `trl_wrapper/trainer_wrapper.py`: Core training orchestration and configuration
-- `generate.py`: Main CLI interface for data generation
-- `train_trl.py`: Main CLI interface for model training
+- `synthetic_data/generation.py`: Generation wrapper system supporting OpenAI, Anthropic, Gemini, and other providers with native tool calling
+- `synthetic_data/tasks/__init__.py`: Base task interface (`BaseTask`, `BaseTaskV1`) that all generation tasks implement
+- `synthetic_data/tasks/roleplaying.py`: Advanced example showing multi-step generation with tool calling
+- `trl_wrapper/trainer_wrapper.py`: Core training orchestration with CONFIGS dictionary and support for SFT, DPO, GRPO, and reward training
+- `trl_wrapper/wrapper_config.py`: Configuration dataclasses (`WrapperConfig`, `DatasetConfig`) and model definitions
+- `generate.py`: Main CLI interface for data generation (orchestrates task execution with throughput monitoring)
+- `trl_wrapper/train_trl.py`: Main CLI interface for model training
 - `evaluate.py`: Main CLI interface for model evaluation
+- `util_scripts.py`: Utility functions for dataset downloads and common operations

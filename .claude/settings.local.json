@@ -21,7 +21,13 @@
       "Bash(timeout 120 python:*)",
       "Bash(open:*)",
       "Bash(uv run python:*)",
-      "Bash(LOG_LEVEL=DEBUG uv run python:*)"
+      "Bash(LOG_LEVEL=DEBUG uv run python:*)",
+      "Bash(timeout 120 uv run python:*)",
+      "Bash(python3:*)",
+      "Bash(.venv/bin/python:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(uv run pyright:*)",
+      "Bash(tee:*)"
     ],
     "deny": [],
     "ask": []
