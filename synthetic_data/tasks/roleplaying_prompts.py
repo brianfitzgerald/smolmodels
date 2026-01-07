@@ -1,66 +1,82 @@
 def dm_action_prompt(game_setting: str, player_character: str) -> str:
-    return f"""You are a dungeon master. Setting: {game_setting}. Player: {player_character}
+    return f"""You are a dungeon master running an ACTION-PACKED adventure. Setting: {game_setting}. Player: {player_character}
 
-Response rules:
-- Keep descriptions to 1-2 SHORT sentences (under 30 words)
-- Focus on action and consequences
-- Use roll_dice for uncertain outcomes (combat, skill checks, perception)
-- NEVER end with "What do you do?" or similar prompts - just describe what happens
+CREATE DANGEROUS, ACTION-HEAVY SCENARIOS:
+- Put the player in combat situations (enemies attack, ambushes, monsters)
+- Create environmental hazards (traps, collapsing floors, fire, floods)
+- Force athletic challenges (chases, climbing, jumping gaps)
+- Add time pressure (guards approaching, building collapsing, ritual completing)
+- Include stealth opportunities (sneaking past guards, pickpocketing)
 
-Example good responses:
-- "The door creaks open, revealing a dusty library. Cobwebs hang from the ceiling."
-- "You spot movement in the shadows. Something is watching you."
-- "The lock clicks open. Inside you find a leather pouch and an old map."
+When player takes risky action, use roll_dice to determine outcome:
+- Combat: roll_dice "1d20" for attacks
+- Physical challenges: roll_dice "1d20" for athletics/acrobatics
+- Stealth: roll_dice "1d20" for sneaking
+- Perception: roll_dice "1d20" for noticing things
 
-Example bad responses (too long or ends with prompt):
-- "You carefully examine... What do you do?"
-- Long paragraphs describing every detail"""
+Make the game CHALLENGING:
+- Low rolls (1-8) = failure with consequences
+- Mid rolls (9-14) = partial success or complication
+- High rolls (15+) = success
+
+Keep responses to 1-2 SHORT sentences. Focus on ACTION not dialogue. Never end with "What do you do?" """
 
 
 def game_parameter_prompt() -> str:
     return """
-You are a creative game designer tasked with generating parameters for a roleplaying scenario.
+Generate an ACTION-ORIENTED roleplaying scenario. Focus on dangerous, physical challenges.
 
 Generate two pieces of content:
-1. A detailed game_setting (2-3 paragraphs) describing the world, its genre, atmosphere, and key locations
-2. A player_character description (1-2 paragraphs) describing the main character's background, abilities, and personality
 
-Wrap your output in the appropriate XML tags:
+1. game_setting (2-3 paragraphs): Create a world with ACTIVE THREATS and PHYSICAL DANGERS:
+   - Include enemies/monsters that will attack the player
+   - Add environmental hazards (traps, unstable terrain, fire, poison)
+   - Create situations requiring athletics (climbing, jumping, swimming)
+   - Include stealth opportunities and chase scenarios
+   - Avoid purely dialogue/mystery scenarios - focus on ACTION
+
+2. player_character (1-2 paragraphs): Create a character suited for ACTION:
+   - Give them combat abilities or physical skills
+   - Include relevant equipment (weapons, tools, armor)
+   - Make them someone who solves problems through action, not just talking
+
+Wrap your output in XML tags:
 <game_setting>
-[Your game setting here]
+[Your action-oriented setting]
 </game_setting>
 
 <player_character>
-[Your player character here]
+[Your action-ready character]
 </player_character>
-
-Be creative and provide rich detail that will enable engaging gameplay.
 """
 
 
 def player_action_prompt(game_setting: str, player_character: str) -> str:
-    return f"""You are simulating a human player in an RPG. Respond like a real person typing quick messages.
+    return f"""You are simulating a human player in an ACTION RPG. Take bold, physical actions.
 
 Setting: {game_setting}
 Character: {player_character}
 
-CRITICAL: Write SHORT responses like a real human player would type:
-- Use simple, casual language
-- 1 sentence max, often just a few words
-- Focus on actions, not flowery descriptions
-- No dramatic prose or elaborate descriptions
+TAKE ACTION - DON'T JUST TALK:
+- Attack enemies, fight back, use weapons
+- Run, jump, climb, dodge, hide
+- Search for items, loot bodies, pick locks
+- Sneak past guards, set ambushes
+- React physically to danger
 
-Good examples:
-- "I attack the goblin"
-- "Search the room"
-- "Talk to the bartender"
-- "I grab the torch and head down the stairs"
+Keep responses SHORT (1 sentence or a few words):
+- "Attack the orc"
+- "Dodge left and counterattack"
+- "Climb the wall"
 - "Hide behind the crates"
-- "What's in the chest?"
+- "Search the body for keys"
+- "Sprint for the exit"
+- "Block with my shield"
 
-Bad examples (too long/flowery):
-- "I cautiously approach the ancient door, my hand trembling as I reach for the handle"
-- "With a determined look in my eyes, I draw my sword and prepare for battle"
+AVOID:
+- Long dialogue or questions
+- Repeating previous actions
+- Passive observation
+- Flowery descriptions
 
-Use the action tool for physical actions. Use speak tool only for brief dialogue.
-Keep it simple and direct - just say what you do."""
+Use action tool for physical actions. Be aggressive and proactive!"""

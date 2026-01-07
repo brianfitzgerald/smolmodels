@@ -178,7 +178,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 max_tokens=1024,
                 tools=DM_TOOLS,
                 tool_use_executor=execute_tool_use_block,
-                tool_choice={"type": "any"},  # Force DM to use tools (roll_dice, speak, etc.)
+                tool_choice={"type": "any"},  # Force DM to use tools
             ),
         )
         # Get the assistant message from the conversation (last message added by generate)
@@ -195,7 +195,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "step_count": episode.step_count,
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
-            "actions": [action.message for action in episode.actions],
+            "actions": [
+                {"role": action.role, "message": action.message}
+                for action in episode.actions
+            ],
             "metadata": episode.metadata,
         }
 
@@ -255,21 +258,24 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     ) -> list[ContentBlock]:
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
-            if block["type"] == "tool_use":
-                block_sanitized = block.copy()
-                del block_sanitized["type"]
-                del block_sanitized["id"]
+            block_type = block.get("type")
+            if block_type == "tool_use":
+                # Extract only name and input for the sanitized output
+                block_sanitized = {
+                    "name": block.get("name"),
+                    "input": block.get("input"),
+                }
                 tool_call_json_str = json.dumps(block_sanitized)
                 text_block: TextBlock = {
                     "type": "text",
                     "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
                 }
                 out_blocks.append(text_block)
-            elif block["type"] == "tool_result":
+            elif block_type == "tool_result":
                 # Convert tool_result to text block for cross-perspective viewing
                 text_block: TextBlock = {
                     "type": "text",
-                    "text": f"<tool_result>{block.get('content', '')}</tool_result>",
+                    "text": block.get("content", ""),
                 }
                 out_blocks.append(text_block)
             else:
@@ -358,7 +364,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 # Player perspective: dungeon_master -> user, player -> assistant
                 role = "user" if action.role == "dungeon_master" else "assistant"
 
-            content = action.message["content"]
+            content = action.message.get("content", [])
 
             # Convert tool_use and tool_result blocks when role is "user"
             # since user messages can't contain tool_use blocks in the Anthropic API
