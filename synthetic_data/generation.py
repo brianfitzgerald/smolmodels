@@ -546,10 +546,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     conversation=conversation, finish_reason=finish_reason
                 )
 
-            # Max iterations reached
-            logger.warning(f"Max tool use iterations ({max_tool_iterations}) reached")
-            return GenerationResult(conversation=conversation, finish_reason="end_turn")
-
         except Exception as e:
             logger.error(f"Error while generating with Anthropic: {e}")
             traceback.print_exc()
