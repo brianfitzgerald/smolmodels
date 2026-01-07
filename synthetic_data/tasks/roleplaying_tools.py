@@ -60,7 +60,7 @@ RANDOM_CHOICE_TOOL: ToolParam = {
 
 SPEAK_TOOL: ToolParam = {
     "name": "speak",
-    "description": "Have a character speak dialogue. Use this for NPC dialogue (as DM) or player character dialogue (as player).",
+    "description": "Have a character speak brief dialogue. Keep messages short - 1 sentence max.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -68,10 +68,13 @@ SPEAK_TOOL: ToolParam = {
                 "type": "string",
                 "description": "Name of the character speaking",
             },
-            "message": {"type": "string", "description": "What the character says"},
+            "message": {
+                "type": "string",
+                "description": "Short dialogue - 1 sentence max. Be direct and natural.",
+            },
             "tone": {
                 "type": "string",
-                "description": "Optional tone or emotion (e.g., 'whispered', 'shouted', 'nervously')",
+                "description": "Optional tone in 1-2 words (e.g., 'whispered', 'angrily')",
             },
         },
         "required": ["character", "message"],
@@ -80,13 +83,13 @@ SPEAK_TOOL: ToolParam = {
 
 ACTION_TOOL: ToolParam = {
     "name": "action",
-    "description": "Perform a general action in the game world. Use this for player actions that interact with the environment or other characters.",
+    "description": "Perform an action. Keep it SHORT - just a few words like a real player would type.",
     "input_schema": {
         "type": "object",
         "properties": {
             "description": {
                 "type": "string",
-                "description": "Description of the action being taken. Keep the description concise and describe in first person, such as 'Walk forward' or 'Look around'",
+                "description": "Brief action in 2-5 words. Examples: 'Search the room', 'Attack the goblin', 'Open the door', 'Hide behind the barrel'",
             },
         },
         "required": ["description"],
@@ -162,25 +165,17 @@ def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
 
 
 def execute_speak(character: str, message: str, tone: str | None = None) -> ToolOutput:
-    """Execute a speak action."""
-    result: ToolOutput = {
-        "character": character,
-        "message": message,
-    }
+    """Execute a speak action. Returns natural language format."""
     if tone:
-        result["tone"] = tone
-    return result
+        return {"text": f'{character} says ({tone}): "{message}"'}
+    return {"text": f'{character} says: "{message}"'}
 
 
 def execute_action(description: str, target: str | None = None) -> ToolOutput:
-    """Execute a player action."""
-    result: ToolOutput = {
-        "description": description,
-        "executed": True,
-    }
+    """Execute a player action. Returns natural language format."""
     if target:
-        result["target"] = target
-    return result
+        return {"text": f"*{description} ({target})*"}
+    return {"text": f"*{description}*"}
 
 
 TOOL_EXECUTORS = {
@@ -250,10 +245,16 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
         # Check if result indicates an error
         is_error = not result.get("success", True) or "error" in result
 
+        # Use natural language format if available, otherwise JSON
+        if "text" in result:
+            content = result["text"]
+        else:
+            content = json.dumps(result, ensure_ascii=False)
+
         return ToolResultBlock(
             type="tool_result",
             tool_use_id=tool_use.get("id", ""),
-            content=json.dumps(result),
+            content=content,
             is_error=is_error,
         )
     except Exception as e:

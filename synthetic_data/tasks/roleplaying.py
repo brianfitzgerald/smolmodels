@@ -144,6 +144,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     max_tokens=1024,
                     tools=DM_TOOLS,
                     tool_use_executor=execute_tool_use_block,
+                    tool_choice={"type": "any"},  # Force DM to use tools (roll_dice, speak, etc.)
                 ),
             )
             # Get the assistant message from the conversation (last message added by generate)
@@ -177,6 +178,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 max_tokens=1024,
                 tools=DM_TOOLS,
                 tool_use_executor=execute_tool_use_block,
+                tool_choice={"type": "any"},  # Force DM to use tools (roll_dice, speak, etc.)
             ),
         )
         # Get the assistant message from the conversation (last message added by generate)

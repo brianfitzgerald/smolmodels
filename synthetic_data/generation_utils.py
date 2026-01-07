@@ -223,6 +223,9 @@ SHAREGPT_TO_OPENAI_ROLE = {
 }
 
 
+ToolChoice = Literal["auto", "any", "none"] | dict[str, str]
+
+
 class GenerationArgs(BaseModel):
     """
     Arguments that can be overridden on a per-generation basis.
@@ -237,6 +240,7 @@ class GenerationArgs(BaseModel):
     thinking_budget: int | None = None
     tools: list[ToolParam] | None = None
     tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
+    tool_choice: Optional[ToolChoice] = None  # "auto", "any", "none", or {"type": "tool", "name": "tool_name"}
 
 
 FinishReason = Literal[

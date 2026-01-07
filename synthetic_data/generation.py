@@ -490,6 +490,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
                 if args.tools:
                     request_kwargs["tools"] = args.tools
+                    # Only set tool_choice on the first iteration - after that let model decide
+                    if args.tool_choice and iteration == 1:
+                        request_kwargs["tool_choice"] = args.tool_choice
 
                 # Log request for debugging
                 logger.debug(
