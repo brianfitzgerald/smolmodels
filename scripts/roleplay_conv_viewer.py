@@ -4,6 +4,7 @@ Interactive viewer for roleplaying game conversation dataset.
 Renders RPGEpisode samples in an HTML interface with navigation.
 """
 
+import ast
 import json
 import tempfile
 import threading
@@ -11,6 +12,7 @@ import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -62,10 +64,73 @@ def format_tool_calls_html(tool_calls: list | None) -> str:
     return "".join(html_parts)
 
 
+def parse_content_blocks(content: object) -> list[dict]:
+    """Parse content into a list of content block dicts, handling various formats."""
+    if content is None:
+        return []
+
+    # Handle numpy arrays
+    if isinstance(content, np.ndarray):
+        content = content.tolist()
+
+    # Handle stringified lists/dicts
+    if isinstance(content, str):
+        content = content.strip()
+        if content.startswith("[") or content.startswith("{"):
+            try:
+                content = ast.literal_eval(content)
+            except (ValueError, SyntaxError):
+                # Not a valid literal, treat as plain string
+                return [{"type": "text", "text": content}]
+        else:
+            return [{"type": "text", "text": content}]
+
+    # Now content should be a list
+    if isinstance(content, list):
+        return content
+    if isinstance(content, dict):
+        return [content]
+
+    return [{"type": "text", "text": str(content)}]
+
+
+def extract_text_from_content(content: object) -> str:
+    """Extract text from content which can be a string, list, numpy array, or content blocks."""
+    blocks = parse_content_blocks(content)
+
+    text_parts = []
+    for block in blocks:
+        if isinstance(block, dict):
+            block_type = block.get("type", "")
+            if block_type == "text":
+                text_parts.append(block.get("text", ""))
+            elif block_type == "tool_use":
+                # Format tool use as readable text
+                name = block.get("name", "unknown")
+                input_data = block.get("input", {})
+                text_parts.append(f"[Tool: {name}] {json.dumps(input_data)}")
+            elif block_type == "tool_result":
+                result_content = block.get("content", "")
+                text_parts.append(f"[Result: {result_content}]")
+            else:
+                # Unknown block type, try to extract any text
+                if "text" in block:
+                    text_parts.append(block["text"])
+                elif "content" in block:
+                    text_parts.append(str(block["content"]))
+        elif isinstance(block, str):
+            text_parts.append(block)
+
+    return "\n".join(text_parts)
+
+
 def format_message_html(message: dict) -> str:
     """Format a single message as HTML."""
     content = message.get("content", "")
     tool_calls = message.get("tool_calls")
+
+    # Extract text from content (handles strings, lists, numpy arrays, stringified lists)
+    content = extract_text_from_content(content)
 
     # Escape HTML in content
     if content:
@@ -138,8 +203,18 @@ def episode_to_html(episode: dict, index: int) -> str:
     # Format actions
     actions_html = []
     for i, action in enumerate(actions):
-        role = action.get("role", "unknown")
-        message = action.get("message", {})
+        # Handle both old format (action IS the message) and new format (action has role + message)
+        if "message" in action and isinstance(action.get("message"), dict):
+            # New format: {"role": "player"|"dungeon_master", "message": {...}}
+            role = action.get("role", "unknown")
+            message = action.get("message", {})
+        else:
+            # Old format: action is the message directly
+            # Infer role: DM goes first, then alternating player/DM
+            # Pattern: DM, player, DM, player, DM, ...
+            # Turn 0 = DM, Turn 1 = player, Turn 2 = DM, etc.
+            role = "dungeon_master" if i % 2 == 0 else "player"
+            message = action
 
         role_class = "player-message" if role == "player" else "dm-message"
         badge_class = "player-badge" if role == "player" else "dm-badge"
@@ -638,7 +713,7 @@ def main():
     parser = argparse.ArgumentParser(description="View roleplaying game dataset")
     parser.add_argument(
         "--path",
-        default="dataset_files/roleplaying_game_multi_step.parquet",
+        default="dataset_files/roleplaying_game_multi_step_dev.parquet",
         help="Path to the parquet file",
     )
     parser.add_argument(

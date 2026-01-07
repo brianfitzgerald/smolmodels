@@ -27,7 +27,8 @@
       "Bash(.venv/bin/python:*)",
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(uv run pyright:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(timeout 5 python:*)"
     ],
     "deny": [],
     "ask": []
