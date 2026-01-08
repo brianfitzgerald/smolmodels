@@ -15,7 +15,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from synthetic_data.tasks.roleplaying_tools import format_tool_use_as_nl
+from synthetic_data.tasks.roleplaying_tools import (
+    format_tool_result_as_nl,
+    format_tool_use_as_nl,
+)
 
 
 def load_dataset(path: str) -> list[dict]:
@@ -151,11 +154,16 @@ def parse_content_blocks(content: object) -> list[dict]:
     if isinstance(content, str):
         content = content.strip()
         if content.startswith("[") or content.startswith("{"):
+            # Try json.loads first (handles escaped quotes properly)
             try:
-                content = ast.literal_eval(content)
-            except (ValueError, SyntaxError):
-                # Not a valid literal, treat as plain string
-                return [{"type": "text", "text": content}]
+                content = json.loads(content)
+            except json.JSONDecodeError:
+                # Fall back to ast.literal_eval for Python literals
+                try:
+                    content = ast.literal_eval(content)
+                except (ValueError, SyntaxError):
+                    # Not a valid literal, treat as plain string
+                    return [{"type": "text", "text": content}]
         else:
             return [{"type": "text", "text": content}]
 
@@ -241,9 +249,10 @@ _tool_result_counter = 0
 
 
 def format_tool_result_html(block: dict) -> str:
-    """Format a tool_result content block as styled HTML with syntax highlighting."""
+    """Format a tool_result content block as styled HTML with NL/JSON toggle."""
     global _tool_result_counter
     tool_use_id = block.get("tool_use_id", "")
+    tool_name = block.get("name", "")  # Get tool name from block
     result_content = block.get("content", "")
     is_error = block.get("is_error", False)
 
@@ -254,7 +263,7 @@ def format_tool_result_html(block: dict) -> str:
     is_json = False
     result_obj = None
 
-    # Try to parse and pretty-print if it's JSON
+    # Try to parse JSON content
     try:
         if isinstance(result_content, str):
             result_content = result_content.strip()
@@ -272,33 +281,42 @@ def format_tool_result_html(block: dict) -> str:
     status_icon = "❌" if is_error else "✅"
     status_text = "Error" if is_error else "Result"
 
-    if is_json and result_obj is not None:
-        # JSON content - show with syntax highlighting and toggle for raw/formatted
+    if is_json and result_obj is not None and isinstance(result_obj, dict):
+        # Use tool name from block to generate NL output
+        nl_output = format_tool_result_as_nl(tool_name, result_obj)
+
+        # Create highlighted JSON view
         result_formatted = json.dumps(result_obj, indent=2)
         result_highlighted = highlight_json(result_formatted)
 
-        # Also create a compact single-line version for "Raw" view
-        result_raw = json.dumps(result_obj, ensure_ascii=False)
-        result_raw_escaped = (
-            result_raw.replace("&", "&amp;")
+        # Escape NL output for HTML
+        nl_output_escaped = (
+            nl_output.replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
+            .replace("\n", "<br>")
         )
 
         toggle_html = f"""
         <div class="view-toggle">
-            <button class="toggle-btn active" onclick="toggleToolView('{block_id}', 'nl')">Formatted</button>
-            <button class="toggle-btn" onclick="toggleToolView('{block_id}', 'json')">Raw</button>
+            <button class="toggle-btn active" onclick="toggleToolView('{block_id}', 'nl')">Natural Language</button>
+            <button class="toggle-btn" onclick="toggleToolView('{block_id}', 'json')">JSON</button>
         </div>
         """
         content_html = f"""
-        <div class="tool-result-formatted" id="{block_id}-nl">
+        <div class="nl-output-view" id="{block_id}-nl">
+            <div class="nl-output-content">{nl_output_escaped}</div>
+        </div>
+        <div class="json-view hidden" id="{block_id}-json">
             <pre class="tool-result-content">{result_highlighted}</pre>
         </div>
-        <div class="tool-result-raw hidden" id="{block_id}-json">
-            <pre class="tool-result-content">{result_raw_escaped}</pre>
-        </div>
         """
+    elif is_json and result_obj is not None:
+        # JSON array or non-dict - just show formatted JSON
+        result_formatted = json.dumps(result_obj, indent=2)
+        result_highlighted = highlight_json(result_formatted)
+        toggle_html = ""
+        content_html = f'<pre class="tool-result-content">{result_highlighted}</pre>'
     else:
         # Plain text result - escape HTML and display nicely
         if isinstance(result_content, str):

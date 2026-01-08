@@ -380,6 +380,35 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
             self.extra_body["provider"] = {"order": args.providers}
 
 
+def _sanitize_conversation_for_anthropic(conversation: Conversation) -> Conversation:
+    """
+    Sanitize a conversation for the Anthropic API by removing extra fields
+    from tool_result blocks that Anthropic doesn't accept (e.g., 'name' field).
+    """
+    sanitized: Conversation = []
+    for message in conversation:
+        content = message.get("content", [])
+        sanitized_content: list[ContentBlock] = []
+
+        for block in content:
+            if block.get("type") == "tool_result":
+                # Only include fields that Anthropic accepts
+                sanitized_block: ToolResultBlock = {
+                    "type": "tool_result",
+                    "tool_use_id": block.get("tool_use_id", ""),
+                    "content": block.get("content", ""),
+                }
+                if block.get("is_error"):
+                    sanitized_block["is_error"] = block["is_error"]
+                sanitized_content.append(sanitized_block)
+            else:
+                sanitized_content.append(block)
+
+        sanitized.append({"role": message["role"], "content": sanitized_content})
+
+    return sanitized
+
+
 class AnthropicGenerationWrapper(GenerationWrapper):
     provider_name = "anthropic"
 
@@ -425,10 +454,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 iteration += 1
 
                 # Build API request kwargs
+                # Sanitize conversation to remove extra fields (like 'name' in tool_result)
+                # that the Anthropic API doesn't accept
+                sanitized_conversation = _sanitize_conversation_for_anthropic(conversation)
                 request_kwargs: dict = {
                     "model": self.model_name,
                     "max_tokens": args.max_tokens,
-                    "messages": conversation,
+                    "messages": sanitized_conversation,
                 }
 
                 if system_content:

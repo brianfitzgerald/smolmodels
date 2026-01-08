@@ -34,6 +34,7 @@ class ToolUseBlock(TypedDict):
 class ToolResultBlock(TypedDict, total=False):
     tool_use_id: str
     type: Literal["tool_result"]
+    name: str  # Name of the tool that was called
     content: str
     is_error: bool
 

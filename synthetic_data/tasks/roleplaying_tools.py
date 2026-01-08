@@ -312,6 +312,7 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
         return ToolResultBlock(
             type="tool_result",
             tool_use_id=tool_use.get("id", ""),
+            name=tool_name,
             content=f"Unknown tool: {tool_name}",
             is_error=True,
         )
@@ -328,12 +329,13 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
         # Check if result indicates an error
         is_error = not result.get("success", True) or "error" in result
 
-        # Format result as natural language
-        content = format_tool_result_as_nl(tool_name, result)
+        # Store the raw JSON result - the viewer will format as NL when displaying
+        content = json.dumps(result, ensure_ascii=False)
 
         return ToolResultBlock(
             type="tool_result",
             tool_use_id=tool_use.get("id", ""),
+            name=tool_name,
             content=content,
             is_error=is_error,
         )
@@ -341,6 +343,7 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
         return ToolResultBlock(
             type="tool_result",
             tool_use_id=tool_use.get("id", ""),
+            name=tool_name,
             content=str(e),
             is_error=True,
         )

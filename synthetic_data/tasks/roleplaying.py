@@ -20,6 +20,7 @@ from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
     PLAYER_TOOLS,
     execute_tool_use_block,
+    format_tool_result_as_nl,
     format_tool_use_as_nl,
 )
 from synthetic_data.utils import (
@@ -60,7 +61,6 @@ class Action:
 
 @dataclass
 class RPGEpisode:
-    step_count: int = 0
     game_setting: str | None = None
     player_character: str | None = None
     actions: list[Action] = field(default_factory=list)
@@ -83,11 +83,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     def __init__(
         self,
         run_mode: RunMode,
-        max_user_responses: int = 10,
+        max_steps: int = 20,
         num_episodes: int = 1000,
     ):
         super().__init__(run_mode)
-        self.max_user_responses = max_user_responses
+        self.max_steps = max_steps
         self.num_episodes = num_episodes
 
         self._add_generation_wrapper("dungeon_master", "claude-4-5-sonnet")
@@ -124,7 +124,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "adventure_parameters_model": self.generation_wrappers[
                 "adventure_parameters"
             ].provider_name,
-            "max_user_responses": self.max_user_responses,
+            "max_user_responses": self.max_steps,
             "seed": seed,
         }
         game_setting, player_character = await self._generate_setting_and_characters(ep)
@@ -171,7 +171,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
         # On the first turn, DM goes first to set the scene
         # After that, player goes first, then DM responds
-        if episode.step_count == 0:
+        if len(episode.actions) == 0:
             # Generate dungeon master action to set the scene
             conversation = self._format_conversation(episode, "dungeon_master")
             initial_length = len(conversation)
@@ -192,9 +192,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             )
             episode.actions.extend(new_actions)
 
-            episode.step_count += 1
-            finished = episode.step_count >= self.max_user_responses
-            return episode, finished
+            return episode, False
 
         # Generate player action
         conversation = self._format_conversation(episode, "player")
@@ -232,8 +230,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         episode.actions.extend(new_actions)
 
-        episode.step_count += 1
-        finished = episode.step_count >= self.max_user_responses
+        finished = len(episode.actions) >= self.max_steps
         return episode, finished
 
     def format_episode(self, episode: RPGEpisode) -> dict:
@@ -254,7 +251,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             serialized_actions.append({"role": action.role, "message": message_copy})
 
         return {
-            "step_count": episode.step_count,
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
             "actions": serialized_actions,
@@ -329,10 +325,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 }
                 out_blocks.append(text_block)
             elif block_type == "tool_result":
-                # Convert tool_result to text block for cross-perspective viewing
+                # Convert tool_result to NL text for cross-perspective viewing
+                tool_name = block.get("name", "")
+                content = block.get("content", "")
+                # Try to parse JSON and format as NL
+                try:
+                    if isinstance(content, str) and content.strip().startswith("{"):
+                        result_obj = json.loads(content)
+                        nl_text = format_tool_result_as_nl(tool_name, result_obj)
+                    else:
+                        # Already NL or plain text
+                        nl_text = content
+                except (json.JSONDecodeError, TypeError):
+                    nl_text = content
                 text_block: TextBlock = {
                     "type": "text",
-                    "text": block.get("content", ""),
+                    "text": nl_text,
                 }
                 out_blocks.append(text_block)
             else:
