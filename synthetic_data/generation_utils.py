@@ -240,7 +240,9 @@ class GenerationArgs(BaseModel):
     thinking_budget: int | None = None
     tools: list[ToolParam] | None = None
     tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
-    tool_choice: Optional[ToolChoice] = None  # "auto", "any", "none", or {"type": "tool", "name": "tool_name"}
+    tool_choice: Optional[ToolChoice] = (
+        None  # "auto", "any", "none", or {"type": "tool", "name": "tool_name"}
+    )
 
 
 FinishReason = Literal[

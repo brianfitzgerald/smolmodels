@@ -533,15 +533,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                         continue
 
                 # Map Anthropic stop_reason to our FinishReason type
-                finish_reason_map: dict[str, FinishReason] = {
-                    "end_turn": "end_turn",
-                    "max_tokens": "max_tokens",
-                    "stop_sequence": "stop_sequence",
-                    "tool_use": "tool_use",
-                }
-                finish_reason: FinishReason = finish_reason_map.get(
-                    result.stop_reason or "end_turn", "end_turn"
-                )
+                finish_reason: FinishReason = result.stop_reason or "end_turn"
                 return GenerationResult(
                     conversation=conversation, finish_reason=finish_reason
                 )

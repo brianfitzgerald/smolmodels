@@ -1,4 +1,3 @@
-import json
 import random
 from dataclasses import dataclass, field
 from typing import Literal
@@ -20,6 +19,7 @@ from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
     PLAYER_TOOLS,
     execute_tool_use_block,
+    format_tool_use_as_nl,
 )
 from synthetic_data.utils import (
     ContentBlock,
@@ -52,7 +52,8 @@ RolePlayingRole = Literal["player", "dungeon_master"]
 
 @dataclass
 class Action:
-    role: Literal["player", "dungeon_master"]
+    # tool_result represents the result of a tool call (dice roll result, etc.)
+    role: Literal["player", "dungeon_master", "tool_result"]
     message: Message
 
 
@@ -132,24 +133,63 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ep.player_character = player_character
         return ep
 
+    def _extract_new_messages(
+        self,
+        conversation: Conversation,
+        initial_length: int,
+        role: RolePlayingRole,
+    ) -> list[Action]:
+        """
+        Extract all new messages added during generation, preserving tool_use blocks.
+
+        Returns a list of Actions for:
+        - Assistant messages (may contain tool_use blocks like dice rolls)
+        - User messages containing tool_result blocks
+        """
+        actions: list[Action] = []
+        new_messages = conversation[initial_length:]
+
+        for msg in new_messages:
+            msg_role = msg.get("role")
+            content = msg.get("content", [])
+
+            if msg_role == "assistant":
+                # Save all assistant messages (includes tool_use and text blocks)
+                actions.append(Action(role=role, message=msg))
+            elif msg_role == "user":
+                # Check if this is a tool_result message (from tool execution)
+                has_tool_result = any(
+                    block.get("type") == "tool_result" for block in content
+                )
+                if has_tool_result:
+                    # Save tool results as part of the same role's turn
+                    actions.append(Action(role="tool_result", message=msg))
+
+        return actions
+
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
         # On the first turn, DM goes first to set the scene
         # After that, player goes first, then DM responds
         if episode.step_count == 0:
             # Generate dungeon master action to set the scene
             conversation = self._format_conversation(episode, "dungeon_master")
+            initial_length = len(conversation)
             result = await self.generation_wrappers["dungeon_master"].generate(
                 conversation,
                 args=GenerationArgs(
                     max_tokens=1024,
                     tools=DM_TOOLS,
                     tool_use_executor=execute_tool_use_block,
-                    tool_choice={"type": "any"},  # Force DM to use tools (roll_dice, speak, etc.)
+                    tool_choice={
+                        "type": "any"
+                    },  # Force DM to use tools (roll_dice, speak, etc.)
                 ),
             )
-            # Get the assistant message from the conversation (last message added by generate)
-            dm_message = result.conversation[-1]
-            episode.actions.append(Action(role="dungeon_master", message=dm_message))
+            # Extract all new messages (tool_use, tool_result, and final text)
+            new_actions = self._extract_new_messages(
+                result.conversation, initial_length, "dungeon_master"
+            )
+            episode.actions.extend(new_actions)
 
             episode.step_count += 1
             finished = episode.step_count >= self.max_user_responses
@@ -157,6 +197,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
         # Generate player action
         conversation = self._format_conversation(episode, "player")
+        initial_length = len(conversation)
 
         result = await self.generation_wrappers["player"].generate(
             conversation,
@@ -166,12 +207,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tool_use_executor=execute_tool_use_block,
             ),
         )
-        # Get the assistant message from the conversation (last message added by generate)
-        assistant_message = result.conversation[-1]
-        episode.actions.append(Action(role="player", message=assistant_message))
+        # Extract all new messages from player generation
+        new_actions = self._extract_new_messages(
+            result.conversation, initial_length, "player"
+        )
+        episode.actions.extend(new_actions)
 
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
+        initial_length = len(conversation)
         result = await self.generation_wrappers["dungeon_master"].generate(
             conversation,
             args=GenerationArgs(
@@ -181,9 +225,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tool_choice={"type": "any"},  # Force DM to use tools
             ),
         )
-        # Get the assistant message from the conversation (last message added by generate)
-        dm_message = result.conversation[-1]
-        episode.actions.append(Action(role="dungeon_master", message=dm_message))
+        # Extract all new messages from DM generation
+        new_actions = self._extract_new_messages(
+            result.conversation, initial_length, "dungeon_master"
+        )
+        episode.actions.extend(new_actions)
 
         episode.step_count += 1
         finished = episode.step_count >= self.max_user_responses
@@ -260,15 +306,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         for block in content_blocks:
             block_type = block.get("type")
             if block_type == "tool_use":
-                # Extract only name and input for the sanitized output
-                block_sanitized = {
-                    "name": block.get("name"),
-                    "input": block.get("input"),
-                }
-                tool_call_json_str = json.dumps(block_sanitized)
+                # Format tool_use as natural language for user turns
+                tool_name = block.get("name", "")
+                tool_input = block.get("input", {})
+                nl_text = format_tool_use_as_nl(tool_name, tool_input)
                 text_block: TextBlock = {
                     "type": "text",
-                    "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
+                    "text": nl_text,
                 }
                 out_blocks.append(text_block)
             elif block_type == "tool_result":
@@ -357,6 +401,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             conversation.append({"role": "user", "content": [content_block]})
 
         for action in episode.actions:
+            # Skip tool_result actions when formatting conversation
+            # Tool results are intermediate messages that were processed during generation
+            # They're saved in the episode for the output dataset, but shouldn't be
+            # included when constructing the conversation for the next API call
+            if action.role == "tool_result":
+                continue
+
             if generating_role == "dungeon_master":
                 # DM perspective: player -> user, dm -> assistant
                 role = "user" if action.role == "player" else "assistant"
@@ -366,18 +417,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
             content = action.message.get("content", [])
 
-            # Convert tool_use and tool_result blocks when role is "user"
-            # since user messages can't contain tool_use blocks in the Anthropic API
-            if role == "user":
-                content = self._convert_tool_calls_to_text_blocks(content)
-            else:
-                # For assistant messages, filter out tool_result blocks
-                # (they can only be in user messages per Anthropic API)
-                content = [
-                    block for block in content if block.get("type") != "tool_result"
-                ]
+            # Convert tool_use/tool_result blocks to text for ALL messages
+            # This avoids API errors about tool_use requiring matching tool_result
+            # The raw tool calls are still preserved in the episode.actions for the output dataset
+            content = self._convert_tool_calls_to_text_blocks(content)
 
-            # Skip messages with empty content (except final assistant message)
+            # Skip messages with empty content
             if not content:
                 continue
 

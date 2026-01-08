@@ -6,6 +6,7 @@ Supports both Dungeon Master and Player roles with native API tool calling.
 import json
 import random
 import re
+from typing import Any
 
 from openai.types.chat.chat_completion_message_tool_call import (
     ChatCompletionMessageToolCall,
@@ -132,11 +133,20 @@ def execute_roll_dice(notation: str, reason: str) -> dict:
         return {
             "error": f"Invalid dice notation: {notation}",
             "success": False,
+            "nl_output": f"*Tries to roll {notation} for {reason} but the notation is invalid*",
         }
 
     num_dice, num_sides, modifier = parsed
     rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
     total = sum(rolls) + modifier
+
+    # Format natural language output
+    rolls_str = ", ".join(str(r) for r in rolls)
+    if modifier != 0:
+        modifier_str = f" {'+' if modifier > 0 else ''}{modifier}"
+        nl_output = f"*Rolls {notation} for {reason}: [{rolls_str}]{modifier_str} = {total}*"
+    else:
+        nl_output = f"*Rolls {notation} for {reason}: [{rolls_str}] = {total}*"
 
     return {
         "notation": notation,
@@ -144,6 +154,7 @@ def execute_roll_dice(notation: str, reason: str) -> dict:
         "rolls": rolls,
         "modifier": modifier,
         "total": total,
+        "nl_output": nl_output,
     }
 
 
@@ -153,6 +164,7 @@ def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
         return {
             "error": "No options provided",
             "success": False,
+            "nl_output": f"*Tries to make a random choice for {reason} but no options were provided*",
         }
 
     chosen = random.choice(options)
@@ -161,21 +173,26 @@ def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
         "options": options,
         "chosen": chosen,
         "index": options.index(chosen),
+        "nl_output": f"*Randomly determines {reason}: {chosen}*",
     }
 
 
 def execute_speak(character: str, message: str, tone: str | None = None) -> ToolOutput:
     """Execute a speak action. Returns natural language format."""
     if tone:
-        return {"text": f'{character} says ({tone}): "{message}"'}
-    return {"text": f'{character} says: "{message}"'}
+        nl_output = f'{character} says ({tone}): "{message}"'
+    else:
+        nl_output = f'{character} says: "{message}"'
+    return {"text": nl_output, "nl_output": nl_output}
 
 
 def execute_action(description: str, target: str | None = None) -> ToolOutput:
     """Execute a player action. Returns natural language format."""
     if target:
-        return {"text": f"*{description} ({target})*"}
-    return {"text": f"*{description}*"}
+        nl_output = f"*{description} ({target})*"
+    else:
+        nl_output = f"*{description}*"
+    return {"text": nl_output, "nl_output": nl_output}
 
 
 TOOL_EXECUTORS = {
@@ -188,6 +205,38 @@ TOOL_EXECUTORS = {
     ),
     "action": lambda args: execute_action(args["description"], args.get("target")),
 }
+
+
+def format_tool_use_as_nl(tool_name: str, tool_input: Any) -> str:
+    """
+    Format a tool_use block (the request) as natural language.
+    This is used when converting assistant tool calls to user-facing text.
+    """
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    if tool_name == "action":
+        description = tool_input.get("description", "")
+        target = tool_input.get("target")
+        if target:
+            return f"*{description} ({target})*"
+        return f"*{description}*"
+    elif tool_name == "speak":
+        character = tool_input.get("character", "")
+        message = tool_input.get("message", "")
+        tone = tool_input.get("tone")
+        if tone:
+            return f'{character} says ({tone}): "{message}"'
+        return f'{character} says: "{message}"'
+    elif tool_name == "roll_dice":
+        notation = tool_input.get("notation", "")
+        reason = tool_input.get("reason", "")
+        return f"*Rolls {notation} for {reason}*"
+    elif tool_name == "random_choice":
+        reason = tool_input.get("reason", "")
+        return f"*Makes a random choice for {reason}*"
+    else:
+        # Fallback to JSON for unknown tools
+        return json.dumps({"name": tool_name, "input": tool_input})
 
 
 def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolOutput:
