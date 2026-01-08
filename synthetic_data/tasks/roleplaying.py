@@ -1,3 +1,4 @@
+import json
 import random
 from dataclasses import dataclass, field
 from typing import Literal
@@ -236,15 +237,27 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return episode, finished
 
     def format_episode(self, episode: RPGEpisode) -> dict:
-        """Convert a finished RPGEpisode to a dictionary for storage."""
+        """Convert a finished RPGEpisode to a dictionary for storage.
+
+        Note: We serialize the message content to JSON strings to avoid schema
+        mismatches in parquet - different tools have different input schemas
+        (e.g., action has 'description', roll_dice has 'notation' and 'reason').
+        """
+        serialized_actions = []
+
+        for action in episode.actions:
+            # Serialize content blocks to JSON string to avoid schema issues
+            message_copy = {
+                "role": action.message.get("role"),
+                "content": json.dumps(action.message.get("content", [])),
+            }
+            serialized_actions.append({"role": action.role, "message": message_copy})
+
         return {
             "step_count": episode.step_count,
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
-            "actions": [
-                {"role": action.role, "message": action.message}
-                for action in episode.actions
-            ],
+            "actions": serialized_actions,
             "metadata": episode.metadata,
         }
 

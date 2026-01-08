@@ -14,7 +14,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
 
 from synthetic_data.utils import ToolParam, ToolResultBlock, ToolUseBlock
 
-ToolOutput = dict[str, str | int | list[str] | bool]
+ToolOutput = dict[str, str | int | list[str] | bool | None]
 
 # Dice roll pattern: matches "1d20", "2d6+3", "d20", "3d8-2", etc.
 DICE_PATTERN = re.compile(r"^(\d*)d(\d+)([+-]\d+)?$", re.IGNORECASE)
@@ -133,20 +133,11 @@ def execute_roll_dice(notation: str, reason: str) -> dict:
         return {
             "error": f"Invalid dice notation: {notation}",
             "success": False,
-            "nl_output": f"*Tries to roll {notation} for {reason} but the notation is invalid*",
         }
 
     num_dice, num_sides, modifier = parsed
     rolls = [random.randint(1, num_sides) for _ in range(num_dice)]
     total = sum(rolls) + modifier
-
-    # Format natural language output
-    rolls_str = ", ".join(str(r) for r in rolls)
-    if modifier != 0:
-        modifier_str = f" {'+' if modifier > 0 else ''}{modifier}"
-        nl_output = f"*Rolls {notation} for {reason}: [{rolls_str}]{modifier_str} = {total}*"
-    else:
-        nl_output = f"*Rolls {notation} for {reason}: [{rolls_str}] = {total}*"
 
     return {
         "notation": notation,
@@ -154,7 +145,6 @@ def execute_roll_dice(notation: str, reason: str) -> dict:
         "rolls": rolls,
         "modifier": modifier,
         "total": total,
-        "nl_output": nl_output,
     }
 
 
@@ -164,7 +154,6 @@ def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
         return {
             "error": "No options provided",
             "success": False,
-            "nl_output": f"*Tries to make a random choice for {reason} but no options were provided*",
         }
 
     chosen = random.choice(options)
@@ -173,26 +162,24 @@ def execute_random_choice(options: list[str], reason: str) -> ToolOutput:
         "options": options,
         "chosen": chosen,
         "index": options.index(chosen),
-        "nl_output": f"*Randomly determines {reason}: {chosen}*",
     }
 
 
 def execute_speak(character: str, message: str, tone: str | None = None) -> ToolOutput:
-    """Execute a speak action. Returns natural language format."""
-    if tone:
-        nl_output = f'{character} says ({tone}): "{message}"'
-    else:
-        nl_output = f'{character} says: "{message}"'
-    return {"text": nl_output, "nl_output": nl_output}
+    """Execute a speak action. Returns the input parameters for NL formatting."""
+    return {
+        "character": character,
+        "message": message,
+        "tone": tone,
+    }
 
 
 def execute_action(description: str, target: str | None = None) -> ToolOutput:
-    """Execute a player action. Returns natural language format."""
-    if target:
-        nl_output = f"*{description} ({target})*"
-    else:
-        nl_output = f"*{description}*"
-    return {"text": nl_output, "nl_output": nl_output}
+    """Execute a player action. Returns the input parameters for NL formatting."""
+    return {
+        "description": description,
+        "target": target,
+    }
 
 
 TOOL_EXECUTORS = {
@@ -237,6 +224,53 @@ def format_tool_use_as_nl(tool_name: str, tool_input: Any) -> str:
     else:
         # Fallback to JSON for unknown tools
         return json.dumps({"name": tool_name, "input": tool_input})
+
+
+def format_tool_result_as_nl(tool_name: str, result: ToolOutput) -> str:
+    """
+    Format the result of a tool execution as natural language.
+    This is used for displaying tool results in a human-readable way.
+    """
+    if "error" in result:
+        return f"*Error: {result['error']}*"
+
+    if tool_name == "roll_dice":
+        notation = result.get("notation", "")
+        reason = result.get("reason", "")
+        rolls = result.get("rolls", [])
+        modifier = result.get("modifier", 0)
+        total = result.get("total", 0)
+        rolls_str = (
+            ", ".join(str(r) for r in rolls) if isinstance(rolls, list) else str(rolls)
+        )
+        if modifier is not None and isinstance(modifier, int) and modifier != 0:
+            modifier_str = f" {'+' if modifier > 0 else ''}{modifier}"
+            return f"*Rolls {notation} for {reason}: [{rolls_str}]{modifier_str} = {total}*"
+        return f"*Rolls {notation} for {reason}: [{rolls_str}] = {total}*"
+
+    elif tool_name == "random_choice":
+        reason = result.get("reason", "")
+        chosen = result.get("chosen", "")
+        return f"*Randomly determines {reason}: {chosen}*"
+
+    elif tool_name == "speak":
+        character = result.get("character", "")
+        message = result.get("message", "")
+        tone = result.get("tone")
+        if tone:
+            return f'{character} says ({tone}): "{message}"'
+        return f'{character} says: "{message}"'
+
+    elif tool_name == "action":
+        description = result.get("description", "")
+        target = result.get("target")
+        if target:
+            return f"*{description} ({target})*"
+        return f"*{description}*"
+
+    else:
+        # Fallback to JSON for unknown tools
+        return json.dumps(result, ensure_ascii=False)
 
 
 def execute_tool_call(tool_call: ChatCompletionMessageToolCall) -> ToolOutput:
@@ -294,11 +328,8 @@ def execute_tool_use_block(tool_use: ToolUseBlock) -> ToolResultBlock:
         # Check if result indicates an error
         is_error = not result.get("success", True) or "error" in result
 
-        # Use natural language format if available, otherwise JSON
-        if "text" in result:
-            content = result["text"]
-        else:
-            content = json.dumps(result, ensure_ascii=False)
+        # Format result as natural language
+        content = format_tool_result_as_nl(tool_name, result)
 
         return ToolResultBlock(
             type="tool_result",

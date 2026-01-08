@@ -24,14 +24,14 @@
                 "--task_name",
                 "roleplaying_game",
                 "--batch_size",
-                "1"
+                "4"
             ],
         },
         {
             "name": "Viewer - RPG",
             "type": "debugpy",
             "request": "launch",
-            "program": "scripts/roleplay_conv_viewer.py",
+            "program": "roleplay_conv_viewer.py",
         },
         {
             "name": "Generate - Gutenberg NCP",
