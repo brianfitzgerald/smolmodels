@@ -28,7 +28,8 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(uv run pyright:*)",
       "Bash(tee:*)",
-      "Bash(timeout 5 python:*)"
+      "Bash(timeout 5 python:*)",
+      "Bash(uv run pytest:*)"
     ],
     "deny": [],
     "ask": []

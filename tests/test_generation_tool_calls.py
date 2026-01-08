@@ -1,11 +1,15 @@
 """Integration tests for generation wrappers with tool call processing."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from synthetic_data.generation import OpenAIGenerationWrapper, AnthropicGenerationWrapper
+import pytest
+
+from synthetic_data.generation import (
+    AnthropicGenerationWrapper,
+    OpenAIGenerationWrapper,
+)
 from synthetic_data.generation_utils import GenerationArgs, GenWrapperArgs
 from synthetic_data.utils import (
     Conversation,
@@ -146,7 +150,10 @@ def test_openai_wrapper_executes_tool_and_continues(mock_openai_env):
         )
 
         conversation: Conversation = [
-            {"role": "user", "content": [{"type": "text", "text": "What's the weather?"}]}
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "What's the weather?"}],
+            }
         ]
 
         tools = [
@@ -160,10 +167,12 @@ def test_openai_wrapper_executes_tool_and_continues(mock_openai_env):
             }
         ]
 
-        result = run_async(wrapper.generate(
-            conversation,
-            GenerationArgs(tools=tools, tool_use_executor=tool_executor),
-        ))
+        result = run_async(
+            wrapper.generate(
+                conversation,
+                GenerationArgs(tools=tools, tool_use_executor=tool_executor),
+            )
+        )
 
         # Verify tool executor was called
         assert len(tool_executor.calls) == 1
@@ -171,7 +180,9 @@ def test_openai_wrapper_executes_tool_and_continues(mock_openai_env):
         assert tool_executor.calls[0]["id"] == "call_123"
 
         # Verify conversation structure
-        assert len(result.conversation) == 4  # user, assistant+tool_use, user+tool_result, assistant
+        assert (
+            len(result.conversation) == 4
+        )  # user, assistant+tool_use, user+tool_result, assistant
         assert result.conversation[0].get("role") == "user"
         assert result.conversation[1].get("role") == "assistant"
         assert result.conversation[2].get("role") == "user"
@@ -222,13 +233,21 @@ def test_openai_wrapper_handles_tool_executor_error(mock_openai_env):
             {"role": "user", "content": [{"type": "text", "text": "Run the tool"}]}
         ]
 
-        result = run_async(wrapper.generate(
-            conversation,
-            GenerationArgs(
-                tools=[{"name": "broken_tool", "description": "A broken tool", "input_schema": {}}],
-                tool_use_executor=failing_executor,
-            ),
-        ))
+        result = run_async(
+            wrapper.generate(
+                conversation,
+                GenerationArgs(
+                    tools=[
+                        {
+                            "name": "broken_tool",
+                            "description": "A broken tool",
+                            "input_schema": {},
+                        }
+                    ],
+                    tool_use_executor=failing_executor,
+                ),
+            )
+        )
 
         # Verify error was captured in tool result
         tool_result_msg = result.conversation[2]
@@ -276,10 +295,12 @@ def test_anthropic_wrapper_executes_tool_and_continues(mock_anthropic_env):
             }
         ]
 
-        result = run_async(wrapper.generate(
-            conversation,
-            GenerationArgs(tools=tools, tool_use_executor=tool_executor),
-        ))
+        result = run_async(
+            wrapper.generate(
+                conversation,
+                GenerationArgs(tools=tools, tool_use_executor=tool_executor),
+            )
+        )
 
         # Verify tool executor was called
         assert len(tool_executor.calls) == 1
@@ -304,3 +325,91 @@ def test_anthropic_wrapper_executes_tool_and_continues(mock_anthropic_env):
 
         # Verify finish reason
         assert result.finish_reason == "end_turn"
+
+
+class TestOpenAIConversationConversion:
+    """Test OpenAI conversation format conversion."""
+
+    def test_convert_tool_use_blocks_to_openai_format(self, mock_openai_env):
+        """Test that internal tool_use blocks convert correctly to OpenAI format."""
+        with patch("synthetic_data.generation.AsyncOpenAI"):
+            wrapper = OpenAIGenerationWrapper(
+                GenWrapperArgs(model_id="gpt-4o-mini", use_async_client=True)
+            )
+
+            conversation: Conversation = [
+                {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_123",
+                            "name": "get_info",
+                            "input": {"query": "test"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call_123",
+                            "content": "Result data",
+                        }
+                    ],
+                },
+            ]
+
+            openai_messages = wrapper._convert_conversation_to_openai_format(
+                conversation
+            )
+
+            # Verify user message
+            assert openai_messages[0]["role"] == "user"
+            assert openai_messages[0]["content"] == "Hello"
+
+            # Verify assistant message with tool_calls
+            assert openai_messages[1]["role"] == "assistant"
+            assert "tool_calls" in openai_messages[1]
+            assert openai_messages[1]["tool_calls"][0]["id"] == "call_123"
+            assert openai_messages[1]["tool_calls"][0]["function"]["name"] == "get_info"
+
+            # Verify tool result message
+            assert openai_messages[2]["role"] == "tool"
+            assert openai_messages[2]["tool_call_id"] == "call_123"
+            assert openai_messages[2]["content"] == "Result data"
+
+    def test_convert_tools_to_openai_format(self, mock_openai_env):
+        """Test that Anthropic-style tools convert correctly to OpenAI format."""
+        with patch("synthetic_data.generation.AsyncOpenAI"):
+            wrapper = OpenAIGenerationWrapper(
+                GenWrapperArgs(model_id="gpt-4o-mini", use_async_client=True)
+            )
+
+            anthropic_tools = [
+                {
+                    "name": "roll_dice",
+                    "description": "Roll dice using RPG notation",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "notation": {"type": "string"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["notation", "reason"],
+                    },
+                }
+            ]
+
+            openai_tools = wrapper._convert_tools_to_openai_format(anthropic_tools)
+
+            assert len(openai_tools) == 1
+            assert openai_tools[0]["type"] == "function"
+            assert openai_tools[0]["function"]["name"] == "roll_dice"
+            assert (
+                openai_tools[0]["function"]["description"]
+                == "Roll dice using RPG notation"
+            )
+            assert "properties" in openai_tools[0]["function"]["parameters"]
