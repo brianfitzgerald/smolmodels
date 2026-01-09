@@ -236,6 +236,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             result.conversation, initial_length, "player"
         )
         episode["actions"].extend(new_actions)
+        logger.info("Player conversation:")
+        log_conversation(self._format_conversation(episode, "player"))
 
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
@@ -254,6 +256,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             result.conversation, initial_length, "dungeon_master"
         )
         episode["actions"].extend(new_actions)
+        logger.info("Dungeon master conversation:")
         log_conversation(self._format_conversation(episode, "dungeon_master"))
 
         finished = len(episode["actions"]) >= self.max_steps
