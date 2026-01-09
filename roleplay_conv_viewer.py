@@ -4,21 +4,19 @@ Interactive viewer for roleplaying game conversation dataset.
 Renders RPGEpisode samples in an HTML interface with navigation.
 """
 
-import ast
+import html
 import json
 import tempfile
 import threading
+import time
 import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
-from synthetic_data.tasks.roleplaying_tools import (
-    format_tool_result_as_nl,
-    format_tool_use_as_nl,
-)
+from synthetic_data.tasks.roleplaying import Action, RPGEpisode
+from synthetic_data.utils import ContentBlock
 
 
 def load_dataset(path: str) -> list[dict]:
@@ -27,1126 +25,614 @@ def load_dataset(path: str) -> list[dict]:
     return df.to_dict(orient="records")
 
 
-def highlight_json(json_str: str) -> str:
-    """Add syntax highlighting spans to JSON string for HTML display."""
-    import re
-
-    # Escape HTML first
-    json_str = json_str.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    # Highlight strings (including keys)
-    json_str = re.sub(
-        r'"([^"\\]*(\\.[^"\\]*)*)"',
-        r'<span class="json-string">"\1"</span>',
-        json_str,
-    )
-
-    # Highlight numbers
-    json_str = re.sub(
-        r"\b(-?\d+\.?\d*([eE][+-]?\d+)?)\b",
-        r'<span class="json-number">\1</span>',
-        json_str,
-    )
-
-    # Highlight booleans and null
-    json_str = re.sub(
-        r"\b(true|false|null)\b",
-        r'<span class="json-boolean">\1</span>',
-        json_str,
-    )
-
-    return json_str
-
-
-def format_tool_calls_html(tool_calls: list | None, base_id: str = "") -> str:
-    """Format tool calls as styled HTML with NL toggle support."""
-    if not tool_calls:
-        return ""
-
-    html_parts = ['<div class="tool-calls">']
-    for idx, tc in enumerate(tool_calls):
-        if isinstance(tc, dict):
-            tc_id = tc.get("id", f"tc-{idx}")
-            func = tc.get("function", {})
-            name = func.get("name", "unknown")
-            args = func.get("arguments", "{}")
-        else:
-            tc_id = getattr(tc, "id", f"tc-{idx}")
-            func = getattr(tc, "function", None)
-            name = getattr(func, "name", "unknown") if func else "unknown"
-            args = getattr(func, "arguments", "{}") if func else "{}"
-
-        # Parse arguments
+def format_json_html(obj: dict | list | str) -> str:
+    """Format a JSON object as syntax-highlighted HTML."""
+    if isinstance(obj, str):
         try:
-            if isinstance(args, str):
-                args_obj = json.loads(args)
-            else:
-                args_obj = args if isinstance(args, dict) else {}
-        except (json.JSONDecodeError, TypeError):
-            args_obj = {}
+            obj = json.loads(obj)
+        except json.JSONDecodeError:
+            return f"<pre>{html.escape(obj)}</pre>"
+    json_str = json.dumps(obj, indent=2, ensure_ascii=False)
+    return f'<pre class="json-block">{html.escape(json_str)}</pre>'
 
-        # Generate NL output using format_tool_use_as_nl
-        nl_output = format_tool_use_as_nl(name, args_obj)
 
-        # Pretty print and highlight the full JSON
-        try:
-            args_formatted = json.dumps(args_obj, indent=2)
-        except (TypeError, ValueError):
-            args_formatted = str(args)
+def render_content_block(block: ContentBlock) -> str:
+    """Render a single content block (text, tool_use, or tool_result)."""
+    block_type = block.get("type", "text")
 
-        args_highlighted = highlight_json(args_formatted)
+    if block_type == "text":
+        text = block.get("text", "")
+        # Escape HTML and preserve newlines
+        escaped = html.escape(text).replace("\n", "<br>")
+        return f'<div class="text-block">{escaped}</div>'
 
-        # Generate unique block ID
-        block_id = f"{base_id}-{tc_id}" if base_id else tc_id
-
-        # Build toggle buttons and views if nl_output exists
-        if nl_output:
-            nl_output_escaped = (
-                nl_output.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>")
-            )
-            toggle_html = f"""
-            <div class="view-toggle">
-                <button class="toggle-btn active" onclick="toggleToolView('{block_id}', 'nl')">Natural Language</button>
-                <button class="toggle-btn" onclick="toggleToolView('{block_id}', 'json')">JSON</button>
-            </div>
-            """
-            views_html = f"""
-            <div class="nl-output-view" id="{block_id}-nl">
-                <div class="nl-output-content">{nl_output_escaped}</div>
-            </div>
-            <div class="json-view hidden" id="{block_id}-json">
-                <pre class="tool-args">{args_highlighted}</pre>
-            </div>
-            """
-        else:
-            toggle_html = ""
-            views_html = f'<pre class="tool-args">{args_highlighted}</pre>'
-
-        html_parts.append(f"""
-        <div class="tool-call">
-            <div class="tool-call-header">
+    elif block_type == "tool_use":
+        tool_name = block.get("name", "unknown")
+        tool_id = block.get("id", "")
+        tool_input = block.get("input", {})
+        return f"""
+        <div class="tool-use-block">
+            <div class="tool-header">
                 <span class="tool-icon">🔧</span>
-                <span class="tool-name">{name}</span>
-                <span class="tool-id">ID: {tc_id}</span>
+                <span class="tool-name">{html.escape(tool_name)}</span>
+                <span class="tool-id">{html.escape(tool_id[:8] + "..." if len(tool_id) > 8 else tool_id)}</span>
             </div>
-            {toggle_html}
-            {views_html}
-        </div>
-        """)
-
-    html_parts.append("</div>")
-    return "".join(html_parts)
-
-
-def parse_content_blocks(content: object) -> list[dict]:
-    """Parse content into a list of content block dicts, handling various formats."""
-    if content is None:
-        return []
-
-    # Handle numpy arrays
-    if isinstance(content, np.ndarray):
-        content = content.tolist()
-
-    # Handle stringified lists/dicts
-    if isinstance(content, str):
-        content = content.strip()
-        if content.startswith("[") or content.startswith("{"):
-            # Try json.loads first (handles escaped quotes properly)
-            try:
-                content = json.loads(content)
-            except json.JSONDecodeError:
-                # Fall back to ast.literal_eval for Python literals
-                try:
-                    content = ast.literal_eval(content)
-                except (ValueError, SyntaxError):
-                    # Not a valid literal, treat as plain string
-                    return [{"type": "text", "text": content}]
-        else:
-            return [{"type": "text", "text": content}]
-
-    # Now content should be a list
-    if isinstance(content, list):
-        return content
-    if isinstance(content, dict):
-        return [content]
-
-    return [{"type": "text", "text": str(content)}]
-
-
-def format_tool_use_html(block: dict, unique_id: str = "") -> str:
-    """Format a tool_use content block as styled HTML with NL toggle."""
-    name = block.get("name", "unknown")
-    tool_id = block.get("id", "")
-    input_data = block.get("input", {})
-
-    # Parse input data
-    try:
-        if isinstance(input_data, str):
-            input_obj = json.loads(input_data)
-        else:
-            input_obj = input_data if isinstance(input_data, dict) else {}
-    except (json.JSONDecodeError, TypeError):
-        input_obj = {}
-
-    # Generate NL output using format_tool_use_as_nl
-    nl_output = format_tool_use_as_nl(name, input_obj)
-
-    # Pretty print and highlight the full JSON
-    try:
-        input_formatted = json.dumps(input_obj, indent=2)
-    except (TypeError, ValueError):
-        input_formatted = str(input_data)
-
-    input_highlighted = highlight_json(input_formatted)
-
-    id_html = f'<span class="tool-id">ID: {tool_id}</span>' if tool_id else ""
-    block_id = unique_id or tool_id or "tool"
-
-    # Build toggle buttons and views - always show toggle since we generate NL
-    if nl_output:
-        nl_output_escaped = (
-            nl_output.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br>")
-        )
-        toggle_html = f"""
-        <div class="view-toggle">
-            <button class="toggle-btn active" onclick="toggleToolView('{block_id}', 'nl')">Natural Language</button>
-            <button class="toggle-btn" onclick="toggleToolView('{block_id}', 'json')">JSON</button>
+            <div class="tool-input">
+                <div class="tool-label">Input:</div>
+                {format_json_html(tool_input)}
+            </div>
         </div>
         """
-        views_html = f"""
-        <div class="nl-output-view" id="{block_id}-nl">
-            <div class="nl-output-content">{nl_output_escaped}</div>
-        </div>
-        <div class="json-view hidden" id="{block_id}-json">
-            <pre class="tool-args">{input_highlighted}</pre>
-        </div>
-        """
-    else:
-        toggle_html = ""
-        views_html = f'<pre class="tool-args">{input_highlighted}</pre>'
 
-    return f"""
-    <div class="tool-use-block">
-        <div class="tool-use-header">
-            <span class="tool-icon">🔧</span>
-            <span class="tool-label">Tool Call</span>
-            <span class="tool-name">{name}</span>
-            {id_html}
-        </div>
-        {toggle_html}
-        {views_html}
-    </div>
-    """
+    elif block_type == "tool_result":
+        tool_use_id = block.get("tool_use_id", "")
+        tool_name = block.get("name", "unknown")
+        content = block.get("content", "")
+        is_error = block.get("is_error", False)
+        error_class = "error" if is_error else ""
 
-
-_tool_result_counter = 0
-
-
-def format_tool_result_html(block: dict) -> str:
-    """Format a tool_result content block as styled HTML with NL/JSON toggle."""
-    global _tool_result_counter
-    tool_use_id = block.get("tool_use_id", "")
-    tool_name = block.get("name", "")  # Get tool name from block
-    result_content = block.get("content", "")
-    is_error = block.get("is_error", False)
-
-    # Generate unique block ID for toggle
-    block_id = tool_use_id or f"tr-{_tool_result_counter}"
-    _tool_result_counter += 1
-
-    is_json = False
-    result_obj = None
-
-    # Try to parse JSON content
-    try:
-        if isinstance(result_content, str):
-            result_content = result_content.strip()
-            if result_content.startswith("{") or result_content.startswith("["):
-                result_obj = json.loads(result_content)
-                is_json = True
-        elif isinstance(result_content, (dict, list)):
-            result_obj = result_content
-            is_json = True
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    error_class = " tool-result-error" if is_error else ""
-    id_html = f'<span class="tool-id">ID: {tool_use_id}</span>' if tool_use_id else ""
-    status_icon = "❌" if is_error else "✅"
-    status_text = "Error" if is_error else "Result"
-
-    if is_json and result_obj is not None and isinstance(result_obj, dict):
-        # Use tool name from block to generate NL output
-        nl_output = format_tool_result_as_nl(tool_name, result_obj)
-
-        # Create highlighted JSON view
-        result_formatted = json.dumps(result_obj, indent=2)
-        result_highlighted = highlight_json(result_formatted)
-
-        # Escape NL output for HTML
-        nl_output_escaped = (
-            nl_output.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br>")
-        )
-
-        toggle_html = f"""
-        <div class="view-toggle">
-            <button class="toggle-btn active" onclick="toggleToolView('{block_id}', 'nl')">Natural Language</button>
-            <button class="toggle-btn" onclick="toggleToolView('{block_id}', 'json')">JSON</button>
-        </div>
-        """
-        content_html = f"""
-        <div class="nl-output-view" id="{block_id}-nl">
-            <div class="nl-output-content">{nl_output_escaped}</div>
-        </div>
-        <div class="json-view hidden" id="{block_id}-json">
-            <pre class="tool-result-content">{result_highlighted}</pre>
-        </div>
-        """
-    elif is_json and result_obj is not None:
-        # JSON array or non-dict - just show formatted JSON
-        result_formatted = json.dumps(result_obj, indent=2)
-        result_highlighted = highlight_json(result_formatted)
-        toggle_html = ""
-        content_html = f'<pre class="tool-result-content">{result_highlighted}</pre>'
-    else:
-        # Plain text result - escape HTML and display nicely
-        if isinstance(result_content, str):
-            result_escaped = (
-                result_content.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-        else:
-            result_escaped = (
-                str(result_content)
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-
-        toggle_html = ""
-        content_html = f'<pre class="tool-result-content">{result_escaped}</pre>'
-
-    return f"""
-    <div class="tool-result-block{error_class}">
-        <div class="tool-result-header">
-            <span class="result-icon">{status_icon}</span>
-            <span class="result-label">{status_text}</span>
-            {id_html}
-        </div>
-        {toggle_html}
-        {content_html}
-    </div>
-    """
-
-
-_tool_use_counter = 0
-
-
-def format_content_blocks_html(content: object) -> str:
-    """Format content blocks as HTML, with special handling for tool_use and tool_result."""
-    global _tool_use_counter
-    blocks = parse_content_blocks(content)
-
-    html_parts = []
-    for block in blocks:
-        if isinstance(block, dict):
-            block_type = block.get("type", "")
-            if block_type == "text":
-                text = block.get("text", "")
-                if text:
-                    # Escape HTML and convert newlines
-                    text = (
-                        text.replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                        .replace("\n", "<br>")
-                    )
-                    html_parts.append(f'<div class="content-text">{text}</div>')
-            elif block_type == "tool_use":
-                # Generate unique ID for this tool use block
-                tool_id = block.get("id", "")
-                unique_id = tool_id or f"tu-{_tool_use_counter}"
-                _tool_use_counter += 1
-                html_parts.append(format_tool_use_html(block, unique_id))
-            elif block_type == "tool_result":
-                html_parts.append(format_tool_result_html(block))
+        # Try to parse content as JSON for better formatting
+        try:
+            if isinstance(content, str):
+                content_obj = json.loads(content)
+                content_html = format_json_html(content_obj)
             else:
-                # Unknown block type, try to extract any text
-                text = ""
-                if "text" in block:
-                    text = block["text"]
-                elif "content" in block:
-                    text = str(block["content"])
-                if text:
-                    text = (
-                        text.replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                        .replace("\n", "<br>")
-                    )
-                    html_parts.append(f'<div class="content-text">{text}</div>')
-        elif isinstance(block, str):
-            text = (
-                block.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>")
-            )
-            html_parts.append(f'<div class="content-text">{text}</div>')
+                content_html = format_json_html(content)
+        except (json.JSONDecodeError, TypeError):
+            content_html = f"<pre>{html.escape(str(content))}</pre>"
 
-    return "\n".join(html_parts)
-
-
-def format_message_html(message: dict) -> str:
-    """Format a single message as HTML."""
-    content = message.get("content", "")
-    tool_calls = message.get("tool_calls")
-
-    # Format content blocks (handles strings, lists, numpy arrays, stringified lists)
-    # This now includes proper rendering for tool_use and tool_result blocks
-    content_html = format_content_blocks_html(content)
-
-    # Format tool_calls field (separate from content blocks)
-    tool_calls_html = format_tool_calls_html(tool_calls)
-
-    return f"""
-    <div class="message-content">
-        {content_html}
-        {tool_calls_html}
-    </div>
-    """
-
-
-def episode_to_html(episode: dict, index: int) -> str:
-    """Convert an RPGEpisode to HTML representation.
-
-    Handles both the RPGEpisode dataclass schema and the flat parquet schema:
-    - RPGEpisode: game_setting, player_character, step_count, metadata, scenario_message, actions
-    - Flat parquet: game_setting, player_character, scenario, original_input, generation_model, etc.
-    """
-    game_setting = episode.get("game_setting", "Unknown setting")
-    player_character = episode.get("player_character", "Unknown character")
-    step_count = episode.get("step_count", 0)
-    metadata = episode.get("metadata", {})
-    scenario_message = episode.get("scenario_message", {})
-    actions = episode.get("actions", [])
-
-    # Handle flat parquet schema - build metadata from model fields
-    if not metadata:
-        for field in [
-            "generation_model",
-            "followup_model",
-            "parameter_model",
-            "original_input",
-        ]:
-            if field in episode and episode[field]:
-                if field == "original_input" and isinstance(episode[field], dict):
-                    metadata[field] = episode[field].get("prompt", str(episode[field]))
-                else:
-                    metadata[field] = episode[field]
-
-    # Format metadata
-    metadata_html = ""
-    if metadata:
-        metadata_items = []
-        for key, value in metadata.items():
-            metadata_items.append(f"<li><strong>{key}:</strong> {value}</li>")
-        metadata_html = f'<ul class="metadata-list">{"".join(metadata_items)}</ul>'
-
-    # Format scenario message
-    scenario_html = ""
-    if scenario_message and scenario_message.get("content"):
-        scenario_html = f"""
-        <div class="message dm-message">
-            <div class="message-header">
-                <span class="role-badge dm-badge">Dungeon Master</span>
-                <span class="message-type">Scenario</span>
+        return f"""
+        <div class="tool-result-block {error_class}">
+            <div class="tool-header">
+                <span class="tool-icon">{"❌" if is_error else "✅"}</span>
+                <span class="tool-name">{html.escape(tool_name)}</span>
+                <span class="tool-id">{html.escape(tool_use_id[:8] + "..." if len(tool_use_id) > 8 else tool_use_id)}</span>
             </div>
-            {format_message_html(scenario_message)}
+            <div class="tool-output">
+                <div class="tool-label">Result:</div>
+                {content_html}
+            </div>
         </div>
         """
 
-    # Format actions
-    actions_html = []
-    for i, action in enumerate(actions):
-        # Handle both old format (action IS the message) and new format (action has role + message)
-        if "message" in action and isinstance(action.get("message"), dict):
-            # New format: {"role": "player"|"dungeon_master", "message": {...}}
-            role = action.get("role", "unknown")
-            message = action.get("message", {})
-        else:
-            # Old format: action is the message directly
-            # Infer role: DM goes first, then alternating player/DM
-            # Pattern: DM, player, DM, player, DM, ...
-            # Turn 0 = DM, Turn 1 = player, Turn 2 = DM, etc.
-            role = "dungeon_master" if i % 2 == 0 else "player"
-            message = action
+    else:
+        # Unknown block type - render as JSON
+        return f'<div class="unknown-block">{format_json_html(block)}</div>'
 
-        role_class = "player-message" if role == "player" else "dm-message"
-        badge_class = "player-badge" if role == "player" else "dm-badge"
-        role_display = "Player" if role == "player" else "Dungeon Master"
 
-        actions_html.append(f"""
-        <div class="message {role_class}">
-            <div class="message-header">
-                <span class="role-badge {badge_class}">{role_display}</span>
-                <span class="message-type">Turn {i + 1}</span>
-            </div>
-            {format_message_html(message)}
+def render_action(action: Action, index: int) -> str:
+    """Render a single action from the episode."""
+    role = action.get("role", "unknown")
+    message = action.get("message", {})
+    tool_calling_role = action.get("tool_calling_role")
+
+    # Determine CSS class and display name based on role
+    role_classes = {
+        "player": ("player-action", "Player", "🎮"),
+        "dungeon_master": ("dm-action", "Dungeon Master", "🎲"),
+        "tool_result": ("tool-result-action", "Tool Result", "⚙️"),
+    }
+    css_class, display_name, icon = role_classes.get(
+        role, ("unknown-action", role, "❓")
+    )
+
+    # Add info about which role called the tool (for tool_result actions)
+    role_info = ""
+    if tool_calling_role:
+        caller_name = "Player" if tool_calling_role == "player" else "DM"
+        role_info = f'<span class="tool-caller">(from {caller_name})</span>'
+
+    # Parse content - it may be a JSON string from parquet storage
+    content = message.get("content", [])
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except json.JSONDecodeError:
+            content = [{"type": "text", "text": content}]
+
+    # Render all content blocks
+    content_html = ""
+    for block in content:
+        content_html += render_content_block(block)
+
+    return f'''
+    <div class="action {css_class}" data-index="{index}">
+        <div class="action-header">
+            <span class="action-icon">{icon}</span>
+            <span class="action-role">{display_name}</span>
+            {role_info}
+            <span class="action-index">#{index + 1}</span>
         </div>
-        """)
+        <div class="action-content">
+            {content_html}
+        </div>
+    </div>
+    '''
+
+
+def render_episode(episode_data: RPGEpisode) -> str:
+    """Render an episode dictionary as an HTML string."""
+    game_setting = episode_data.get("game_setting", "Unknown")
+    player_character = episode_data.get("player_character", "Unknown")
+    metadata = episode_data.get("metadata", {})
+    actions = episode_data.get("actions", [])
+
+    # Render metadata section
+    metadata_items = ""
+    for key, value in metadata.items():
+        metadata_items += f"""
+        <div class="metadata-item">
+            <span class="metadata-key">{html.escape(str(key))}:</span>
+            <span class="metadata-value">{html.escape(str(value))}</span>
+        </div>
+        """
+
+    # Render all actions
+    actions_html = ""
+    for i, action in enumerate(actions):
+        actions_html += render_action(action, i)
 
     return f"""
-    <div class="episode" id="episode-{index}">
+    <div class="episode">
         <div class="episode-header">
-            <h2>Episode {index + 1}</h2>
-            <div class="episode-stats">
-                <span class="stat">Steps: {step_count}</span>
-                <span class="stat">Actions: {len(actions)}</span>
+            <div class="episode-setting">
+                <span class="setting-icon">🏰</span>
+                <span class="setting-label">Setting:</span>
+                <span class="setting-value">{html.escape(str(game_setting))}</span>
+            </div>
+            <div class="episode-character">
+                <span class="character-icon">🧙</span>
+                <span class="character-label">Player Character:</span>
+                <span class="character-value">{html.escape(str(player_character))}</span>
             </div>
         </div>
-
-        <div class="episode-info">
-            <div class="info-card">
-                <h3>Game Setting</h3>
-                <p>{game_setting}</p>
+        <details class="metadata-section">
+            <summary>Metadata ({len(metadata)} items)</summary>
+            <div class="metadata-content">
+                {metadata_items}
             </div>
-            <div class="info-card">
-                <h3>Player Character</h3>
-                <p>{player_character}</p>
-            </div>
-        </div>
-
-        {f'<div class="metadata-section"><h3>Metadata</h3>{metadata_html}</div>' if metadata_html else ""}
-
-        <div class="conversation-section">
-            <h3>Conversation</h3>
-            <div class="conversation">
-                {scenario_html}
-                {"".join(actions_html)}
+        </details>
+        <div class="actions-section">
+            <div class="actions-header">Actions ({len(actions)} total)</div>
+            <div class="actions-list">
+                {actions_html}
             </div>
         </div>
     </div>
+    """
+
+
+def generate_css() -> str:
+    """Generate the CSS styles for the viewer."""
+    return """
+    :root {
+        --bg-color: #1a1a2e;
+        --card-bg: #16213e;
+        --text-color: #eee;
+        --text-muted: #888;
+        --border-color: #0f3460;
+        --player-color: #4ade80;
+        --player-bg: #1a3a2a;
+        --dm-color: #f472b6;
+        --dm-bg: #3a1a2a;
+        --tool-color: #60a5fa;
+        --tool-bg: #1a2a3a;
+        --tool-result-color: #fbbf24;
+        --tool-result-bg: #2a2a1a;
+        --json-key: #93c5fd;
+        --json-string: #86efac;
+        --json-number: #fcd34d;
+        --error-color: #ef4444;
+        --error-bg: #3a1a1a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg-color);
+        color: var(--text-color);
+        line-height: 1.6;
+        min-height: 100vh;
+    }
+
+    .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+
+    .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px;
+        background: var(--card-bg);
+        border-radius: 12px;
+        margin-bottom: 20px;
+        border: 1px solid var(--border-color);
+    }
+
+    .header h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .nav-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .nav-btn {
+        background: var(--border-color);
+        color: var(--text-color);
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 1rem;
+        transition: background 0.2s;
+    }
+
+    .nav-btn:hover:not(:disabled) {
+        background: #1a4a7e;
+    }
+
+    .nav-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .episode-counter {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+    }
+
+    .episode {
+        background: var(--card-bg);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        overflow: hidden;
+    }
+
+    .episode-header {
+        padding: 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+    }
+
+    .episode-setting, .episode-character {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .setting-icon, .character-icon {
+        font-size: 1.5rem;
+    }
+
+    .setting-label, .character-label {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+
+    .setting-value, .character-value {
+        font-weight: 600;
+    }
+
+    .metadata-section {
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .metadata-section summary {
+        padding: 12px 20px;
+        cursor: pointer;
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+
+    .metadata-content {
+        padding: 0 20px 15px 20px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 8px;
+    }
+
+    .metadata-item {
+        font-size: 0.85rem;
+    }
+
+    .metadata-key {
+        color: var(--text-muted);
+    }
+
+    .metadata-value {
+        color: var(--text-color);
+    }
+
+    .actions-section {
+        padding: 20px;
+    }
+
+    .actions-header {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin-bottom: 15px;
+    }
+
+    .actions-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .action {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .action-header {
+        padding: 10px 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+
+    .action-icon { font-size: 1.1rem; }
+    .action-index { margin-left: auto; color: var(--text-muted); font-size: 0.8rem; }
+    .tool-caller { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+
+    .action-content {
+        padding: 15px;
+        font-size: 0.95rem;
+    }
+
+    /* Role-specific styling */
+    .player-action {
+        background: var(--player-bg);
+        border-left: 3px solid var(--player-color);
+    }
+    .player-action .action-header { color: var(--player-color); }
+
+    .dm-action {
+        background: var(--dm-bg);
+        border-left: 3px solid var(--dm-color);
+    }
+    .dm-action .action-header { color: var(--dm-color); }
+
+    .tool-result-action {
+        background: var(--tool-result-bg);
+        border-left: 3px solid var(--tool-result-color);
+    }
+    .tool-result-action .action-header { color: var(--tool-result-color); }
+
+    /* Content blocks */
+    .text-block {
+        margin-bottom: 10px;
+    }
+
+    .tool-use-block, .tool-result-block {
+        background: rgba(0,0,0,0.2);
+        border-radius: 6px;
+        padding: 12px;
+        margin: 10px 0;
+    }
+
+    .tool-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+
+    .tool-icon { font-size: 1rem; }
+    .tool-name {
+        font-weight: 600;
+        color: var(--tool-color);
+    }
+    .tool-id {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        font-family: monospace;
+    }
+
+    .tool-label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+    }
+
+    .tool-result-block.error {
+        border: 1px solid var(--error-color);
+        background: var(--error-bg);
+    }
+
+    .json-block {
+        background: rgba(0,0,0,0.3);
+        border-radius: 4px;
+        padding: 10px;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 0.85rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+
+    /* Hot reload indicator */
+    .reload-indicator {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        padding: 6px 12px;
+        background: var(--tool-color);
+        color: #000;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .reload-indicator.visible {
+        opacity: 1;
+    }
     """
 
 
 def generate_html(episodes: list[dict]) -> str:
     """Generate the full HTML page with all episodes."""
-    episodes_html = []
-    for i, ep in enumerate(episodes):
-        episodes_html.append(episode_to_html(ep, i))
+    css = generate_css()
 
-    return f'''<!DOCTYPE html>
+    # Render all episodes
+    episodes_html = ""
+    for i, episode in enumerate(episodes):
+        episode_html = render_episode(episode)
+        episodes_html += f'<div class="episode-wrapper" data-episode="{i}" style="display: none;">{episode_html}</div>'
+
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Roleplaying Game Dataset Viewer</title>
-    <style>
-        * {{
-            box-sizing: border-box;
-        }}
-
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e0e0e0;
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-        }}
-
-        .container {{
-            max-width: 900px;
-            margin: 0 auto;
-        }}
-
-        header {{
-            text-align: center;
-            padding: 20px 0 30px;
-        }}
-
-        h1 {{
-            color: #ffd700;
-            margin: 0 0 10px;
-            font-size: 2rem;
-        }}
-
-        .nav-controls {{
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 20px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }}
-
-        .nav-btn {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            color: white;
-            padding: 12px 24px;
-            font-size: 1rem;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }}
-
-        .nav-btn:hover:not(:disabled) {{
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-        }}
-
-        .nav-btn:disabled {{
-            opacity: 0.5;
-            cursor: not-allowed;
-        }}
-
-        .page-info {{
-            font-size: 1.1rem;
-            color: #a0a0a0;
-        }}
-
-        .jump-controls {{
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }}
-
-        .jump-input {{
-            width: 80px;
-            padding: 8px 12px;
-            border: 2px solid #444;
-            border-radius: 6px;
-            background: #2a2a4a;
-            color: #e0e0e0;
-            font-size: 1rem;
-            text-align: center;
-        }}
-
-        .jump-btn {{
-            background: #444;
-            border: none;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-        }}
-
-        .jump-btn:hover {{
-            background: #555;
-        }}
-
-        .episode {{
-            display: none;
-            background: #1e1e3f;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }}
-
-        .episode.active {{
-            display: block;
-        }}
-
-        .episode-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #3a3a5a;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
-        }}
-
-        .episode-header h2 {{
-            color: #ffd700;
-            margin: 0;
-        }}
-
-        .episode-stats {{
-            display: flex;
-            gap: 15px;
-        }}
-
-        .stat {{
-            background: #2a2a4a;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-        }}
-
-        .episode-info {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }}
-
-        .info-card {{
-            background: #2a2a4a;
-            border-radius: 10px;
-            padding: 15px;
-        }}
-
-        .info-card h3 {{
-            color: #8888ff;
-            margin: 0 0 8px;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        .info-card p {{
-            margin: 0;
-            line-height: 1.5;
-        }}
-
-        .metadata-section {{
-            background: #2a2a4a;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }}
-
-        .metadata-section h3 {{
-            color: #8888ff;
-            margin: 0 0 10px;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-        }}
-
-        .metadata-list {{
-            margin: 0;
-            padding-left: 20px;
-            font-size: 0.9rem;
-        }}
-
-        .metadata-list li {{
-            margin-bottom: 5px;
-        }}
-
-        .conversation-section h3 {{
-            color: #8888ff;
-            margin: 0 0 15px;
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        .conversation {{
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }}
-
-        .message {{
-            border-radius: 12px;
-            padding: 15px;
-            position: relative;
-        }}
-
-        .dm-message {{
-            background: linear-gradient(135deg, #2d1f4e 0%, #1e1e3f 100%);
-            border-left: 4px solid #9b59b6;
-        }}
-
-        .player-message {{
-            background: linear-gradient(135deg, #1f3d4e 0%, #1e1e3f 100%);
-            border-left: 4px solid #3498db;
-        }}
-
-        .message-header {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }}
-
-        .role-badge {{
-            padding: 4px 10px;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }}
-
-        .dm-badge {{
-            background: #9b59b6;
-            color: white;
-        }}
-
-        .player-badge {{
-            background: #3498db;
-            color: white;
-        }}
-
-        .message-type {{
-            color: #888;
-            font-size: 0.8rem;
-        }}
-
-        .message-content {{
-            line-height: 1.6;
-        }}
-
-        .content-text {{
-            margin-bottom: 10px;
-        }}
-
-        .tool-calls {{
-            margin-top: 10px;
-        }}
-
-        .tool-call {{
-            background: #1a1a2e;
-            border-radius: 8px;
-            padding: 12px;
-            margin-top: 8px;
-            border: 1px solid #3a3a5a;
-        }}
-
-        .tool-call-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }}
-
-        .tool-name {{
-            color: #ffd700;
-            font-weight: 600;
-            font-family: 'Fira Code', 'Monaco', monospace;
-        }}
-
-        .tool-id {{
-            color: #666;
-            font-size: 0.75rem;
-            font-family: monospace;
-        }}
-
-        .tool-args {{
-            background: #0d0d1a;
-            border-radius: 6px;
-            padding: 12px;
-            margin: 0;
-            overflow-x: auto;
-            font-size: 0.85rem;
-            color: #e0e0e0;
-            font-family: 'Fira Code', 'Monaco', Consolas, monospace;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }}
-
-        /* JSON Syntax Highlighting */
-        .json-string {{
-            color: #98c379;
-        }}
-
-        .json-number {{
-            color: #d19a66;
-        }}
-
-        .json-boolean {{
-            color: #56b6c2;
-        }}
-
-        /* Tool Use Block (in content) */
-        .tool-use-block {{
-            background: linear-gradient(135deg, #1a2a1a 0%, #1a1a2e 100%);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 10px 0;
-            border: 1px solid #3a5a3a;
-        }}
-
-        .tool-use-header {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }}
-
-        .tool-icon {{
-            font-size: 1rem;
-        }}
-
-        .tool-label {{
-            color: #8bc34a;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        /* Tool Result Block */
-        .tool-result-block {{
-            background: linear-gradient(135deg, #1a1a3a 0%, #1a1a2e 100%);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 10px 0;
-            border: 1px solid #3a3a6a;
-        }}
-
-        .tool-result-block.tool-result-error {{
-            background: linear-gradient(135deg, #3a1a1a 0%, #1a1a2e 100%);
-            border-color: #6a3a3a;
-        }}
-
-        .tool-result-header {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }}
-
-        .result-icon {{
-            font-size: 1rem;
-        }}
-
-        .result-label {{
-            color: #64b5f6;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        .tool-result-error .result-label {{
-            color: #ef5350;
-        }}
-
-        .tool-result-content {{
-            background: #0d0d1a;
-            border-radius: 6px;
-            padding: 12px;
-            margin: 0;
-            overflow-x: auto;
-            font-size: 0.85rem;
-            color: #e0e0e0;
-            font-family: 'Fira Code', 'Monaco', Consolas, monospace;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }}
-
-        /* View Toggle */
-        .view-toggle {{
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 20px;
-        }}
-
-        .toggle-btn {{
-            background: #2a2a4a;
-            border: 2px solid #444;
-            color: #a0a0a0;
-            padding: 8px 16px;
-            font-size: 0.9rem;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }}
-
-        .toggle-btn:hover {{
-            border-color: #667eea;
-            color: #e0e0e0;
-        }}
-
-        .toggle-btn.active {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-color: transparent;
-            color: white;
-        }}
-
-        /* NL Output Display */
-        .nl-output-block {{
-            background: linear-gradient(135deg, #2a1f4e 0%, #1e1e3f 100%);
-            border-radius: 10px;
-            padding: 15px;
-            margin: 10px 0;
-            border: 1px solid #4a3a6a;
-        }}
-
-        .nl-output-header {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 10px;
-        }}
-
-        .nl-output-label {{
-            color: #bb86fc;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        .nl-output-content {{
-            line-height: 1.6;
-            color: #e0e0e0;
-        }}
-
-        .hidden {{
-            display: none !important;
-        }}
-
-        .keyboard-hint {{
-            text-align: center;
-            color: #666;
-            font-size: 0.85rem;
-            margin-top: 20px;
-        }}
-
-        kbd {{
-            background: #333;
-            padding: 2px 8px;
-            border-radius: 4px;
-            border: 1px solid #555;
-        }}
-    </style>
+    <title>RPG Episode Viewer</title>
+    <style>{css}</style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Roleplaying Game Dataset Viewer</h1>
-            <p>Browse {len(episodes)} generated episodes</p>
-        </header>
-
-        <div class="nav-controls">
-            <button class="nav-btn" id="prev-btn" onclick="prevEpisode()">Previous</button>
-            <span class="page-info"><span id="current-page">1</span> / {len(episodes)}</span>
-            <button class="nav-btn" id="next-btn" onclick="nextEpisode()">Next</button>
-
-            <div class="jump-controls">
-                <input type="number" class="jump-input" id="jump-input" min="1" max="{len(episodes)}" placeholder="#">
-                <button class="jump-btn" onclick="jumpToEpisode()">Go</button>
+        <div class="header">
+            <h1>RPG Episode Viewer</h1>
+            <div class="nav-controls">
+                <button class="nav-btn" id="prev-btn" onclick="prevEpisode()">← Previous</button>
+                <span class="episode-counter">
+                    Episode <span id="current-num">1</span> of <span id="total-num">{len(episodes)}</span>
+                </span>
+                <button class="nav-btn" id="next-btn" onclick="nextEpisode()">Next →</button>
             </div>
         </div>
-
-        <div class="episodes-container">
-            {"".join(episodes_html)}
+        <div id="episodes-container">
+            {episodes_html}
         </div>
-
-        <p class="keyboard-hint">Use <kbd>←</kbd> <kbd>→</kbd> arrow keys to navigate</p>
     </div>
+    <div class="reload-indicator" id="reload-indicator">Reloading...</div>
 
     <script>
-        const totalEpisodes = {len(episodes)};
         let currentEpisode = 0;
+        const totalEpisodes = {len(episodes)};
+        let lastCheck = Date.now();
 
         function showEpisode(index) {{
-            // Hide all episodes
-            document.querySelectorAll('.episode').forEach(ep => ep.classList.remove('active'));
-
-            // Show the selected episode
-            const episode = document.getElementById('episode-' + index);
-            if (episode) {{
-                episode.classList.add('active');
-                currentEpisode = index;
-                document.getElementById('current-page').textContent = index + 1;
-
-                // Update button states
-                document.getElementById('prev-btn').disabled = index === 0;
-                document.getElementById('next-btn').disabled = index === totalEpisodes - 1;
-            }}
+            document.querySelectorAll('.episode-wrapper').forEach((el, i) => {{
+                el.style.display = i === index ? 'block' : 'none';
+            }});
+            document.getElementById('current-num').textContent = index + 1;
+            document.getElementById('prev-btn').disabled = index === 0;
+            document.getElementById('next-btn').disabled = index === totalEpisodes - 1;
         }}
 
         function nextEpisode() {{
             if (currentEpisode < totalEpisodes - 1) {{
-                showEpisode(currentEpisode + 1);
+                currentEpisode++;
+                showEpisode(currentEpisode);
             }}
         }}
 
         function prevEpisode() {{
             if (currentEpisode > 0) {{
-                showEpisode(currentEpisode - 1);
-            }}
-        }}
-
-        function jumpToEpisode() {{
-            const input = document.getElementById('jump-input');
-            const pageNum = parseInt(input.value);
-            if (pageNum >= 1 && pageNum <= totalEpisodes) {{
-                showEpisode(pageNum - 1);
-                input.value = '';
-            }}
-        }}
-
-        function toggleToolView(blockId, view) {{
-            const nlView = document.getElementById(blockId + '-nl');
-            const jsonView = document.getElementById(blockId + '-json');
-
-            if (!nlView || !jsonView) return;
-
-            // Find the toggle buttons in the parent container
-            const container = nlView.closest('.tool-use-block, .tool-call, .tool-result-block');
-            if (!container) return;
-
-            const buttons = container.querySelectorAll('.toggle-btn');
-
-            if (view === 'nl') {{
-                nlView.classList.remove('hidden');
-                jsonView.classList.add('hidden');
-                buttons[0].classList.add('active');
-                buttons[1].classList.remove('active');
-            }} else {{
-                nlView.classList.add('hidden');
-                jsonView.classList.remove('hidden');
-                buttons[0].classList.remove('active');
-                buttons[1].classList.add('active');
+                currentEpisode--;
+                showEpisode(currentEpisode);
             }}
         }}
 
         // Keyboard navigation
-        document.addEventListener('keydown', function(e) {{
-            if (e.key === 'ArrowRight') {{
-                nextEpisode();
-            }} else if (e.key === 'ArrowLeft') {{
-                prevEpisode();
-            }}
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'ArrowRight' || e.key === 'n') nextEpisode();
+            if (e.key === 'ArrowLeft' || e.key === 'p') prevEpisode();
         }});
 
-        // Handle enter key in jump input
-        document.getElementById('jump-input').addEventListener('keypress', function(e) {{
-            if (e.key === 'Enter') {{
-                jumpToEpisode();
+        // Hot reload polling
+        async function checkForReload() {{
+            try {{
+                const response = await fetch('/reload-check?t=' + lastCheck);
+                const data = await response.json();
+                if (data.reload) {{
+                    const indicator = document.getElementById('reload-indicator');
+                    indicator.classList.add('visible');
+                    setTimeout(() => location.reload(), 300);
+                }}
+                lastCheck = data.timestamp;
+            }} catch (e) {{
+                // Server might be restarting, retry
             }}
-        }});
+            setTimeout(checkForReload, 1000);
+        }}
 
-        // Initialize
         showEpisode(0);
+        checkForReload();
     </script>
 </body>
-</html>
-'''
+</html>"""
 
 
-def serve_viewer(html_content: str, port: int = 8080):
-    """Serve the HTML viewer on a local HTTP server."""
-    # Create a temporary directory for serving
+class HotReloadHandler(SimpleHTTPRequestHandler):
+    """HTTP handler with hot reload support."""
+
+    html_path: Path
+    reload_timestamp: float
+    tmpdir: str
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=self.__class__.tmpdir, **kwargs)
+
+    def do_GET(self):
+        if self.path.startswith("/reload-check"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            response = json.dumps(
+                {
+                    "reload": self.__class__.reload_timestamp
+                    > float(self.path.split("t=")[-1])
+                    if "t=" in self.path
+                    else False,
+                    "timestamp": self.__class__.reload_timestamp,
+                }
+            )
+            self.wfile.write(response.encode())
+        else:
+            super().do_GET()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        del format, args  # Suppress logging
+
+
+def serve_viewer(
+    episodes: list[dict],
+    port: int = 8080,
+    watch_file: str | None = None,
+):
+    """Serve the HTML viewer with hot reload support.
+
+    Args:
+        episodes: List of episode dictionaries to display
+        port: Port for the HTTP server
+        watch_file: Optional file to watch for changes (triggers reload)
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         html_path = Path(tmpdir) / "index.html"
+        html_content = generate_html(episodes)
         html_path.write_text(html_content)
 
-        class Handler(SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=tmpdir, **kwargs)
+        # Set up the handler class with shared state
+        HotReloadHandler.tmpdir = tmpdir
+        HotReloadHandler.html_path = html_path
+        HotReloadHandler.reload_timestamp = time.time()
 
-            def log_message(self, format, *args):
-                pass  # Suppress logging
-
-        server = HTTPServer(("localhost", port), Handler)
+        server = HTTPServer(("localhost", port), HotReloadHandler)
         url = f"http://localhost:{port}"
 
         print(f"Starting server at {url}")
@@ -1154,6 +640,30 @@ def serve_viewer(html_content: str, port: int = 8080):
 
         # Open browser in a separate thread
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+
+        # File watcher thread for hot reload
+        if watch_file:
+            watch_path = Path(watch_file)
+            last_mtime = watch_path.stat().st_mtime if watch_path.exists() else 0
+
+            def watch_for_changes():
+                nonlocal last_mtime
+                while True:
+                    time.sleep(0.5)
+                    try:
+                        if watch_path.exists():
+                            mtime = watch_path.stat().st_mtime
+                            if mtime > last_mtime:
+                                last_mtime = mtime
+                                print(
+                                    f"File changed: {watch_file}, triggering reload..."
+                                )
+                                HotReloadHandler.reload_timestamp = time.time()
+                    except Exception:
+                        pass
+
+            watcher = threading.Thread(target=watch_for_changes, daemon=True)
+            watcher.start()
 
         try:
             server.serve_forever()
@@ -1183,21 +693,26 @@ def main():
         default=None,
         help="Output HTML file path (if provided, saves to file instead of serving)",
     )
+    parser.add_argument(
+        "--watch",
+        type=str,
+        default=None,
+        help="File to watch for changes (enables hot reload)",
+    )
     args = parser.parse_args()
 
     print(f"Loading dataset from {args.path}...")
     episodes = load_dataset(args.path)
     print(f"Loaded {len(episodes)} episodes")
 
-    print("Generating HTML viewer...")
-    html_content = generate_html(episodes)
-
     if args.output:
-        output_path = Path(args.output)
-        output_path.write_text(html_content)
-        print(f"Saved viewer to {output_path}")
+        # Save to file
+        html_content = generate_html(episodes)
+        Path(args.output).write_text(html_content)
+        print(f"Saved HTML to {args.output}")
     else:
-        serve_viewer(html_content, args.port)
+        # Serve with HTTP
+        serve_viewer(episodes, port=args.port, watch_file=args.watch)
 
 
 if __name__ == "__main__":

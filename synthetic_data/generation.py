@@ -6,6 +6,9 @@ from typing import Optional
 
 from anthropic import AsyncAnthropic
 from anthropic.types.message import Message as AnthropicMessage
+from anthropic.types.tool_result_block_param import (
+    ToolResultBlockParam as AnthropicToolResultBlock,
+)
 from loguru import logger
 from openai import NOT_GIVEN, AsyncOpenAI, LengthFinishReasonError, OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
@@ -27,7 +30,6 @@ from synthetic_data.utils import (
     ToolResultBlock,
     ToolUseBlock,
     get_class_name,
-    log_conversation,
 )
 
 
@@ -381,10 +383,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 
 def _sanitize_conversation_for_anthropic(conversation: Conversation) -> Conversation:
-    """
-    Sanitize a conversation for the Anthropic API by removing extra fields
-    from tool_result blocks that Anthropic doesn't accept (e.g., 'name' field).
-    """
+    """Remove the name field from tool_result blocks that Anthropic doesn't accept."""
     sanitized: Conversation = []
     for message in conversation:
         content = message.get("content", [])
@@ -392,14 +391,12 @@ def _sanitize_conversation_for_anthropic(conversation: Conversation) -> Conversa
 
         for block in content:
             if block.get("type") == "tool_result":
-                # Only include fields that Anthropic accepts
-                sanitized_block: ToolResultBlock = {
+                sanitized_block: AnthropicToolResultBlock = {
                     "type": "tool_result",
                     "tool_use_id": block.get("tool_use_id", ""),
                     "content": block.get("content", ""),
+                    "is_error": block.get("is_error", False),
                 }
-                if block.get("is_error"):
-                    sanitized_block["is_error"] = block["is_error"]
                 sanitized_content.append(sanitized_block)
             else:
                 sanitized_content.append(block)
@@ -456,7 +453,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 # Build API request kwargs
                 # Sanitize conversation to remove extra fields (like 'name' in tool_result)
                 # that the Anthropic API doesn't accept
-                sanitized_conversation = _sanitize_conversation_for_anthropic(conversation)
+                sanitized_conversation = _sanitize_conversation_for_anthropic(
+                    conversation
+                )
                 request_kwargs: dict = {
                     "model": self.model_name,
                     "max_tokens": args.max_tokens,
@@ -478,15 +477,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                     if args.tool_choice and iteration == 1:
                         request_kwargs["tool_choice"] = args.tool_choice
 
-                # Log request for debugging
-                logger.debug(
-                    f"Anthropic API request: model={request_kwargs.get('model')}, "
-                    f"num_messages={len(request_kwargs.get('messages', []))}, "
-                    f"message_roles={[m.get('role') for m in request_kwargs.get('messages', [])]}"
-                )
-
-                log_conversation(conversation)
-
                 # Make the API call
                 result: AnthropicMessage = await self.client.messages.create(
                     **request_kwargs
@@ -496,7 +486,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 logger.debug(
                     f"Anthropic API response: stop_reason={result.stop_reason}, "
                     f"content_count={len(result.content)}, "
-                    f"usage={result.usage}"
                 )
 
                 # Build content blocks from response
@@ -564,7 +553,6 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                         conversation.append(tool_result_message)
                         continue
 
-                # Map Anthropic stop_reason to our FinishReason type
                 finish_reason: FinishReason = result.stop_reason or "end_turn"
                 return GenerationResult(
                     conversation=conversation, finish_reason=finish_reason

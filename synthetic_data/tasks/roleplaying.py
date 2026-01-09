@@ -29,6 +29,7 @@ from synthetic_data.utils import (
     DatasetFormat,
     Message,
     TextBlock,
+    log_conversation,
     parse_xml_tags,
 )
 
@@ -49,14 +50,16 @@ GAME_SETTINGS = [
     "museum",
 ]
 
-RolePlayingRole = Literal["player", "dungeon_master"]
+RolePlayingRole = Literal["player", "dungeon_master", "tool_result"]
 
 
 @dataclass
 class Action:
     # tool_result represents the result of a tool call (dice roll result, etc.)
-    role: Literal["player", "dungeon_master", "tool_result"]
+    role: RolePlayingRole
     message: Message
+    # For tool_result actions, contains the role (player/dungeon_master) that performed the tool call
+    tool_calling_role: RolePlayingRole | None = None
 
 
 @dataclass
@@ -134,7 +137,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ep.player_character = player_character
         return ep
 
-    def _extract_new_messages(
+    def _get_new_actions(
         self,
         conversation: Conversation,
         initial_length: int,
@@ -164,7 +167,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 )
                 if has_tool_result:
                     # Save tool results as part of the same role's turn
-                    actions.append(Action(role="tool_result", message=msg))
+                    # Store which role performed the tool call that produced this result
+                    actions.append(
+                        Action(role="tool_result", message=msg, tool_calling_role=role)
+                    )
 
         return actions
 
@@ -187,7 +193,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 ),
             )
             # Extract all new messages (tool_use, tool_result, and final text)
-            new_actions = self._extract_new_messages(
+            new_actions = self._get_new_actions(
                 result.conversation, initial_length, "dungeon_master"
             )
             episode.actions.extend(new_actions)
@@ -207,7 +213,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             ),
         )
         # Extract all new messages from player generation
-        new_actions = self._extract_new_messages(
+        new_actions = self._get_new_actions(
             result.conversation, initial_length, "player"
         )
         episode.actions.extend(new_actions)
@@ -225,10 +231,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             ),
         )
         # Extract all new messages from DM generation
-        new_actions = self._extract_new_messages(
+        new_actions = self._get_new_actions(
             result.conversation, initial_length, "dungeon_master"
         )
         episode.actions.extend(new_actions)
+        log_conversation(self._format_conversation(episode, "dungeon_master"))
 
         finished = len(episode.actions) >= self.max_steps
         return episode, finished
@@ -248,7 +255,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "role": action.message.get("role"),
                 "content": json.dumps(action.message.get("content", [])),
             }
-            serialized_actions.append({"role": action.role, "message": message_copy})
+            action_dict = {"role": action.role, "message": message_copy}
+            if action.tool_calling_role is not None:
+                action_dict["tool_calling_role"] = action.tool_calling_role
+            serialized_actions.append(action_dict)
 
         return {
             "game_setting": episode.game_setting,
@@ -311,6 +321,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self,
         content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
+        """
+        For tool calls that are now user turns, format them as natural language.
+        """
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             block_type = block.get("type")
