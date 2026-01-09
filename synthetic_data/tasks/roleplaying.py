@@ -1,7 +1,6 @@
 import json
 import random
-from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, NotRequired, TypedDict
 
 from datasets import Dataset
 from loguru import logger
@@ -53,21 +52,39 @@ GAME_SETTINGS = [
 RolePlayingRole = Literal["player", "dungeon_master", "tool_result"]
 
 
-@dataclass
-class Action:
-    # tool_result represents the result of a tool call (dice roll result, etc.)
+class Action(TypedDict):
     role: RolePlayingRole
     message: Message
-    # For tool_result actions, contains the role (player/dungeon_master) that performed the tool call
-    tool_calling_role: RolePlayingRole | None = None
+    tool_calling_role: NotRequired[RolePlayingRole | None]
 
 
-@dataclass
-class RPGEpisode:
-    game_setting: str | None = None
-    player_character: str | None = None
-    actions: list[Action] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)
+class RPGEpisode(TypedDict):
+    game_setting: str | None
+    player_character: str | None
+    actions: list[Action]
+    metadata: dict
+
+
+def create_episode() -> RPGEpisode:
+    """Create a new empty RPGEpisode."""
+    return RPGEpisode(
+        game_setting=None,
+        player_character=None,
+        actions=[],
+        metadata={},
+    )
+
+
+def create_action(
+    role: RolePlayingRole,
+    message: Message,
+    tool_calling_role: RolePlayingRole | None = None,
+) -> Action:
+    """Create a new Action."""
+    action: Action = {"role": role, "message": message}
+    if tool_calling_role is not None:
+        action["tool_calling_role"] = tool_calling_role
+    return action
 
 
 class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
@@ -118,8 +135,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
     async def initial_step(self, sample: None) -> RPGEpisode:
         seed = hash(str(sample)) % (2**32)
-        ep = RPGEpisode()
-        ep.metadata = {
+        ep = create_episode()
+        ep["metadata"] = {
             "dungeon_master_model": self.generation_wrappers[
                 "dungeon_master"
             ].provider_name,
@@ -133,8 +150,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         game_setting, player_character = await self._generate_setting_and_characters(ep)
 
         assert game_setting is not None and player_character is not None
-        ep.game_setting = game_setting
-        ep.player_character = player_character
+        ep["game_setting"] = game_setting
+        ep["player_character"] = player_character
         return ep
 
     def _get_new_actions(
@@ -159,7 +176,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
 
             if msg_role == "assistant":
                 # Save all assistant messages (includes tool_use and text blocks)
-                actions.append(Action(role=role, message=msg))
+                actions.append(create_action(role=role, message=msg))
             elif msg_role == "user":
                 # Check if this is a tool_result message (from tool execution)
                 has_tool_result = any(
@@ -169,7 +186,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     # Save tool results as part of the same role's turn
                     # Store which role performed the tool call that produced this result
                     actions.append(
-                        Action(role="tool_result", message=msg, tool_calling_role=role)
+                        create_action(
+                            role="tool_result", message=msg, tool_calling_role=role
+                        )
                     )
 
         return actions
@@ -177,7 +196,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
         # On the first turn, DM goes first to set the scene
         # After that, player goes first, then DM responds
-        if len(episode.actions) == 0:
+        if len(episode["actions"]) == 0:
             # Generate dungeon master action to set the scene
             conversation = self._format_conversation(episode, "dungeon_master")
             initial_length = len(conversation)
@@ -196,7 +215,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             new_actions = self._get_new_actions(
                 result.conversation, initial_length, "dungeon_master"
             )
-            episode.actions.extend(new_actions)
+            episode["actions"].extend(new_actions)
 
             return episode, False
 
@@ -216,7 +235,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         new_actions = self._get_new_actions(
             result.conversation, initial_length, "player"
         )
-        episode.actions.extend(new_actions)
+        episode["actions"].extend(new_actions)
 
         # Generate dungeon master action
         conversation = self._format_conversation(episode, "dungeon_master")
@@ -234,10 +253,10 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         new_actions = self._get_new_actions(
             result.conversation, initial_length, "dungeon_master"
         )
-        episode.actions.extend(new_actions)
+        episode["actions"].extend(new_actions)
         log_conversation(self._format_conversation(episode, "dungeon_master"))
 
-        finished = len(episode.actions) >= self.max_steps
+        finished = len(episode["actions"]) >= self.max_steps
         return episode, finished
 
     def format_episode(self, episode: RPGEpisode) -> dict:
@@ -249,22 +268,22 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         """
         serialized_actions = []
 
-        for action in episode.actions:
+        for action in episode["actions"]:
             # Serialize content blocks to JSON string to avoid schema issues
             message_copy = {
-                "role": action.message.get("role"),
-                "content": json.dumps(action.message.get("content", [])),
+                "role": action["message"].get("role"),
+                "content": json.dumps(action["message"].get("content", [])),
             }
-            action_dict = {"role": action.role, "message": message_copy}
-            if action.tool_calling_role is not None:
-                action_dict["tool_calling_role"] = action.tool_calling_role
+            action_dict = {"role": action["role"], "message": message_copy}
+            if action.get("tool_calling_role") is not None:
+                action_dict["tool_calling_role"] = action.get("tool_calling_role")
             serialized_actions.append(action_dict)
 
         return {
-            "game_setting": episode.game_setting,
-            "player_character": episode.player_character,
+            "game_setting": episode["game_setting"],
+            "player_character": episode["player_character"],
             "actions": serialized_actions,
-            "metadata": episode.metadata,
+            "metadata": episode["metadata"],
         }
 
     async def _generate_setting_and_characters(
@@ -404,14 +423,14 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         For the player, generate with DM actions as user actions, and player actions as assistant actions.
         """
 
-        assert episode.game_setting is not None
-        assert episode.player_character is not None
+        assert episode["game_setting"] is not None
+        assert episode["player_character"] is not None
 
         player_system_prompt = player_action_prompt(
-            episode.game_setting, episode.player_character
+            episode["game_setting"], episode["player_character"]
         )
         dm_system_prompt = dm_action_prompt(
-            episode.game_setting, episode.player_character
+            episode["game_setting"], episode["player_character"]
         )
         system_text_block: TextBlock = {
             "type": "text",
@@ -427,33 +446,33 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         ]
 
         # If generating for DM and no actions yet, add a user message to start the game
-        if generating_role == "dungeon_master" and not episode.actions:
+        if generating_role == "dungeon_master" and not episode["actions"]:
             content_block: TextBlock = {
                 "type": "text",
                 "text": "Begin the adventure. Set the opening scene.",
             }
             conversation.append({"role": "user", "content": [content_block]})
 
-        for action in episode.actions:
+        for action in episode["actions"]:
             # Skip tool_result actions when formatting conversation
             # Tool results are intermediate messages that were processed during generation
             # They're saved in the episode for the output dataset, but shouldn't be
             # included when constructing the conversation for the next API call
-            if action.role == "tool_result":
+            if action["role"] == "tool_result":
                 continue
 
             if generating_role == "dungeon_master":
                 # DM perspective: player -> user, dm -> assistant
-                role = "user" if action.role == "player" else "assistant"
+                role = "user" if action["role"] == "player" else "assistant"
             else:  # generating_role == "player"
                 # Player perspective: dungeon_master -> user, player -> assistant
-                role = "user" if action.role == "dungeon_master" else "assistant"
+                role = "user" if action["role"] == "dungeon_master" else "assistant"
 
-            content = action.message.get("content", [])
+            content = action["message"].get("content", [])
 
             # Convert tool_use/tool_result blocks to text for ALL messages
             # This avoids API errors about tool_use requiring matching tool_result
-            # The raw tool calls are still preserved in the episode.actions for the output dataset
+            # The raw tool calls are still preserved in the episode["actions"] for the output dataset
             content = self._convert_tool_calls_to_text_blocks(content)
 
             # Skip messages with empty content

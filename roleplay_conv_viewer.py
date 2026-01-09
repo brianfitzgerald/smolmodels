@@ -16,16 +16,16 @@ from pathlib import Path
 import pandas as pd
 
 from synthetic_data.tasks.roleplaying import Action, RPGEpisode
-from synthetic_data.utils import ContentBlock
+from synthetic_data.utils import ContentBlock, Message
 
 
-def load_dataset(path: str) -> list[dict]:
+def load_dataset(path: str) -> list[RPGEpisode]:
     """Load the parquet dataset and convert to list of dicts."""
     df = pd.read_parquet(path)
-    return df.to_dict(orient="records")
+    return df.to_dict(orient="records")  # type: ignore[return-value]
 
 
-def format_json_html(obj: dict | list | str) -> str:
+def format_json_html(obj: object) -> str:
     """Format a JSON object as syntax-highlighted HTML."""
     if isinstance(obj, str):
         try:
@@ -36,30 +36,51 @@ def format_json_html(obj: dict | list | str) -> str:
     return f'<pre class="json-block">{html.escape(json_str)}</pre>'
 
 
-def render_content_block(block: ContentBlock) -> str:
-    """Render a single content block (text, tool_use, or tool_result)."""
+def render_content_block(block: ContentBlock | dict, block_index: int) -> str:
+    """Render a single content block with full structure visibility."""
     block_type = block.get("type", "text")
 
     if block_type == "text":
         text = block.get("text", "")
-        # Escape HTML and preserve newlines
         escaped = html.escape(text).replace("\n", "<br>")
-        return f'<div class="text-block">{escaped}</div>'
+        return f"""
+        <div class="content-block text-content-block">
+            <div class="block-header">
+                <span class="block-type-badge text-badge">text</span>
+                <span class="block-index">block {block_index}</span>
+            </div>
+            <div class="block-body">
+                <div class="block-field">
+                    <span class="field-name">text:</span>
+                    <div class="field-value text-value">{escaped}</div>
+                </div>
+            </div>
+        </div>
+        """
 
     elif block_type == "tool_use":
         tool_name = block.get("name", "unknown")
         tool_id = block.get("id", "")
         tool_input = block.get("input", {})
         return f"""
-        <div class="tool-use-block">
-            <div class="tool-header">
-                <span class="tool-icon">🔧</span>
-                <span class="tool-name">{html.escape(tool_name)}</span>
-                <span class="tool-id">{html.escape(tool_id[:8] + "..." if len(tool_id) > 8 else tool_id)}</span>
+        <div class="content-block tool-use-content-block">
+            <div class="block-header">
+                <span class="block-type-badge tool-use-badge">tool_use</span>
+                <span class="block-index">block {block_index}</span>
             </div>
-            <div class="tool-input">
-                <div class="tool-label">Input:</div>
-                {format_json_html(tool_input)}
+            <div class="block-body">
+                <div class="block-field">
+                    <span class="field-name">name:</span>
+                    <span class="field-value tool-name-value">{html.escape(tool_name)}</span>
+                </div>
+                <div class="block-field">
+                    <span class="field-name">id:</span>
+                    <span class="field-value id-value">{html.escape(tool_id)}</span>
+                </div>
+                <div class="block-field">
+                    <span class="field-name">input:</span>
+                    <div class="field-value">{format_json_html(tool_input)}</div>
+                </div>
             </div>
         </div>
         """
@@ -69,58 +90,65 @@ def render_content_block(block: ContentBlock) -> str:
         tool_name = block.get("name", "unknown")
         content = block.get("content", "")
         is_error = block.get("is_error", False)
-        error_class = "error" if is_error else ""
 
         # Try to parse content as JSON for better formatting
         try:
-            if isinstance(content, str):
+            if isinstance(content, str) and content.strip():
                 content_obj = json.loads(content)
                 content_html = format_json_html(content_obj)
-            else:
+            elif content:
                 content_html = format_json_html(content)
+            else:
+                content_html = '<span class="empty-value">(empty)</span>'
         except (json.JSONDecodeError, TypeError):
             content_html = f"<pre>{html.escape(str(content))}</pre>"
 
+        error_class = "error-block" if is_error else ""
         return f"""
-        <div class="tool-result-block {error_class}">
-            <div class="tool-header">
-                <span class="tool-icon">{"❌" if is_error else "✅"}</span>
-                <span class="tool-name">{html.escape(tool_name)}</span>
-                <span class="tool-id">{html.escape(tool_use_id[:8] + "..." if len(tool_use_id) > 8 else tool_use_id)}</span>
+        <div class="content-block tool-result-content-block {error_class}">
+            <div class="block-header">
+                <span class="block-type-badge tool-result-badge">tool_result</span>
+                <span class="block-index">block {block_index}</span>
             </div>
-            <div class="tool-output">
-                <div class="tool-label">Result:</div>
-                {content_html}
+            <div class="block-body">
+                <div class="block-field">
+                    <span class="field-name">name:</span>
+                    <span class="field-value tool-name-value">{html.escape(tool_name)}</span>
+                </div>
+                <div class="block-field">
+                    <span class="field-name">tool_use_id:</span>
+                    <span class="field-value id-value">{html.escape(tool_use_id)}</span>
+                </div>
+                <div class="block-field">
+                    <span class="field-name">is_error:</span>
+                    <span class="field-value bool-value {"error-true" if is_error else ""}">{str(is_error).lower()}</span>
+                </div>
+                <div class="block-field">
+                    <span class="field-name">content:</span>
+                    <div class="field-value">{content_html}</div>
+                </div>
             </div>
         </div>
         """
 
     else:
-        # Unknown block type - render as JSON
-        return f'<div class="unknown-block">{format_json_html(block)}</div>'
+        # Unknown block type - render all fields
+        return f"""
+        <div class="content-block unknown-content-block">
+            <div class="block-header">
+                <span class="block-type-badge unknown-badge">{html.escape(block_type)}</span>
+                <span class="block-index">block {block_index}</span>
+            </div>
+            <div class="block-body">
+                {format_json_html(block)}
+            </div>
+        </div>
+        """
 
 
-def render_action(action: Action, index: int) -> str:
-    """Render a single action from the episode."""
-    role = action.get("role", "unknown")
-    message = action.get("message", {})
-    tool_calling_role = action.get("tool_calling_role")
-
-    # Determine CSS class and display name based on role
-    role_classes = {
-        "player": ("player-action", "Player", "🎮"),
-        "dungeon_master": ("dm-action", "Dungeon Master", "🎲"),
-        "tool_result": ("tool-result-action", "Tool Result", "⚙️"),
-    }
-    css_class, display_name, icon = role_classes.get(
-        role, ("unknown-action", role, "❓")
-    )
-
-    # Add info about which role called the tool (for tool_result actions)
-    role_info = ""
-    if tool_calling_role:
-        caller_name = "Player" if tool_calling_role == "player" else "DM"
-        role_info = f'<span class="tool-caller">(from {caller_name})</span>'
+def render_message(message: Message | dict) -> str:
+    """Render a Message with its role and content blocks."""
+    msg_role = message.get("role") or "unknown"
 
     # Parse content - it may be a JSON string from parquet storage
     content = message.get("content", [])
@@ -131,31 +159,87 @@ def render_action(action: Action, index: int) -> str:
             content = [{"type": "text", "text": content}]
 
     # Render all content blocks
-    content_html = ""
-    for block in content:
-        content_html += render_content_block(block)
+    blocks_html = ""
+    for i, block in enumerate(content):
+        blocks_html += render_content_block(block, i)
 
-    return f'''
-    <div class="action {css_class}" data-index="{index}">
-        <div class="action-header">
-            <span class="action-icon">{icon}</span>
-            <span class="action-role">{display_name}</span>
-            {role_info}
-            <span class="action-index">#{index + 1}</span>
+    role_class = "user-message" if msg_role == "user" else "assistant-message"
+
+    return f"""
+    <div class="message {role_class}">
+        <div class="message-header">
+            <span class="message-label">Message</span>
+            <span class="message-role-badge {role_class}-badge">{html.escape(msg_role)}</span>
+            <span class="content-count">{len(content)} content block{"s" if len(content) != 1 else ""}</span>
         </div>
-        <div class="action-content">
-            {content_html}
+        <div class="message-content">
+            <div class="content-blocks">
+                {blocks_html}
+            </div>
         </div>
     </div>
-    '''
+    """
+
+
+def render_action(action: Action, index: int) -> str:
+    """Render a single Action with full structure visibility."""
+    role = action.get("role") or "unknown"
+    message = action.get("message") or {}
+    tool_calling_role = action.get("tool_calling_role")
+
+    # Determine CSS class based on role
+    role_classes = {
+        "player": ("player-action", "🎮"),
+        "dungeon_master": ("dm-action", "🎲"),
+        "tool_result": ("tool-result-action", "⚙️"),
+    }
+    css_class, icon = role_classes.get(role, ("unknown-action", "❓"))
+
+    # Build action metadata display
+    metadata_items = f"""
+        <div class="action-field">
+            <span class="field-name">role:</span>
+            <span class="field-value role-value">{html.escape(role)}</span>
+        </div>
+    """
+
+    if tool_calling_role:
+        metadata_items += f"""
+        <div class="action-field">
+            <span class="field-name">tool_calling_role:</span>
+            <span class="field-value role-value">{html.escape(tool_calling_role)}</span>
+        </div>
+        """
+
+    # Render the message
+    message_html = render_message(message)
+
+    return f"""
+    <details class="action {css_class}" data-index="{index}" open>
+        <summary class="action-header">
+            <span class="action-icon">{icon}</span>
+            <span class="action-label">Action</span>
+            <span class="action-index">#{index}</span>
+            <span class="collapse-indicator"></span>
+        </summary>
+        <div class="action-body">
+            <div class="action-metadata">
+                {metadata_items}
+            </div>
+            <div class="action-message-container">
+                {message_html}
+            </div>
+        </div>
+    </details>
+    """
 
 
 def render_episode(episode_data: RPGEpisode) -> str:
     """Render an episode dictionary as an HTML string."""
-    game_setting = episode_data.get("game_setting", "Unknown")
-    player_character = episode_data.get("player_character", "Unknown")
-    metadata = episode_data.get("metadata", {})
-    actions = episode_data.get("actions", [])
+    game_setting = episode_data.get("game_setting") or "Unknown"
+    player_character = episode_data.get("player_character") or "Unknown"
+    metadata = episode_data.get("metadata") or {}
+    actions = episode_data.get("actions") or []
 
     # Render metadata section
     metadata_items = ""
@@ -193,7 +277,13 @@ def render_episode(episode_data: RPGEpisode) -> str:
             </div>
         </details>
         <div class="actions-section">
-            <div class="actions-header">Actions ({len(actions)} total)</div>
+            <div class="actions-toolbar">
+                <div class="actions-header">Actions ({len(actions)} total)</div>
+                <div class="actions-controls">
+                    <button class="control-btn" onclick="expandAllActions(this)">Expand All</button>
+                    <button class="control-btn" onclick="collapseAllActions(this)">Collapse All</button>
+                </div>
+            </div>
             <div class="actions-list">
                 {actions_html}
             </div>
@@ -357,113 +447,305 @@ def generate_css() -> str:
         padding: 20px;
     }
 
+    .actions-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+
     .actions-header {
         font-size: 0.9rem;
         color: var(--text-muted);
-        margin-bottom: 15px;
+    }
+
+    .actions-controls {
+        display: flex;
+        gap: 8px;
+    }
+
+    .control-btn {
+        background: var(--border-color);
+        color: var(--text-color);
+        border: none;
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: background 0.2s;
+    }
+
+    .control-btn:hover {
+        background: #1a4a7e;
     }
 
     .actions-list {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        gap: 16px;
     }
 
+    /* ==================== ACTION LEVEL ==================== */
     .action {
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+
+    .action > summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .action > summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .action-header {
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .action[open] > .action-header {
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .action:not([open]) > .action-header {
+        border-bottom: none;
+    }
+
+    .action-icon { font-size: 1.2rem; }
+    .action-label { text-transform: uppercase; letter-spacing: 0.5px; font-size: 0.8rem; }
+    .action-index { color: var(--text-muted); font-size: 0.85rem; font-weight: normal; }
+
+    .collapse-indicator {
+        margin-left: auto;
+        transition: transform 0.2s;
+    }
+
+    .collapse-indicator::after {
+        content: "▼";
+        font-size: 0.7rem;
+        color: var(--text-muted);
+    }
+
+    .action:not([open]) .collapse-indicator::after {
+        content: "▶";
+    }
+
+    .action-body {
+        padding: 16px;
+    }
+
+    .action-metadata {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px dashed rgba(255,255,255,0.1);
+    }
+
+    .action-field {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    /* Role-specific action styling */
+    .player-action {
+        background: var(--player-bg);
+        border-left: 4px solid var(--player-color);
+    }
+    .player-action .action-header { background: rgba(74, 222, 128, 0.1); color: var(--player-color); }
+
+    .dm-action {
+        background: var(--dm-bg);
+        border-left: 4px solid var(--dm-color);
+    }
+    .dm-action .action-header { background: rgba(244, 114, 182, 0.1); color: var(--dm-color); }
+
+    .tool-result-action {
+        background: var(--tool-result-bg);
+        border-left: 4px solid var(--tool-result-color);
+    }
+    .tool-result-action .action-header { background: rgba(251, 191, 36, 0.1); color: var(--tool-result-color); }
+
+    /* ==================== MESSAGE LEVEL ==================== */
+    .message {
+        background: rgba(0,0,0,0.2);
         border-radius: 8px;
         overflow: hidden;
     }
 
-    .action-header {
-        padding: 10px 15px;
+    .message-header {
+        padding: 10px 14px;
         display: flex;
         align-items: center;
-        gap: 8px;
-        font-size: 0.9rem;
+        gap: 10px;
+        font-size: 0.85rem;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: rgba(0,0,0,0.15);
+    }
+
+    .message-label {
+        color: var(--text-muted);
         font-weight: 500;
     }
 
-    .action-icon { font-size: 1.1rem; }
-    .action-index { margin-left: auto; color: var(--text-muted); font-size: 0.8rem; }
-    .tool-caller { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
-
-    .action-content {
-        padding: 15px;
-        font-size: 0.95rem;
+    .message-role-badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
     }
 
-    /* Role-specific styling */
-    .player-action {
-        background: var(--player-bg);
-        border-left: 3px solid var(--player-color);
-    }
-    .player-action .action-header { color: var(--player-color); }
+    .user-message-badge { background: #3b82f6; color: white; }
+    .assistant-message-badge { background: #8b5cf6; color: white; }
 
-    .dm-action {
-        background: var(--dm-bg);
-        border-left: 3px solid var(--dm-color);
-    }
-    .dm-action .action-header { color: var(--dm-color); }
-
-    .tool-result-action {
-        background: var(--tool-result-bg);
-        border-left: 3px solid var(--tool-result-color);
-    }
-    .tool-result-action .action-header { color: var(--tool-result-color); }
-
-    /* Content blocks */
-    .text-block {
-        margin-bottom: 10px;
+    .content-count {
+        margin-left: auto;
+        color: var(--text-muted);
+        font-size: 0.8rem;
     }
 
-    .tool-use-block, .tool-result-block {
-        background: rgba(0,0,0,0.2);
-        border-radius: 6px;
+    .message-content {
         padding: 12px;
-        margin: 10px 0;
     }
 
-    .tool-header {
+    .content-blocks {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    /* ==================== CONTENT BLOCK LEVEL ==================== */
+    .content-block {
+        background: rgba(0,0,0,0.25);
+        border-radius: 6px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .block-header {
+        padding: 8px 12px;
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 8px;
+        font-size: 0.8rem;
+        background: rgba(0,0,0,0.2);
+        border-bottom: 1px solid rgba(255,255,255,0.05);
     }
 
-    .tool-icon { font-size: 1rem; }
-    .tool-name {
+    .block-type-badge {
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.7rem;
         font-weight: 600;
-        color: var(--tool-color);
-    }
-    .tool-id {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        font-family: monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
     }
 
-    .tool-label {
+    .text-badge { background: #22c55e; color: #000; }
+    .tool-use-badge { background: #3b82f6; color: white; }
+    .tool-result-badge { background: #f59e0b; color: #000; }
+    .unknown-badge { background: #6b7280; color: white; }
+
+    .block-index {
+        margin-left: auto;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+    }
+
+    .block-body {
+        padding: 12px;
+    }
+
+    .block-field {
+        margin-bottom: 10px;
+    }
+
+    .block-field:last-child {
+        margin-bottom: 0;
+    }
+
+    /* ==================== FIELD STYLING ==================== */
+    .field-name {
+        color: #93c5fd;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 0.8rem;
+        margin-right: 8px;
+    }
+
+    .field-value {
+        color: var(--text-color);
+    }
+
+    .text-value {
+        line-height: 1.7;
+        padding: 8px 0;
+    }
+
+    .tool-name-value {
+        color: #a78bfa;
+        font-weight: 600;
+    }
+
+    .id-value {
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
         font-size: 0.8rem;
         color: var(--text-muted);
-        margin-bottom: 4px;
+        word-break: break-all;
     }
 
-    .tool-result-block.error {
-        border: 1px solid var(--error-color);
-        background: var(--error-bg);
+    .role-value {
+        color: #fbbf24;
+        font-weight: 500;
     }
 
+    .bool-value {
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        color: #22c55e;
+    }
+
+    .bool-value.error-true {
+        color: var(--error-color);
+    }
+
+    .empty-value {
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    /* Error styling for tool results */
+    .error-block {
+        border-color: var(--error-color) !important;
+    }
+    .error-block .block-header {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    /* ==================== JSON BLOCK ==================== */
     .json-block {
-        background: rgba(0,0,0,0.3);
+        background: rgba(0,0,0,0.4);
         border-radius: 4px;
         padding: 10px;
         font-family: 'SF Mono', Monaco, 'Courier New', monospace;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
         overflow-x: auto;
         white-space: pre-wrap;
         word-break: break-word;
+        margin-top: 4px;
     }
 
-    /* Hot reload indicator */
+    /* ==================== HOT RELOAD ==================== */
     .reload-indicator {
         position: fixed;
         top: 10px;
@@ -483,7 +765,7 @@ def generate_css() -> str:
     """
 
 
-def generate_html(episodes: list[dict]) -> str:
+def generate_html(episodes: list[RPGEpisode]) -> str:
     """Generate the full HTML page with all episodes."""
     css = generate_css()
 
@@ -553,6 +835,17 @@ def generate_html(episodes: list[dict]) -> str:
             if (e.key === 'ArrowLeft' || e.key === 'p') prevEpisode();
         }});
 
+        // Collapse/Expand all actions in current episode
+        function collapseAllActions(btn) {{
+            const episode = btn.closest('.episode');
+            episode.querySelectorAll('details.action').forEach(el => el.open = false);
+        }}
+
+        function expandAllActions(btn) {{
+            const episode = btn.closest('.episode');
+            episode.querySelectorAll('details.action').forEach(el => el.open = true);
+        }}
+
         // Hot reload polling
         async function checkForReload() {{
             try {{
@@ -611,17 +904,20 @@ class HotReloadHandler(SimpleHTTPRequestHandler):
 
 
 def serve_viewer(
-    episodes: list[dict],
+    dataset_path: str,
     port: int = 8080,
-    watch_file: str | None = None,
+    watch_files: list[str] | None = None,
 ):
     """Serve the HTML viewer with hot reload support.
 
     Args:
-        episodes: List of episode dictionaries to display
+        dataset_path: Path to the parquet dataset file
         port: Port for the HTTP server
-        watch_file: Optional file to watch for changes (triggers reload)
+        watch_files: Optional additional files to watch for changes
     """
+    # Load initial dataset
+    episodes = load_dataset(dataset_path)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         html_path = Path(tmpdir) / "index.html"
         html_content = generate_html(episodes)
@@ -636,34 +932,55 @@ def serve_viewer(
         url = f"http://localhost:{port}"
 
         print(f"Starting server at {url}")
+        print(f"Watching dataset: {dataset_path}")
+        if watch_files:
+            print(f"Watching files: {', '.join(watch_files)}")
         print("Press Ctrl+C to stop the server")
 
         # Open browser in a separate thread
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
-        # File watcher thread for hot reload
-        if watch_file:
-            watch_path = Path(watch_file)
-            last_mtime = watch_path.stat().st_mtime if watch_path.exists() else 0
+        # Build list of files to watch (always include dataset)
+        files_to_watch = [dataset_path]
+        if watch_files:
+            files_to_watch.extend(watch_files)
 
-            def watch_for_changes():
-                nonlocal last_mtime
-                while True:
-                    time.sleep(0.5)
-                    try:
+        # Track last modification times
+        last_mtimes: dict[str, float] = {}
+        for f in files_to_watch:
+            p = Path(f)
+            last_mtimes[f] = p.stat().st_mtime if p.exists() else 0
+
+        def watch_for_changes():
+            nonlocal episodes
+            while True:
+                time.sleep(0.5)
+                try:
+                    for filepath in files_to_watch:
+                        watch_path = Path(filepath)
                         if watch_path.exists():
                             mtime = watch_path.stat().st_mtime
-                            if mtime > last_mtime:
-                                last_mtime = mtime
-                                print(
-                                    f"File changed: {watch_file}, triggering reload..."
-                                )
-                                HotReloadHandler.reload_timestamp = time.time()
-                    except Exception:
-                        pass
+                            if mtime > last_mtimes[filepath]:
+                                last_mtimes[filepath] = mtime
+                                print(f"File changed: {filepath}")
 
-            watcher = threading.Thread(target=watch_for_changes, daemon=True)
-            watcher.start()
+                                # If dataset changed, reload data and regenerate HTML
+                                if filepath == dataset_path:
+                                    print("Reloading dataset...")
+                                    episodes = load_dataset(dataset_path)
+                                    html_content = generate_html(episodes)
+                                    html_path.write_text(html_content)
+                                    print(
+                                        f"Regenerated HTML with {len(episodes)} episodes"
+                                    )
+
+                                # Trigger browser reload
+                                HotReloadHandler.reload_timestamp = time.time()
+                except Exception as e:
+                    print(f"Watch error: {e}")
+
+        watcher = threading.Thread(target=watch_for_changes, daemon=True)
+        watcher.start()
 
         try:
             server.serve_forever()
@@ -696,23 +1013,23 @@ def main():
     parser.add_argument(
         "--watch",
         type=str,
+        nargs="*",
         default=None,
-        help="File to watch for changes (enables hot reload)",
+        help="Additional files to watch for changes (dataset is always watched)",
     )
     args = parser.parse_args()
 
-    print(f"Loading dataset from {args.path}...")
-    episodes = load_dataset(args.path)
-    print(f"Loaded {len(episodes)} episodes")
-
     if args.output:
         # Save to file
+        print(f"Loading dataset from {args.path}...")
+        episodes = load_dataset(args.path)
+        print(f"Loaded {len(episodes)} episodes")
         html_content = generate_html(episodes)
         Path(args.output).write_text(html_content)
         print(f"Saved HTML to {args.output}")
     else:
-        # Serve with HTTP
-        serve_viewer(episodes, port=args.port, watch_file=args.watch)
+        # Serve with HTTP (dataset watching is automatic)
+        serve_viewer(args.path, port=args.port, watch_files=args.watch)
 
 
 if __name__ == "__main__":

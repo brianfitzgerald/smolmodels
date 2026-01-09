@@ -175,11 +175,9 @@ def execute_speak(character: str, message: str, tone: str | None = None) -> Tool
 
 
 def execute_action(description: str, target: str | None = None) -> ToolOutput:
-    """Execute a player action. Returns the input parameters for NL formatting."""
-    return {
-        "description": description,
-        "target": target,
-    }
+    """Execute a player action. Returns empty - action info is in the tool_use block."""
+    del description, target  # Not needed in result
+    return {}
 
 
 TOOL_EXECUTORS = {
@@ -262,11 +260,8 @@ def format_tool_result_as_nl(tool_name: str, result: ToolOutput) -> str:
         return f'{character} says: "{message}"'
 
     elif tool_name == "action":
-        description = result.get("description", "")
-        target = result.get("target")
-        if target:
-            return f"*{description} ({target})*"
-        return f"*{description}*"
+        # Action results are empty - the action info is in the tool_use block
+        return ""
 
     else:
         # Fallback to JSON for unknown tools
