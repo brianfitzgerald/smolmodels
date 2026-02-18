@@ -24,6 +24,7 @@ from synthetic_data.utils import (
     DatasetFormat,
     Message,
     TextBlock,
+    ToolParam,
     parse_xml_tags,
 )
 
@@ -78,14 +79,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         run_mode: RunMode,
         max_user_responses: int = 10,
         num_episodes: int = 1000,
+        dungeon_master_model: str = "gpt-4o-mini",
+        player_model: str = "gpt-4o-mini",
+        adventure_parameters_model: str = "gpt-4.1-nano",
     ):
         super().__init__(run_mode)
         self.max_user_responses = max_user_responses
         self.num_episodes = num_episodes
 
-        self._add_generation_wrapper("dungeon_master", "claude-4-5-sonnet")
-        self._add_generation_wrapper("player", "claude-4-5-sonnet")
-        self._add_generation_wrapper("adventure_parameters", "claude-4-5-haiku")
+        self._add_generation_wrapper("dungeon_master", dungeon_master_model)  # type: ignore[arg-type]
+        self._add_generation_wrapper("player", player_model)  # type: ignore[arg-type]
+        self._add_generation_wrapper(
+            "adventure_parameters", adventure_parameters_model  # type: ignore[arg-type]
+        )
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -133,7 +139,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 episode,
                 role="dungeon_master",
                 tools=DM_TOOLS,
-                tool_choice={"type": "any"},
             )
             episode.step_count += 1
             return episode, episode.step_count >= self.max_user_responses
@@ -147,7 +152,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             episode,
             role="dungeon_master",
             tools=DM_TOOLS,
-            tool_choice={"type": "any"},
         )
         episode.step_count += 1
         return episode, episode.step_count >= self.max_user_responses
@@ -170,12 +174,38 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
     ) -> tuple[str, str] | tuple[None, None]:
         """Generate game parameters (setting and characters) using XML parsing."""
         theme_input = "A mysterious adventure"
+        param_tool: ToolParam = {
+            "name": "set_game_parameters",
+            "description": "Set the game setting and player character for the roleplaying scenario.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "game_setting": {
+                        "type": "string",
+                        "description": "Concise setting for the adventure (e.g., 'abandoned library', 'misty forest').",
+                    },
+                    "player_character": {
+                        "type": "string",
+                        "description": "Concise description of the player character (e.g., 'rogue archaeologist').",
+                    },
+                },
+                "required": ["game_setting", "player_character"],
+            },
+        }
         system_text_block: TextBlock = {"type": "text", "text": game_parameter_prompt()}
         user_text_block: TextBlock = {
             "type": "text",
             "text": f"Generate game parameters for a roleplaying scenario based on this theme: {theme_input}",
         }
-        parameter_conversation: Conversation = [
+        strict_user_block: TextBlock = {
+            "type": "text",
+            "text": (
+                "IMPORTANT: Return ONLY the XML tags below and nothing else.\n"
+                "<game_setting>...</game_setting>\n"
+                "<player_character>...</player_character>"
+            ),
+        }
+        base_conversation: Conversation = [
             {
                 "role": "system",
                 "content": [system_text_block],
@@ -191,15 +221,44 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
 
         for attempt in range(MAX_PARSE_RETRIES):
+            parameter_conversation = list(base_conversation)
+            if attempt > 0:
+                parameter_conversation.append(
+                    {"role": "user", "content": [strict_user_block]}
+                )
+            args = GenerationArgs(
+                tools=[param_tool],
+                tool_choice={"type": "tool", "name": "set_game_parameters"},
+            )
             result = await self.generation_wrappers["adventure_parameters"].generate(
                 parameter_conversation,
+                args=args,
             )
             try:
                 # Get the assistant message from the conversation (last message added by generate)
                 assistant_message = result.conversation[-1]
-                content = assistant_message.get("content", [])[0].get("text", "")
+                content_blocks = assistant_message.get("content", [])
+                for block in content_blocks:
+                    if (
+                        block.get("type") == "tool_use"
+                        and block.get("name") == "set_game_parameters"
+                    ):
+                        tool_input = block.get("input", {})
+                        if isinstance(tool_input, str):
+                            try:
+                                tool_input = json.loads(tool_input)
+                            except json.JSONDecodeError:
+                                tool_input = {}
+                        game_setting = tool_input.get("game_setting")
+                        player_character = tool_input.get("player_character")
+                        if game_setting and player_character:
+                            return game_setting, player_character
+
+                content_text = ""
+                if content_blocks:
+                    content_text = content_blocks[0].get("text", "")
                 parsed_tags = parse_xml_tags(
-                    content, required_tags=["game_setting", "player_character"]
+                    content_text, required_tags=["game_setting", "player_character"]
                 )
                 game_setting = parsed_tags["game_setting"]
                 player_character = parsed_tags["player_character"]

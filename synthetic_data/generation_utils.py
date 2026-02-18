@@ -1,6 +1,7 @@
+import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -14,6 +15,9 @@ from synthetic_data.utils import (
 
 # Used for role playing tasks
 GenerationRole = Literal["dungeon_master", "player", "adventure_parameters"]
+
+# Default retry count for generation calls
+MAX_RETRIES = 10
 
 RemoteModel = Literal[
     "claude-4-sonnet",
@@ -48,6 +52,8 @@ class GenerationArgs(BaseModel):
     n_retries: int = 10
     tools: list[ToolParam] | None = None
     tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
+    # Provider-specific tool choice formats (e.g., Anthropic {"type": "any"})
+    tool_choice: Any | None = None
 
 
 FinishReason = Literal[
@@ -65,6 +71,11 @@ FinishReason = Literal[
 class GenerationResult:
     added_messages: list[Message]
     finish_reason: FinishReason = "end_turn"
+    # Convenience fields used by tasks
+    content: str | None = None
+    conversation: Conversation | None = None
+    # Raw usage metadata from provider (tokens, etc.)
+    usage: dict[str, int] | None = None
 
 
 class GenWrapperArgs(BaseModel):
@@ -75,6 +86,7 @@ class GenWrapperArgs(BaseModel):
     model_id: Optional[str] = None
     default_generation_args: GenerationArgs = GenerationArgs()
     max_concurrent: int = 8
+    # Target token throughput (tokens/sec). Kept as max_rps for backward compatibility.
     max_rps: float = 8.0
     providers: list[str] | None = None
     is_reasoning_model: bool = False
@@ -94,8 +106,10 @@ class GenerationWrapper(ABC):
 
     @abstractmethod
     async def generate(
-        self, conversation: Conversation, args: GenerationArgs | None = None
-    ) -> GenerationResult:
+        self,
+        conversation: Conversation | list[Conversation],
+        args: GenerationArgs | None = None,
+    ) -> GenerationResult | list[GenerationResult]:
         """
         Generate completions for the given conversations.
         If args is provided, it will override the args in the wrapper.
@@ -106,3 +120,8 @@ class GenerationWrapper(ABC):
 
     def set_max_concurrent(self, max_concurrent: int) -> None:
         self.gen_wrapper_args.max_concurrent = max_concurrent
+        if hasattr(self, "_semaphore"):
+            try:
+                setattr(self, "_semaphore", asyncio.Semaphore(max_concurrent))
+            except Exception:
+                pass
