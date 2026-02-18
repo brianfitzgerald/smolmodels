@@ -6,10 +6,7 @@ from typing import Literal
 from datasets import Dataset
 from loguru import logger
 
-from synthetic_data.generation import (
-    GenerationWrapper,
-)
-from synthetic_data.generation_utils import GenerationArgs, GenerationResult
+from synthetic_data.generation_utils import GenerationArgs
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     dm_action_prompt,
@@ -31,8 +28,6 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
-MAX_TOOL_ITERATIONS = 5
-
 GAME_SETTINGS = [
     "forest",
     "cave",
@@ -133,61 +128,29 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         return ep
 
     async def step(self, episode: RPGEpisode) -> tuple[RPGEpisode, bool]:
-        # On the first turn, DM goes first to set the scene
-        # After that, player goes first, then DM responds
         if episode.step_count == 0:
-            # Generate dungeon master action to set the scene
-            conversation = self._format_conversation(episode, "dungeon_master")
-            result = await self.generation_wrappers["dungeon_master"].generate(
-                conversation,
-                args=GenerationArgs(
-                    max_tokens=1024,
-                    tools=DM_TOOLS,
-                    tool_use_executor=execute_tool_use_block,
-                    tool_choice={"type": "any"},  # Force DM to use tools (roll_dice, speak, etc.)
-                ),
-            )
-            # Get the assistant message from the conversation (last message added by generate)
-            dm_message = result.conversation[-1]
-            episode.actions.append(Action(role="dungeon_master", message=dm_message))
-
-            episode.step_count += 1
-            finished = episode.step_count >= self.max_user_responses
-            return episode, finished
-
-        # Generate player action
-        conversation = self._format_conversation(episode, "player")
-
-        result = await self.generation_wrappers["player"].generate(
-            conversation,
-            args=GenerationArgs(
-                max_tokens=1024,
-                tools=PLAYER_TOOLS,
-                tool_use_executor=execute_tool_use_block,
-            ),
-        )
-        # Get the assistant message from the conversation (last message added by generate)
-        assistant_message = result.conversation[-1]
-        episode.actions.append(Action(role="player", message=assistant_message))
-
-        # Generate dungeon master action
-        conversation = self._format_conversation(episode, "dungeon_master")
-        result = await self.generation_wrappers["dungeon_master"].generate(
-            conversation,
-            args=GenerationArgs(
-                max_tokens=1024,
+            await self._run_turn(
+                episode,
+                role="dungeon_master",
                 tools=DM_TOOLS,
-                tool_use_executor=execute_tool_use_block,
-                tool_choice={"type": "any"},  # Force DM to use tools
-            ),
-        )
-        # Get the assistant message from the conversation (last message added by generate)
-        dm_message = result.conversation[-1]
-        episode.actions.append(Action(role="dungeon_master", message=dm_message))
+                tool_choice={"type": "any"},
+            )
+            episode.step_count += 1
+            return episode, episode.step_count >= self.max_user_responses
 
+        await self._run_turn(
+            episode,
+            role="player",
+            tools=PLAYER_TOOLS,
+        )
+        await self._run_turn(
+            episode,
+            role="dungeon_master",
+            tools=DM_TOOLS,
+            tool_choice={"type": "any"},
+        )
         episode.step_count += 1
-        finished = episode.step_count >= self.max_user_responses
-        return episode, finished
+        return episode, episode.step_count >= self.max_user_responses
 
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
@@ -252,71 +215,46 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     )
         return None, None
 
+    @staticmethod
     def _convert_tool_calls_to_text_blocks(
-        self,
         content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             block_type = block.get("type")
             if block_type == "tool_use":
-                # Extract only name and input for the sanitized output
-                block_sanitized = {
-                    "name": block.get("name"),
-                    "input": block.get("input"),
-                }
-                tool_call_json_str = json.dumps(block_sanitized)
-                text_block: TextBlock = {
-                    "type": "text",
-                    "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
-                }
-                out_blocks.append(text_block)
-            elif block_type == "tool_result":
-                # Convert tool_result to text block for cross-perspective viewing
-                text_block: TextBlock = {
-                    "type": "text",
-                    "text": block.get("content", ""),
-                }
-                out_blocks.append(text_block)
-            else:
-                out_blocks.append(block)
+                tool_call_json_str = json.dumps(
+                    {"name": block.get("name"), "input": block.get("input")}
+                )
+                out_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
+                    }
+                )
+                continue
+            if block_type == "tool_result":
+                out_blocks.append({"type": "text", "text": block.get("content", "")})
+                continue
+            out_blocks.append(block)
         return out_blocks
 
-    async def _generate_initial_scenario(
+    async def _run_turn(
         self,
-        game_setting: str,
-        player_character: str,
-        generation_wrapper: GenerationWrapper,
-    ) -> GenerationResult:
-        """Generate the initial roleplaying scenario using DM tools."""
-        system_text_block: TextBlock = {
-            "type": "text",
-            "text": dm_action_prompt(game_setting, player_character),
-        }
-        user_text_block: TextBlock = {
-            "type": "text",
-            "text": "Begin the adventure. Set the scene and introduce the player to their situation.",
-        }
-        scenario_conversation: Conversation = [
-            {
-                "role": "system",
-                "content": [system_text_block],
-            },
-            {
-                "role": "user",
-                "content": [user_text_block],
-            },
-        ]
-
-        result = await generation_wrapper.generate(
-            scenario_conversation,
-            args=GenerationArgs(
-                max_tokens=1024,
-                tools=DM_TOOLS,
-                tool_use_executor=execute_tool_use_block,
-            ),
+        episode: RPGEpisode,
+        role: RolePlayingRole,
+        tools: list[dict],
+        tool_choice: dict | None = None,
+    ) -> None:
+        conversation = self._format_conversation(episode, role)
+        args = GenerationArgs(
+            max_tokens=1024,
+            tools=tools,
+            tool_use_executor=execute_tool_use_block,
+            tool_choice=tool_choice,
         )
-        return result
+        result = await self.generation_wrappers[role].generate(conversation, args=args)
+        episode.actions.append(Action(role=role, message=result.conversation[-1]))
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole
