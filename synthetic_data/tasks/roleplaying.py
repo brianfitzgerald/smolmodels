@@ -1,6 +1,5 @@
 import json
 import random
-import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -240,17 +239,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tools=[param_tool],
                 tool_choice={"type": "tool", "name": "set_game_parameters"},
             )
-            t0 = time.perf_counter()
             result = await self.generation_wrappers["adventure_parameters"].generate(
                 parameter_conversation,
                 args=args,
-            )
-            self._record_generation_metric(
-                episode=episode,
-                role="adventure_parameters",
-                duration_s=time.perf_counter() - t0,
-                finish_reason=result.finish_reason,
-                usage_tokens=(result.usage or {}).get("total_tokens", 0),
             )
             try:
                 # Get the assistant message from the conversation (last message added by generate)
@@ -336,51 +327,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             tool_use_executor=execute_tool_use_block,
             tool_choice=tool_choice,
         )
-        t0 = time.perf_counter()
         result = await self.generation_wrappers[role].generate(conversation, args=args)
-        self._record_generation_metric(
-            episode=episode,
-            role=role,
-            duration_s=time.perf_counter() - t0,
-            finish_reason=result.finish_reason,
-            usage_tokens=(result.usage or {}).get("total_tokens", 0),
-        )
         episode.actions.append(Action(role=role, message=result.conversation[-1]))
-
-    def _record_generation_metric(
-        self,
-        episode: RPGEpisode,
-        role: RolePlayingRole | Literal["adventure_parameters"],
-        duration_s: float,
-        finish_reason: str,
-        usage_tokens: int,
-    ) -> None:
-        metrics: list[dict] = episode.metadata.setdefault("generation_metrics", [])
-        metrics.append(
-            {
-                "role": role,
-                "duration_s": round(duration_s, 3),
-                "finish_reason": finish_reason,
-                "usage_tokens": int(usage_tokens or 0),
-            }
-        )
-        duration_ms = int(round(duration_s * 1000))
-        usage_tokens_int = int(usage_tokens or 0)
-        logger.info(
-            f"Generation metrics for: {role}, duration_s: {duration_s:.3f}, finish_reason: {finish_reason}, usage_tokens: {usage_tokens}"
-        )
-        for key, delta in (
-            ("total_calls", 1),
-            (f"{role}_calls", 1),
-            ("total_duration_ms", duration_ms),
-            (f"{role}_duration_ms", duration_ms),
-            ("total_usage_tokens", usage_tokens_int),
-            (f"{role}_usage_tokens", usage_tokens_int),
-        ):
-            episode.metrics[key] = episode.metrics.get(key, 0) + delta
-        if finish_reason == "error":
-            for key in ("total_error_calls", f"{role}_error_calls"):
-                episode.metrics[key] = episode.metrics.get(key, 0) + 1
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole
