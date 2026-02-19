@@ -8,7 +8,7 @@ from typing import Literal
 from datasets import Dataset
 from loguru import logger
 
-from synthetic_data.generation_utils import GenerationArgs
+from synthetic_data.generation_utils import GenerationArgs, RemoteModel
 from synthetic_data.tasks import BaseTask, RunMode
 from synthetic_data.tasks.roleplaying_prompts import (
     dm_action_prompt,
@@ -31,8 +31,6 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
-MAX_SETTING_WORDS = 42
-MAX_CHARACTER_WORDS = 28
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
     "dungeon_master": 512,
     "player": 384,
@@ -66,6 +64,7 @@ class RPGEpisode:
     game_setting: str | None = None
     player_character: str | None = None
     actions: list[Action] = field(default_factory=list)
+    metrics: dict[str, int] = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
 
@@ -87,9 +86,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         run_mode: RunMode,
         max_user_responses: int = 10,
         num_episodes: int = 1000,
-        dungeon_master_model: str = "gpt-4o-mini",
-        player_model: str = "gpt-4.1-nano",
-        adventure_parameters_model: str = "gpt-4.1-nano",
+        dungeon_master_model: RemoteModel = "claude-4-5-sonnet",
+        player_model: RemoteModel = "claude-4-5-sonnet",
+        adventure_parameters_model: RemoteModel = "claude-4-5-haiku",
     ):
         super().__init__(run_mode)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -100,7 +99,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         self._add_generation_wrapper("dungeon_master", dungeon_master_model)  # type: ignore[arg-type]
         self._add_generation_wrapper("player", player_model)  # type: ignore[arg-type]
         self._add_generation_wrapper(
-            "adventure_parameters", adventure_parameters_model  # type: ignore[arg-type]
+            "adventure_parameters",
+            adventure_parameters_model,  # type: ignore[arg-type]
         )
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
@@ -134,7 +134,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "max_user_responses": self.max_user_responses,
             "seed": seed,
             "generation_metrics": [],
-            "generation_metrics_summary": {},
         }
         game_setting, player_character = await self._generate_setting_and_characters(ep)
 
@@ -176,6 +175,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 {"role": action.role, "message": action.message}
                 for action in episode.actions
             ],
+            "metrics": episode.metrics,
             "metadata": episode.metadata,
         }
 
@@ -269,14 +269,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                                 tool_input = {}
                         game_setting = tool_input.get("game_setting")
                         player_character = tool_input.get("player_character")
-                        if game_setting and player_character:
-                            game_setting, player_character = (
-                                self._normalize_game_parameters(
-                                    game_setting, player_character
-                                )
-                            )
-                            return game_setting, player_character
+                        return game_setting, player_character
 
+                # Fallback to parsing the content blocks if the tool call is not found
                 content_text = ""
                 if content_blocks:
                     content_text = content_blocks[0].get("text", "")
@@ -352,18 +347,6 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         )
         episode.actions.append(Action(role=role, message=result.conversation[-1]))
 
-    @staticmethod
-    def _truncate_words(text: str, max_words: int) -> str:
-        words = text.replace("\n", " ").split()
-        return " ".join(words[:max_words]).strip()
-
-    def _normalize_game_parameters(
-        self, game_setting: str, player_character: str
-    ) -> tuple[str, str]:
-        setting = self._truncate_words(game_setting, MAX_SETTING_WORDS)
-        character = self._truncate_words(player_character, MAX_CHARACTER_WORDS)
-        return setting, character
-
     def _record_generation_metric(
         self,
         episode: RPGEpisode,
@@ -372,7 +355,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         finish_reason: str,
         usage_tokens: int,
     ) -> None:
-        metrics = episode.metadata.setdefault("generation_metrics", [])
+        metrics: list[dict] = episode.metadata.setdefault("generation_metrics", [])
         metrics.append(
             {
                 "role": role,
@@ -381,21 +364,23 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "usage_tokens": int(usage_tokens or 0),
             }
         )
-        summary = episode.metadata.setdefault("generation_metrics_summary", {})
-        role_summary = summary.setdefault(
-            role,
-            {
-                "calls": 0,
-                "total_duration_s": 0.0,
-                "total_usage_tokens": 0,
-                "error_calls": 0,
-            },
+        duration_ms = int(round(duration_s * 1000))
+        usage_tokens_int = int(usage_tokens or 0)
+        logger.info(
+            f"Generation metrics for: {role}, duration_s: {duration_s}, finish_reason: {finish_reason}, usage_tokens: {usage_tokens}"
         )
-        role_summary["calls"] += 1
-        role_summary["total_duration_s"] += duration_s
-        role_summary["total_usage_tokens"] += int(usage_tokens or 0)
+        for key, delta in (
+            ("total_calls", 1),
+            (f"{role}_calls", 1),
+            ("total_duration_ms", duration_ms),
+            (f"{role}_duration_ms", duration_ms),
+            ("total_usage_tokens", usage_tokens_int),
+            (f"{role}_usage_tokens", usage_tokens_int),
+        ):
+            episode.metrics[key] = episode.metrics.get(key, 0) + delta
         if finish_reason == "error":
-            role_summary["error_calls"] += 1
+            for key in ("total_error_calls", f"{role}_error_calls"):
+                episode.metrics[key] = episode.metrics.get(key, 0) + 1
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole

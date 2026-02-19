@@ -11,9 +11,8 @@ import asyncio
 import json
 import os
 import time
-from typing import Any
 from dataclasses import dataclass, fields
-from typing import Optional
+from typing import Any, Optional
 
 from anthropic import AsyncAnthropic
 from loguru import logger
@@ -154,13 +153,49 @@ class TokenBucketRateLimiter:
             return
         per_request = max(1.0, actual_tokens / max(1, n_items))
         self.tokens_per_request = (
-            (1 - self.alpha) * self.tokens_per_request + self.alpha * per_request
-        )
+            1 - self.alpha
+        ) * self.tokens_per_request + self.alpha * per_request
         self.capacity = max(self.max_tps, self.tokens_per_request)
+
+
+class ThroughputConcurrencyLimiter:
+    """Limit in-flight requests based on the model token throughput."""
+
+    def __init__(self, rate_limiter: TokenBucketRateLimiter) -> None:
+        self._rate_limiter = rate_limiter
+        self._in_flight = 0
+        self._lock = asyncio.Lock()
+        self._cond = asyncio.Condition(self._lock)
+
+    def _max_in_flight(self) -> int:
+        max_tps = self._rate_limiter.max_tps
+        if max_tps <= 0:
+            return 1_000_000
+        est_tokens = max(1.0, self._rate_limiter.tokens_per_request)
+        return max(1, int(max_tps // est_tokens))
+
+    async def acquire(self) -> None:
+        async with self._cond:
+            while self._in_flight >= self._max_in_flight():
+                await self._cond.wait()
+            self._in_flight += 1
+
+    async def release(self) -> None:
+        async with self._cond:
+            self._in_flight = max(0, self._in_flight - 1)
+            self._cond.notify_all()
+
+    async def __aenter__(self) -> "ThroughputConcurrencyLimiter":
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.release()
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
     """OpenAI Chat Completions wrapper with tool-calling support."""
+
     provider_name: str = "openai"
 
     def __init__(
@@ -189,10 +224,12 @@ class OpenAIGenerationWrapper(GenerationWrapper):
         self._rate_limiter = TokenBucketRateLimiter(
             default_args.max_rps, initial_tokens_per_request=initial_estimate
         )
-        self._semaphore = asyncio.Semaphore(default_args.max_concurrent)
+        self._concurrency_limiter = ThroughputConcurrencyLimiter(self._rate_limiter)
 
     async def generate(
-        self, conversation: Conversation | list[Conversation], args: GenerationArgs | None = None
+        self,
+        conversation: Conversation | list[Conversation],
+        args: GenerationArgs | None = None,
     ) -> GenerationResult | list[GenerationResult]:
         """Generate one or many conversations and return normalized results."""
         conversations, is_batch = _normalize_conversations(conversation)
@@ -399,7 +436,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         # Reserve estimated tokens before issuing the request.
                         est_tokens = self._rate_limiter.estimate_tokens()
                         await self._rate_limiter.acquire(est_tokens)
-                        async with self._semaphore:
+                        async with self._concurrency_limiter:
                             response = await _call_openai(
                                 messages, tools_param, tool_choice_param
                             )
@@ -408,7 +445,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                             actual_tokens = response.usage.total_tokens
                             total_usage += actual_tokens
                             if actual_tokens > est_tokens:
-                                await self._rate_limiter.debit(actual_tokens - est_tokens)
+                                await self._rate_limiter.debit(
+                                    actual_tokens - est_tokens
+                                )
                             elif est_tokens > actual_tokens:
                                 await self._rate_limiter.refund(
                                     est_tokens - actual_tokens
@@ -424,7 +463,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                                 {"type": "text", "text": message.content}
                             )
                         if tool_calls:
-                            content_blocks.extend(_to_tool_blocks_from_openai(tool_calls))
+                            content_blocks.extend(
+                                _to_tool_blocks_from_openai(tool_calls)
+                            )
 
                         assistant_message: Message = {
                             "role": "assistant",
@@ -508,9 +549,11 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                             finish_reason="error",
                             content=None,
                             conversation=conv + added_messages,
-                            usage={"total_tokens": total_usage} if total_usage else None,
+                            usage={"total_tokens": total_usage}
+                            if total_usage
+                            else None,
                         )
-                    await asyncio.sleep(min(2 ** attempt, 10))
+                    await asyncio.sleep(min(2**attempt, 10))
 
             return GenerationResult(
                 added_messages=added_messages,
@@ -526,6 +569,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
 class VLLMWrapper(OpenAIGenerationWrapper):
     """OpenAI-compatible wrapper pointed at a local vLLM server."""
+
     provider_name: str = "vllm"
 
     def __init__(self, args: GenWrapperArgs) -> None:
@@ -552,6 +596,7 @@ class VLLMWrapper(OpenAIGenerationWrapper):
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
     """OpenAI-compatible wrapper configured for OpenRouter."""
+
     def __init__(self, args: GenWrapperArgs) -> None:
         super().__init__(args, "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1")
         if args.providers:
@@ -561,6 +606,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 class AnthropicGenerationWrapper(GenerationWrapper):
     """Anthropic Messages API wrapper with normalized result conversion."""
+
     provider_name = "anthropic"
 
     def __init__(self, args: GenWrapperArgs) -> None:
@@ -582,10 +628,12 @@ class AnthropicGenerationWrapper(GenerationWrapper):
         self._rate_limiter = TokenBucketRateLimiter(
             args.max_rps, initial_tokens_per_request=initial_estimate
         )
-        self._semaphore = asyncio.Semaphore(args.max_concurrent)
+        self._concurrency_limiter = ThroughputConcurrencyLimiter(self._rate_limiter)
 
     async def generate(
-        self, conversation: Conversation | list[Conversation], args: GenerationArgs | None = None
+        self,
+        conversation: Conversation | list[Conversation],
+        args: GenerationArgs | None = None,
     ) -> GenerationResult | list[GenerationResult]:
         """Generate one or many conversations and return normalized results."""
         conversations, is_batch = _normalize_conversations(conversation)
@@ -599,7 +647,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 result = await result
             return result
 
-        def _split_system(conv: Conversation) -> tuple[list[ContentBlock], list[Message]]:
+        def _split_system(
+            conv: Conversation,
+        ) -> tuple[list[ContentBlock], list[Message]]:
             system_blocks: list[ContentBlock] = []
             messages: list[Message] = []
             for msg in conv:
@@ -655,7 +705,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             request_kwargs["tools"] = tools_param
                         if tool_choice_param is not None:
                             request_kwargs["tool_choice"] = tool_choice_param
-                        async with self._semaphore:
+                        async with self._concurrency_limiter:
                             response = await asyncio.wait_for(
                                 self.client.messages.create(**request_kwargs),
                                 timeout=self.gen_wrapper_args.request_timeout_s,
@@ -669,7 +719,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                                 "cache_creation_input_tokens",
                                 "cache_read_input_tokens",
                             ]:
-                                usage_tokens += int(getattr(response.usage, key, 0) or 0)
+                                usage_tokens += int(
+                                    getattr(response.usage, key, 0) or 0
+                                )
                             if usage_tokens:
                                 # Reconcile estimate with actual token usage.
                                 total_usage += usage_tokens
@@ -748,7 +800,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             finish_reason=response.stop_reason or "end_turn",
                             content=final_content,
                             conversation=conv + added_messages,
-                            usage={"total_tokens": total_usage} if total_usage else None,
+                            usage={"total_tokens": total_usage}
+                            if total_usage
+                            else None,
                         )
                 except Exception as e:
                     if attempt == n_retries - 1:
@@ -758,9 +812,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             finish_reason="error",
                             content=None,
                             conversation=conv + added_messages,
-                            usage={"total_tokens": total_usage} if total_usage else None,
+                            usage={"total_tokens": total_usage}
+                            if total_usage
+                            else None,
                         )
-                    await asyncio.sleep(min(2 ** attempt, 10))
+                    await asyncio.sleep(min(2**attempt, 10))
 
             return GenerationResult(
                 added_messages=added_messages,
