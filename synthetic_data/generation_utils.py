@@ -1,7 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional, TypedDict
 
 from pydantic import BaseModel
 
@@ -68,6 +68,12 @@ FinishReason = Literal[
 ]
 
 
+class Usage(TypedDict):
+    total_tokens: int
+    input_tokens: int
+    output_tokens: int
+
+
 @dataclass
 class GenerationResult:
     added_messages: list[Message]
@@ -75,8 +81,7 @@ class GenerationResult:
     # Convenience fields used by tasks
     content: str | None = None
     conversation: Conversation | None = None
-    # Raw usage metadata from provider (tokens, etc.)
-    usage: dict[str, int] | None = None
+    usage: Usage | None = None
 
 
 class GenWrapperArgs(BaseModel):

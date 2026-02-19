@@ -367,7 +367,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         duration_ms = int(round(duration_s * 1000))
         usage_tokens_int = int(usage_tokens or 0)
         logger.info(
-            f"Generation metrics for: {role}, duration_s: {duration_s}, finish_reason: {finish_reason}, usage_tokens: {usage_tokens}"
+            f"Generation metrics for: {role}, duration_s: {duration_s:.3f}, finish_reason: {finish_reason}, usage_tokens: {usage_tokens}"
         )
         for key, delta in (
             ("total_calls", 1),

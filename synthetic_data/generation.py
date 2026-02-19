@@ -15,6 +15,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Optional
 
 from anthropic import AsyncAnthropic
+from anthropic.types.message import Message as AnthropicMessage
 from loguru import logger
 from openai import AsyncOpenAI, OpenAI
 
@@ -706,34 +707,24 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                         if tool_choice_param is not None:
                             request_kwargs["tool_choice"] = tool_choice_param
                         async with self._concurrency_limiter:
-                            response = await asyncio.wait_for(
+                            response: AnthropicMessage = await asyncio.wait_for(
                                 self.client.messages.create(**request_kwargs),
                                 timeout=self.gen_wrapper_args.request_timeout_s,
                             )
 
                         if response.usage:
-                            usage_tokens = 0
-                            for key in [
-                                "input_tokens",
-                                "output_tokens",
-                                "cache_creation_input_tokens",
-                                "cache_read_input_tokens",
-                            ]:
-                                usage_tokens += int(
-                                    getattr(response.usage, key, 0) or 0
-                                )
-                            if usage_tokens:
+                            if response.usage.total_tokens:
                                 # Reconcile estimate with actual token usage.
-                                total_usage += usage_tokens
-                                if usage_tokens > est_tokens:
+                                total_usage += response.usage.output_tokens
+                                if total_usage > est_tokens:
                                     await self._rate_limiter.debit(
-                                        usage_tokens - est_tokens
+                                        total_usage - est_tokens
                                     )
-                                elif est_tokens > usage_tokens:
+                                elif est_tokens > total_usage:
                                     await self._rate_limiter.refund(
-                                        est_tokens - usage_tokens
+                                        est_tokens - total_usage
                                     )
-                                self._rate_limiter.update(usage_tokens)
+                                self._rate_limiter.update(total_usage)
 
                         assistant_blocks: list[ContentBlock] = []
                         for block in response.content:
@@ -775,8 +766,12 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                                     finish_reason="error",
                                     content=None,
                                     conversation=conv + added_messages,
-                                    usage={"total_tokens": total_usage}
-                                    if total_usage
+                                    usage={
+                                        "total_tokens": total_usage,
+                                        "input_tokens": response.usage.input_tokens,
+                                        "output_tokens": response.usage.output_tokens,
+                                    }
+                                    if response.usage
                                     else None,
                                 )
                             tool_results: list[ToolResultBlock] = []
@@ -812,8 +807,12 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             finish_reason="error",
                             content=None,
                             conversation=conv + added_messages,
-                            usage={"total_tokens": total_usage}
-                            if total_usage
+                            usage={
+                                "total_tokens": total_usage,
+                                "input_tokens": response.usage.input_tokens,
+                                "output_tokens": response.usage.output_tokens,
+                            }
+                            if response.usage
                             else None,
                         )
                     await asyncio.sleep(min(2**attempt, 10))
@@ -823,7 +822,13 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 finish_reason="error",
                 content=None,
                 conversation=conv + added_messages,
-                usage={"total_tokens": total_usage} if total_usage else None,
+                usage={
+                    "total_tokens": total_usage,
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                }
+                if response.usage
+                else None,
             )
 
         results = await asyncio.gather(*[_generate_one(conv) for conv in conversations])
