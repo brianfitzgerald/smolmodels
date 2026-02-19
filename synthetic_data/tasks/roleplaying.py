@@ -1,6 +1,8 @@
 import json
 import random
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal
 
 from datasets import Dataset
@@ -29,6 +31,12 @@ from synthetic_data.utils import (
 )
 
 MAX_PARSE_RETRIES = 3
+MAX_SETTING_WORDS = 42
+MAX_CHARACTER_WORDS = 28
+TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
+    "dungeon_master": 512,
+    "player": 384,
+}
 GAME_SETTINGS = [
     "forest",
     "cave",
@@ -80,10 +88,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         max_user_responses: int = 10,
         num_episodes: int = 1000,
         dungeon_master_model: str = "gpt-4o-mini",
-        player_model: str = "gpt-4o-mini",
+        player_model: str = "gpt-4.1-nano",
         adventure_parameters_model: str = "gpt-4.1-nano",
     ):
         super().__init__(run_mode)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_dataset_name = f"roleplaying_game_multi_step_dev_{timestamp}"
         self.max_user_responses = max_user_responses
         self.num_episodes = num_episodes
 
@@ -116,15 +126,15 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         seed = hash(str(sample)) % (2**32)
         ep = RPGEpisode()
         ep.metadata = {
-            "dungeon_master_model": self.generation_wrappers[
-                "dungeon_master"
-            ].provider_name,
-            "player_model": self.generation_wrappers["player"].provider_name,
-            "adventure_parameters_model": self.generation_wrappers[
+            "dungeon_master_model": self.generation_model_names["dungeon_master"],
+            "player_model": self.generation_model_names["player"],
+            "adventure_parameters_model": self.generation_model_names[
                 "adventure_parameters"
-            ].provider_name,
+            ],
             "max_user_responses": self.max_user_responses,
             "seed": seed,
+            "generation_metrics": [],
+            "generation_metrics_summary": {},
         }
         game_setting, player_character = await self._generate_setting_and_characters(ep)
 
@@ -230,9 +240,17 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 tools=[param_tool],
                 tool_choice={"type": "tool", "name": "set_game_parameters"},
             )
+            t0 = time.perf_counter()
             result = await self.generation_wrappers["adventure_parameters"].generate(
                 parameter_conversation,
                 args=args,
+            )
+            self._record_generation_metric(
+                episode=episode,
+                role="adventure_parameters",
+                duration_s=time.perf_counter() - t0,
+                finish_reason=result.finish_reason,
+                usage_tokens=(result.usage or {}).get("total_tokens", 0),
             )
             try:
                 # Get the assistant message from the conversation (last message added by generate)
@@ -252,6 +270,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                         game_setting = tool_input.get("game_setting")
                         player_character = tool_input.get("player_character")
                         if game_setting and player_character:
+                            game_setting, player_character = (
+                                self._normalize_game_parameters(
+                                    game_setting, player_character
+                                )
+                            )
                             return game_setting, player_character
 
                 content_text = ""
@@ -262,6 +285,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 )
                 game_setting = parsed_tags["game_setting"]
                 player_character = parsed_tags["player_character"]
+                game_setting, player_character = self._normalize_game_parameters(
+                    game_setting, player_character
+                )
                 return game_setting, player_character
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
@@ -306,14 +332,70 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         tool_choice: dict | None = None,
     ) -> None:
         conversation = self._format_conversation(episode, role)
+        # Keep tool-calling bounded to avoid runaway latency in multi-turn episodes.
+        max_tool_iterations = 1 if role == "player" else 2
         args = GenerationArgs(
-            max_tokens=1024,
+            max_tokens=TURN_MAX_TOKENS_BY_ROLE[role],
+            max_tool_iterations=max_tool_iterations,
             tools=tools,
             tool_use_executor=execute_tool_use_block,
             tool_choice=tool_choice,
         )
+        t0 = time.perf_counter()
         result = await self.generation_wrappers[role].generate(conversation, args=args)
+        self._record_generation_metric(
+            episode=episode,
+            role=role,
+            duration_s=time.perf_counter() - t0,
+            finish_reason=result.finish_reason,
+            usage_tokens=(result.usage or {}).get("total_tokens", 0),
+        )
         episode.actions.append(Action(role=role, message=result.conversation[-1]))
+
+    @staticmethod
+    def _truncate_words(text: str, max_words: int) -> str:
+        words = text.replace("\n", " ").split()
+        return " ".join(words[:max_words]).strip()
+
+    def _normalize_game_parameters(
+        self, game_setting: str, player_character: str
+    ) -> tuple[str, str]:
+        setting = self._truncate_words(game_setting, MAX_SETTING_WORDS)
+        character = self._truncate_words(player_character, MAX_CHARACTER_WORDS)
+        return setting, character
+
+    def _record_generation_metric(
+        self,
+        episode: RPGEpisode,
+        role: RolePlayingRole | Literal["adventure_parameters"],
+        duration_s: float,
+        finish_reason: str,
+        usage_tokens: int,
+    ) -> None:
+        metrics = episode.metadata.setdefault("generation_metrics", [])
+        metrics.append(
+            {
+                "role": role,
+                "duration_s": round(duration_s, 3),
+                "finish_reason": finish_reason,
+                "usage_tokens": int(usage_tokens or 0),
+            }
+        )
+        summary = episode.metadata.setdefault("generation_metrics_summary", {})
+        role_summary = summary.setdefault(
+            role,
+            {
+                "calls": 0,
+                "total_duration_s": 0.0,
+                "total_usage_tokens": 0,
+                "error_calls": 0,
+            },
+        )
+        role_summary["calls"] += 1
+        role_summary["total_duration_s"] += duration_s
+        role_summary["total_usage_tokens"] += int(usage_tokens or 0)
+        if finish_reason == "error":
+            role_summary["error_calls"] += 1
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole

@@ -4,7 +4,6 @@ Interactive viewer for roleplaying game conversation dataset.
 Renders RPGEpisode samples in an HTML interface with navigation.
 """
 
-import ast
 import json
 import tempfile
 import threading
@@ -12,8 +11,18 @@ import webbrowser
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+
+try:
+    from scripts.trajectory_formatting import (
+        extract_text_from_content,
+        normalize_tool_calls,
+    )
+except ModuleNotFoundError:
+    from trajectory_formatting import (  # type: ignore[no-redef]
+        extract_text_from_content,
+        normalize_tool_calls,
+    )
 
 
 def load_dataset(path: str) -> list[dict]:
@@ -27,8 +36,12 @@ def format_tool_calls_html(tool_calls: list | None) -> str:
     if not tool_calls:
         return ""
 
+    normalized_calls = normalize_tool_calls(tool_calls)
+    if not normalized_calls:
+        return ""
+
     html_parts = ['<div class="tool-calls">']
-    for tc in tool_calls:
+    for tc in normalized_calls:
         if isinstance(tc, dict):
             tc_id = tc.get("id", "unknown")
             func = tc.get("function", {})
@@ -40,15 +53,7 @@ def format_tool_calls_html(tool_calls: list | None) -> str:
             name = getattr(func, "name", "unknown") if func else "unknown"
             args = getattr(func, "arguments", "{}") if func else "{}"
 
-        # Parse and pretty-print arguments
-        try:
-            if isinstance(args, str):
-                args_obj = json.loads(args)
-            else:
-                args_obj = args
-            args_formatted = json.dumps(args_obj, indent=2)
-        except (json.JSONDecodeError, TypeError):
-            args_formatted = str(args)
+        args_formatted = json.dumps(args, indent=2, ensure_ascii=True)
 
         html_parts.append(f"""
         <div class="tool-call">
@@ -62,66 +67,6 @@ def format_tool_calls_html(tool_calls: list | None) -> str:
 
     html_parts.append("</div>")
     return "".join(html_parts)
-
-
-def parse_content_blocks(content: object) -> list[dict]:
-    """Parse content into a list of content block dicts, handling various formats."""
-    if content is None:
-        return []
-
-    # Handle numpy arrays
-    if isinstance(content, np.ndarray):
-        content = content.tolist()
-
-    # Handle stringified lists/dicts
-    if isinstance(content, str):
-        content = content.strip()
-        if content.startswith("[") or content.startswith("{"):
-            try:
-                content = ast.literal_eval(content)
-            except (ValueError, SyntaxError):
-                # Not a valid literal, treat as plain string
-                return [{"type": "text", "text": content}]
-        else:
-            return [{"type": "text", "text": content}]
-
-    # Now content should be a list
-    if isinstance(content, list):
-        return content
-    if isinstance(content, dict):
-        return [content]
-
-    return [{"type": "text", "text": str(content)}]
-
-
-def extract_text_from_content(content: object) -> str:
-    """Extract text from content which can be a string, list, numpy array, or content blocks."""
-    blocks = parse_content_blocks(content)
-
-    text_parts = []
-    for block in blocks:
-        if isinstance(block, dict):
-            block_type = block.get("type", "")
-            if block_type == "text":
-                text_parts.append(block.get("text", ""))
-            elif block_type == "tool_use":
-                # Format tool use as readable text
-                name = block.get("name", "unknown")
-                input_data = block.get("input", {})
-                text_parts.append(f"[Tool: {name}] {json.dumps(input_data)}")
-            elif block_type == "tool_result":
-                result_content = block.get("content", "")
-                text_parts.append(f"[Result: {result_content}]")
-            else:
-                # Unknown block type, try to extract any text
-                if "text" in block:
-                    text_parts.append(block["text"])
-                elif "content" in block:
-                    text_parts.append(str(block["content"]))
-        elif isinstance(block, str):
-            text_parts.append(block)
-
-    return "\n".join(text_parts)
 
 
 def format_message_html(message: dict) -> str:

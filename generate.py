@@ -1,3 +1,9 @@
+"""CLI entrypoint for dataset generation tasks.
+
+This module resolves a task, loads seed/output datasets, runs async generation,
+and persists the resulting dataset in the task's configured output format.
+"""
+
 import asyncio
 import os
 import time
@@ -84,6 +90,12 @@ async def run_task(
     save_every_n_batches: int,
     model: RemoteModel,
 ):
+    """Run one task over an input dataset and return the updated output dataset.
+
+    `BaseTaskV1` uses batched prompt/completion generation. `BaseTask` uses an
+    episode loop (`initial_step` -> repeated `step`) per row.
+    """
+
     async def _append_rows(rows: list[dict]) -> None:
         nonlocal output_dataset
         if not rows:
@@ -95,6 +107,7 @@ async def run_task(
             output_dataset = concatenate_datasets([output_dataset, new_ds])
 
     async def _run_base_task_v1() -> None:
+        """Producer/worker/writer pipeline for prompt->completion style tasks."""
         nonlocal output_dataset
         generation_wrapper = get_generation_wrapper(
             model, task.gen_wrapper_args_override
@@ -107,6 +120,7 @@ async def run_task(
         results_queue: asyncio.Queue[list[dict] | None] = asyncio.Queue()
 
         async def producer() -> None:
+            # Expand epochs and per-row preprocessing into a work queue.
             for _ in range(n_epochs):
                 for row in input_dataset:
                     processed_rows = await task.preprocess_row(row)
@@ -122,6 +136,7 @@ async def run_task(
                     queue.task_done()
                     break
                 batch = [item]
+                # Opportunistically build a local batch without blocking.
                 while len(batch) < max_batch:
                     try:
                         next_item = queue.get_nowait()
@@ -143,6 +158,7 @@ async def run_task(
             await results_queue.put(None)
 
         async def writer() -> None:
+            # Single writer appends rows and handles periodic checkpoint saves.
             batches_written = 0
             finished_workers = 0
             while finished_workers < max_concurrent:
@@ -174,6 +190,7 @@ async def run_task(
         await writer_task
 
     async def _run_base_task() -> None:
+        """Producer/worker/writer pipeline for multi-step episode tasks."""
         nonlocal output_dataset
         max_concurrent = 1
         if task.generation_wrappers:
@@ -199,6 +216,7 @@ async def run_task(
                     queue.task_done()
                     break
                 try:
+                    # Execute full episode lifecycle for one input row.
                     episode = await task.initial_step(item)  # type: ignore[arg-type]
                     finished = False
                     while not finished:
@@ -278,9 +296,12 @@ def main(
     **kwargs,
 ):
     """
-    Generate synthetic preference data from a given dataset.
-    Inputs a seed dataset, that is either given from a CSV or HF dataset,
-    or generated from a synthetic source, such as a list of subjects.
+    Main CLI flow:
+    1. Resolve task and runtime configuration.
+    2. Load existing output dataset unless `restart=True`.
+    3. Load/trim input dataset.
+    4. Run async generation loop.
+    5. Persist final output.
     """
     assert not kwargs, f"Unrecognized arguments: {kwargs}"
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"

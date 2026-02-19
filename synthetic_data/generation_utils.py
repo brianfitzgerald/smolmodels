@@ -50,6 +50,7 @@ class GenerationArgs(BaseModel):
     temperature: float | None = None
     seed: int | None = None
     n_retries: int = 10
+    max_tool_iterations: int = 8
     tools: list[ToolParam] | None = None
     tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
     # Provider-specific tool choice formats (e.g., Anthropic {"type": "any"})
@@ -88,6 +89,7 @@ class GenWrapperArgs(BaseModel):
     max_concurrent: int = 8
     # Target token throughput (tokens/sec). Kept as max_rps for backward compatibility.
     max_rps: float = 8.0
+    request_timeout_s: float = 120.0
     providers: list[str] | None = None
     is_reasoning_model: bool = False
     use_async_client: bool = True

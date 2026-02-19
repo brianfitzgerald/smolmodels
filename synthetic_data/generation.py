@@ -1,3 +1,12 @@
+"""Generation wrappers for provider-specific chat APIs.
+
+Main flow:
+1) Normalize conversations and generation args.
+2) Apply token-rate/concurrency limits.
+3) Call provider API, optionally execute tool calls.
+4) Return unified `GenerationResult` records.
+"""
+
 import asyncio
 import json
 import os
@@ -82,6 +91,12 @@ def _map_openai_finish_reason(reason: str | None) -> str:
 
 
 class TokenBucketRateLimiter:
+    """Token-per-second limiter with adaptive request-size estimation.
+
+    The caller acquires an estimated token budget pre-request, then reconciles
+    with actual usage by debiting or refunding the bucket.
+    """
+
     def __init__(
         self,
         max_tokens_per_sec: float,
@@ -91,7 +106,7 @@ class TokenBucketRateLimiter:
         self.max_tps = max(0.0, float(max_tokens_per_sec))
         self.tokens_per_request = max(1.0, float(initial_tokens_per_request))
         self.alpha = alpha
-        self.capacity = max(self.max_tps, self.tokens_per_request * 2)
+        self.capacity = max(self.max_tps, self.tokens_per_request)
         self.tokens = self.capacity
         self.last_ts = time.monotonic()
         self._lock = asyncio.Lock()
@@ -104,19 +119,35 @@ class TokenBucketRateLimiter:
             return
         while True:
             async with self._lock:
-                now = time.monotonic()
-                elapsed = now - self.last_ts
-                if elapsed > 0:
-                    self.tokens = min(
-                        self.capacity, self.tokens + elapsed * self.max_tps
-                    )
-                    self.last_ts = now
+                self._refill_locked()
                 if self.tokens >= est_tokens:
                     self.tokens -= est_tokens
                     return
                 deficit = est_tokens - self.tokens
                 wait_time = deficit / self.max_tps if self.max_tps > 0 else 0.05
             await asyncio.sleep(max(wait_time, 0.0))
+
+    async def refund(self, refunded_tokens: float) -> None:
+        if refunded_tokens <= 0:
+            return
+        async with self._lock:
+            self._refill_locked()
+            self.tokens = min(self.capacity, self.tokens + refunded_tokens)
+
+    async def debit(self, extra_tokens: float) -> None:
+        if extra_tokens <= 0:
+            return
+        async with self._lock:
+            self._refill_locked()
+            # Allow temporary debt; future acquires wait for refill.
+            self.tokens -= extra_tokens
+
+    def _refill_locked(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self.last_ts
+        if elapsed > 0:
+            self.tokens = min(self.capacity, self.tokens + elapsed * self.max_tps)
+            self.last_ts = now
 
     def update(self, actual_tokens: int, n_items: int = 1) -> None:
         if actual_tokens <= 0:
@@ -125,10 +156,11 @@ class TokenBucketRateLimiter:
         self.tokens_per_request = (
             (1 - self.alpha) * self.tokens_per_request + self.alpha * per_request
         )
-        self.capacity = max(self.max_tps, self.tokens_per_request * 2)
+        self.capacity = max(self.max_tps, self.tokens_per_request)
 
 
 class OpenAIGenerationWrapper(GenerationWrapper):
+    """OpenAI Chat Completions wrapper with tool-calling support."""
     provider_name: str = "openai"
 
     def __init__(
@@ -162,6 +194,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
     async def generate(
         self, conversation: Conversation | list[Conversation], args: GenerationArgs | None = None
     ) -> GenerationResult | list[GenerationResult]:
+        """Generate one or many conversations and return normalized results."""
         conversations, is_batch = _normalize_conversations(conversation)
         effective_args = _merge_generation_args(self.gen_wrapper_args, args)
 
@@ -336,9 +369,16 @@ class OpenAIGenerationWrapper(GenerationWrapper):
             if self.extra_body:
                 kwargs["extra_body"] = self.extra_body
 
+            timeout_s = self.gen_wrapper_args.request_timeout_s
             if isinstance(self.oai_client, AsyncOpenAI):
-                return await self.oai_client.chat.completions.create(**kwargs)
-            return await asyncio.to_thread(self.oai_client.chat.completions.create, **kwargs)
+                return await asyncio.wait_for(
+                    self.oai_client.chat.completions.create(**kwargs),
+                    timeout=timeout_s,
+                )
+            return await asyncio.wait_for(
+                asyncio.to_thread(self.oai_client.chat.completions.create, **kwargs),
+                timeout=timeout_s,
+            )
 
         async def _generate_one(conv: Conversation) -> GenerationResult:
             messages = _to_openai_messages(conv)
@@ -356,16 +396,24 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                 try:
                     tool_iterations = 0
                     while True:
-                        await self._rate_limiter.acquire(
-                            self._rate_limiter.estimate_tokens()
-                        )
+                        # Reserve estimated tokens before issuing the request.
+                        est_tokens = self._rate_limiter.estimate_tokens()
+                        await self._rate_limiter.acquire(est_tokens)
                         async with self._semaphore:
                             response = await _call_openai(
                                 messages, tools_param, tool_choice_param
                             )
                         if response.usage and response.usage.total_tokens:
-                            total_usage += response.usage.total_tokens
-                            self._rate_limiter.update(response.usage.total_tokens)
+                            # Reconcile estimate with actual token usage.
+                            actual_tokens = response.usage.total_tokens
+                            total_usage += actual_tokens
+                            if actual_tokens > est_tokens:
+                                await self._rate_limiter.debit(actual_tokens - est_tokens)
+                            elif est_tokens > actual_tokens:
+                                await self._rate_limiter.refund(
+                                    est_tokens - actual_tokens
+                                )
+                            self._rate_limiter.update(actual_tokens)
 
                         choice = response.choices[0]
                         message = choice.message
@@ -402,8 +450,9 @@ class OpenAIGenerationWrapper(GenerationWrapper):
                         messages.append(assistant_payload)
 
                         if tool_calls and effective_args.tool_use_executor:
+                            # Continue the same turn by feeding tool results back.
                             tool_iterations += 1
-                            if tool_iterations > 8:
+                            if tool_iterations > effective_args.max_tool_iterations:
                                 return GenerationResult(
                                     added_messages=added_messages,
                                     finish_reason="error",
@@ -476,6 +525,7 @@ class OpenAIGenerationWrapper(GenerationWrapper):
 
 
 class VLLMWrapper(OpenAIGenerationWrapper):
+    """OpenAI-compatible wrapper pointed at a local vLLM server."""
     provider_name: str = "vllm"
 
     def __init__(self, args: GenWrapperArgs) -> None:
@@ -501,6 +551,7 @@ class VLLMWrapper(OpenAIGenerationWrapper):
 
 
 class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
+    """OpenAI-compatible wrapper configured for OpenRouter."""
     def __init__(self, args: GenWrapperArgs) -> None:
         super().__init__(args, "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1")
         if args.providers:
@@ -509,6 +560,7 @@ class OpenRouterGenerationWrapper(OpenAIGenerationWrapper):
 
 
 class AnthropicGenerationWrapper(GenerationWrapper):
+    """Anthropic Messages API wrapper with normalized result conversion."""
     provider_name = "anthropic"
 
     def __init__(self, args: GenWrapperArgs) -> None:
@@ -535,6 +587,7 @@ class AnthropicGenerationWrapper(GenerationWrapper):
     async def generate(
         self, conversation: Conversation | list[Conversation], args: GenerationArgs | None = None
     ) -> GenerationResult | list[GenerationResult]:
+        """Generate one or many conversations and return normalized results."""
         conversations, is_batch = _normalize_conversations(conversation)
         effective_args = _merge_generation_args(self.gen_wrapper_args, args)
 
@@ -587,9 +640,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                 try:
                     tool_iterations = 0
                     while True:
-                        await self._rate_limiter.acquire(
-                            self._rate_limiter.estimate_tokens()
-                        )
+                        # Reserve estimated tokens before issuing the request.
+                        est_tokens = self._rate_limiter.estimate_tokens()
+                        await self._rate_limiter.acquire(est_tokens)
                         request_kwargs = {
                             "model": self.model_name,
                             "max_tokens": effective_args.max_tokens or 1024,
@@ -603,7 +656,10 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                         if tool_choice_param is not None:
                             request_kwargs["tool_choice"] = tool_choice_param
                         async with self._semaphore:
-                            response = await self.client.messages.create(**request_kwargs)
+                            response = await asyncio.wait_for(
+                                self.client.messages.create(**request_kwargs),
+                                timeout=self.gen_wrapper_args.request_timeout_s,
+                            )
 
                         if response.usage:
                             usage_tokens = 0
@@ -615,7 +671,16 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             ]:
                                 usage_tokens += int(getattr(response.usage, key, 0) or 0)
                             if usage_tokens:
+                                # Reconcile estimate with actual token usage.
                                 total_usage += usage_tokens
+                                if usage_tokens > est_tokens:
+                                    await self._rate_limiter.debit(
+                                        usage_tokens - est_tokens
+                                    )
+                                elif est_tokens > usage_tokens:
+                                    await self._rate_limiter.refund(
+                                        est_tokens - usage_tokens
+                                    )
                                 self._rate_limiter.update(usage_tokens)
 
                         assistant_blocks: list[ContentBlock] = []
@@ -650,8 +715,9 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             and tool_use_blocks
                             and effective_args.tool_use_executor
                         ):
+                            # Continue the same turn by feeding tool results back.
                             tool_iterations += 1
-                            if tool_iterations > 8:
+                            if tool_iterations > effective_args.max_tool_iterations:
                                 return GenerationResult(
                                     added_messages=added_messages,
                                     finish_reason="error",
@@ -787,6 +853,7 @@ MODEL_CONFIGS: dict[RemoteModel, RemoteModelChoice] = {
 def get_generation_wrapper(
     model_name: RemoteModel, args_override: GenWrapperArgs | None = None
 ) -> GenerationWrapper:
+    """Build a wrapper from `MODEL_CONFIGS`, applying optional arg overrides."""
     config = MODEL_CONFIGS[model_name]
     if args_override:
         for field in fields(args_override):
