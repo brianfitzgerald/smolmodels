@@ -166,26 +166,43 @@ async def run_task(
             finished_workers = 0
             while finished_workers < max_concurrent:
                 results = await results_queue.get()
-                if results is None:
-                    finished_workers += 1
+                try:
+                    if results is None:
+                        finished_workers += 1
+                        continue
+                    try:
+                        await _append_rows(results)
+                        batches_written += 1
+                        _log_progress("Generation progress", batches_written)
+                        if (
+                            save_every_n_batches > 0
+                            and batches_written % save_every_n_batches == 0
+                        ):
+                            if task.output_dataset_format == DatasetFormat.HF_DATASET:
+                                if len(output_dataset) > 0:
+                                    output_dataset.push_to_hub(task.output_dataset_name)
+                                else:
+                                    logger.warning(
+                                        "Skipping checkpoint push: output dataset is empty"
+                                    )
+                            elif task.output_dataset_format == DatasetFormat.PARQUET:
+                                if len(output_dataset) > 0:
+                                    os.makedirs(task.dataset_root_path, exist_ok=True)
+                                    output_dataset.to_parquet(
+                                        f"{task.dataset_root_path}/{task.output_dataset_name}.parquet"
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Skipping checkpoint parquet write: output dataset is empty"
+                                    )
+                            if generation_stats["metric_calls"] > 0:
+                                _log_progress(
+                                    "Generation stats checkpoint", batches_written
+                                )
+                    except Exception as e:
+                        logger.error(f"Error writing generation batch: {e}")
+                finally:
                     results_queue.task_done()
-                    continue
-                await _append_rows(results)
-                batches_written += 1
-                _log_progress("Generation progress", batches_written)
-                if (
-                    save_every_n_batches > 0
-                    and batches_written % save_every_n_batches == 0
-                ):
-                    if task.output_dataset_format == DatasetFormat.HF_DATASET:
-                        output_dataset.push_to_hub(task.output_dataset_name)
-                    elif task.output_dataset_format == DatasetFormat.PARQUET:
-                        output_dataset.to_parquet(
-                            f"{task.dataset_root_path}/{task.output_dataset_name}.parquet"
-                        )
-                    if generation_stats["metric_calls"] > 0:
-                        _log_progress("Generation stats checkpoint", batches_written)
-                results_queue.task_done()
 
         producer_task = asyncio.create_task(producer())
         worker_tasks = [asyncio.create_task(worker()) for _ in range(max_concurrent)]
@@ -352,11 +369,17 @@ def main(
     )
 
     if task.output_dataset_format == DatasetFormat.HF_DATASET:
-        output_dataset.push_to_hub(task.output_dataset_name)
+        if len(output_dataset) > 0:
+            output_dataset.push_to_hub(task.output_dataset_name)
+        else:
+            logger.warning("Skipping final push: output dataset is empty")
     elif task.output_dataset_format == DatasetFormat.PARQUET:
-        os.makedirs(out_dir, exist_ok=True)
-        filename = f"{out_dir}/{task.output_dataset_name}.parquet"
-        output_dataset.to_parquet(filename)
+        if len(output_dataset) > 0:
+            os.makedirs(out_dir, exist_ok=True)
+            filename = f"{out_dir}/{task.output_dataset_name}.parquet"
+            output_dataset.to_parquet(filename)
+        else:
+            logger.warning("Skipping final parquet write: output dataset is empty")
     else:
         raise ValueError(f"Unsupported output format: {task.output_dataset_format}")
 

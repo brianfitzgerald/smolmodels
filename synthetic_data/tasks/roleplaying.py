@@ -1,6 +1,8 @@
+import asyncio
 import json
 import random
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -31,6 +33,7 @@ from synthetic_data.utils import (
 MAX_PARSE_RETRIES = 3
 MAX_SETTING_WORDS = 42
 MAX_CHARACTER_WORDS = 28
+TIMEOUT_BUFFER_S = 5.0
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
     "dungeon_master": 512,
     "player": 192,
@@ -58,6 +61,10 @@ RolePlayingRole = Literal["player", "dungeon_master"]
 DICE_OR_ROLL_TEXT_RE = re.compile(
     r"\b(\d*d\d+|roll(?:ed|ing)?|dice|d20|d12|d10|d8|d6|d4)\b", re.IGNORECASE
 )
+RISKY_ACTION_TEXT_RE = re.compile(
+    r"\b(attack|strike|swing|shoot|fight|dodge|parry|block|jump|climb|sneak|stealth|hide|pick|lock|search|perception|listen|rush|charge|run)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -72,7 +79,14 @@ class RPGEpisode:
     game_setting: str | None = None
     player_character: str | None = None
     actions: list[Action] = field(default_factory=list)
-    metrics: dict[str, int] = field(default_factory=dict)
+    metrics: dict[str, int] = field(
+        default_factory=lambda: {
+            "turn_count": 0,
+            "total_tool_use_blocks": 0,
+            "dm_tool_use_blocks": 0,
+            "player_tool_use_blocks": 0,
+        }
+    )
     metadata: dict = field(default_factory=dict)
 
 
@@ -184,6 +198,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
 
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
+        conversation_lines = self._flatten_action_messages(episode.actions)
         return {
             "step_count": episode.step_count,
             "game_setting": episode.game_setting,
@@ -192,91 +207,46 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 {"role": action.role, "messages": action.messages}
                 for action in episode.actions
             ],
-            "metrics": episode.metrics,
+            "conversation_lines": conversation_lines,
+            "transcript": "\n".join(conversation_lines),
+            "metrics": episode.metrics
+            if episode.metrics
+            else {
+                "turn_count": 0,
+                "total_tool_use_blocks": 0,
+                "dm_tool_use_blocks": 0,
+                "player_tool_use_blocks": 0,
+            },
             "metadata": episode.metadata,
         }
 
     @staticmethod
-    def _dm_tool_use_fewshot() -> Conversation:
-        return [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "I rush the goblin and swing my sword."}
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": "fewshot_roll_attack",
-                        "name": "roll_dice",
-                        "input": {"notation": "1d20", "reason": "attack roll"},
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": "fewshot_roll_attack",
-                        "content": '{"notation":"1d20","reason":"attack roll","rolls":[7],"modifier":0,"total":7}',
-                        "is_error": False,
-                    }
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Your blade whistles past the goblin, and it snaps back with a vicious counterstrike.",
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "I sprint for the collapsing bridge and leap the gap.",
-                    }
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": "fewshot_roll_athletics",
-                        "name": "roll_dice",
-                        "input": {"notation": "1d20", "reason": "jump check"},
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": "fewshot_roll_athletics",
-                        "content": '{"notation":"1d20","reason":"jump check","rolls":[18],"modifier":0,"total":18}',
-                        "is_error": False,
-                    }
-                ],
-            },
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "You clear the gap and crash onto the far ledge as stone crumbles into the abyss behind you.",
-                    }
-                ],
-            },
-        ]
+    def _flatten_action_messages(actions: list[Action]) -> list[str]:
+        lines: list[str] = []
+        for action in actions:
+            for message in action.messages:
+                content = message.get("content", [])
+                if not isinstance(content, list):
+                    continue
+                chunks: list[str] = []
+                for block in content:
+                    block_type = block.get("type")
+                    if block_type == "text":
+                        text = str(block.get("text", "")).strip()
+                        if text:
+                            chunks.append(text)
+                    elif block_type == "tool_use":
+                        name = str(block.get("name", "")).strip()
+                        payload = block.get("input", {})
+                        chunks.append(
+                            f"<tool_use name={name}>{json.dumps(payload, ensure_ascii=False)}</tool_use>"
+                        )
+                    elif block_type == "tool_result":
+                        result = str(block.get("content", "")).strip()
+                        chunks.append(f"<tool_result>{result}</tool_result>")
+                if chunks:
+                    lines.append(f"{action.role}: {' '.join(chunks)}")
+        return lines
 
     async def _generate_setting_and_characters(
         self, theme_input: str
@@ -339,12 +309,16 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 tools=[param_tool],
                 tool_choice={"type": "tool", "name": "set_game_parameters"},
             )
-            result = await self.generation_wrappers["adventure_parameters"].generate(
+            result = await self._generate_with_latency_guard(
+                "adventure_parameters",
                 parameter_conversation,
-                args=args,
+                args,
+                stage=f"setting_generation_attempt_{attempt + 1}",
             )
             try:
                 # Get the assistant message from the conversation (last message added by generate)
+                if not result.conversation:
+                    raise ValueError("No conversation returned by generation wrapper")
                 assistant_message = result.conversation[-1]
                 content_blocks = assistant_message.get("content", [])
                 for block in content_blocks:
@@ -362,7 +336,8 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                         player_character = tool_input.get("player_character")
                         if game_setting and player_character:
                             return game_setting, player_character
-            except ValueError as e:
+                raise ValueError("Missing set_game_parameters tool output")
+            except Exception as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
                     logger.warning(
                         f"Parse failed (attempt {attempt + 1}), retrying: {e}"
@@ -424,6 +399,20 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             return False
         return DICE_OR_ROLL_TEXT_RE.search("\n".join(text_parts)) is not None
 
+    @staticmethod
+    def _contains_risky_action_request(message: Message) -> bool:
+        content = message.get("content", [])
+        if not isinstance(content, list):
+            return False
+        text_parts = [
+            str(block.get("text", ""))
+            for block in content
+            if block.get("type") == "text" and block.get("text")
+        ]
+        if not text_parts:
+            return False
+        return RISKY_ACTION_TEXT_RE.search("\n".join(text_parts)) is not None
+
     async def _run_turn(
         self,
         episode: RPGEpisode,
@@ -442,8 +431,131 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             tool_use_executor=execute_tool_use_block if tools else None,
             tool_choice=tool_choice,
         )
-        result = await self.generation_wrappers[role].generate(conversation, args=args)
+        result = await self._generate_with_latency_guard(
+            role,
+            conversation,
+            args,
+            stage=f"{role}_turn_{episode.step_count}",
+        )
+        if role == "dungeon_master" and tools:
+            latest_user = next(
+                (m for m in reversed(conversation) if m.get("role") == "user"),
+                None,
+            )
+            latest_assistant = next(
+                (
+                    m
+                    for m in reversed(result.added_messages)
+                    if m.get("role") == "assistant"
+                ),
+                None,
+            )
+            if (
+                latest_user is not None
+                and self._contains_risky_action_request(latest_user)
+                and latest_assistant is not None
+                and not self._has_tool_use_block(latest_assistant)
+            ):
+                logger.warning(
+                    "DM resolved risky action without a tool call; retrying with forced tool usage"
+                )
+                retry_args = args.model_copy(deep=True)
+                retry_args.tool_choice = {"type": "any"}
+                retry_result = await self._generate_with_latency_guard(
+                    role,
+                    conversation,
+                    retry_args,
+                    stage=f"{role}_turn_{episode.step_count}_forced_risky_tool_retry",
+                )
+                retry_latest_assistant = next(
+                    (
+                        m
+                        for m in reversed(retry_result.added_messages)
+                        if m.get("role") == "assistant"
+                    ),
+                    None,
+                )
+                if retry_latest_assistant is not None and self._has_tool_use_block(
+                    retry_latest_assistant
+                ):
+                    result = retry_result
+            elif (
+                latest_assistant is not None
+                and self._contains_textual_roll(latest_assistant)
+                and not self._has_tool_use_block(latest_assistant)
+            ):
+                logger.warning(
+                    "DM narrated dice/randomness without a tool call; retrying with forced tool usage"
+                )
+                retry_args = args.model_copy(deep=True)
+                retry_args.tool_choice = {"type": "any"}
+                retry_result = await self._generate_with_latency_guard(
+                    role,
+                    conversation,
+                    retry_args,
+                    stage=f"{role}_turn_{episode.step_count}_forced_tool_retry",
+                )
+                retry_latest_assistant = next(
+                    (
+                        m
+                        for m in reversed(retry_result.added_messages)
+                        if m.get("role") == "assistant"
+                    ),
+                    None,
+                )
+                if retry_latest_assistant is not None and self._has_tool_use_block(
+                    retry_latest_assistant
+                ):
+                    result = retry_result
+        tool_use_blocks = self._count_tool_use_blocks(result.added_messages)
+        episode.metrics["turn_count"] = int(episode.metrics.get("turn_count", 0)) + 1
+        episode.metrics["total_tool_use_blocks"] = (
+            int(episode.metrics.get("total_tool_use_blocks", 0)) + tool_use_blocks
+        )
+        key = (
+            "dm_tool_use_blocks"
+            if role == "dungeon_master"
+            else "player_tool_use_blocks"
+        )
+        episode.metrics[key] = int(episode.metrics.get(key, 0)) + tool_use_blocks
         episode.actions.append(Action(role=role, messages=result.added_messages))
+
+    @staticmethod
+    def _count_tool_use_blocks(messages: list[Message]) -> int:
+        count = 0
+        for message in messages:
+            content = message.get("content", [])
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if block.get("type") == "tool_use":
+                    count += 1
+        return count
+
+    async def _generate_with_latency_guard(
+        self,
+        role: Literal["dungeon_master", "player", "adventure_parameters"],
+        conversation: Conversation,
+        args: GenerationArgs,
+        stage: str,
+    ):
+        wrapper = self.generation_wrappers[role]
+        timeout_s = wrapper.gen_wrapper_args.request_timeout_s + TIMEOUT_BUFFER_S
+        start = time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                wrapper.generate(conversation, args=args),
+                timeout=timeout_s,
+            )
+            elapsed_s = time.perf_counter() - start
+            logger.info(f"{stage} completed in {elapsed_s:.2f}s")
+            return result
+        except asyncio.TimeoutError as e:
+            elapsed_s = time.perf_counter() - start
+            logger.error(
+                f"{stage} timed out after {elapsed_s:.2f}s (timeout={timeout_s:.1f}s)"
+            )
+            raise TimeoutError(f"{stage} timed out after {elapsed_s:.2f}s") from e
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole
@@ -474,8 +586,6 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 "content": [system_text_block],
             },
         ]
-        if generating_role == "dungeon_master":
-            conversation.extend(self._dm_tool_use_fewshot())
 
         # If generating for DM and no actions yet, add a user message to start the game
         if generating_role == "dungeon_master" and not episode.actions:
@@ -493,18 +603,15 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 # Player perspective: dungeon_master -> user, player -> assistant
                 role = "user" if action.role == "dungeon_master" else "assistant"
 
-            content = action.message.get("content", [])
+            # Flatten all content blocks from this turn so we keep trajectory detail,
+            # then normalize tool blocks to text tags for safe replay.
+            merged_blocks: list[ContentBlock] = []
+            for turn_message in action.messages:
+                msg_content = turn_message.get("content", [])
+                if isinstance(msg_content, list):
+                    merged_blocks.extend(msg_content)
+            content = self._convert_tool_calls_to_text_blocks(merged_blocks)
 
-            # Convert tool_use and tool_result blocks when role is "user"
-            # since user messages can't contain tool_use blocks in the Anthropic API
-            if role == "user":
-                content = self._convert_tool_calls_to_text_blocks(content)
-            else:
-                # Preserve trajectory details safely by serializing tool blocks as text
-                # rather than replaying provider-native tool payloads.
-                content = self._convert_tool_calls_to_text_blocks(content)
-
-            # Skip messages with empty content (except final assistant message)
             if not content:
                 continue
 
