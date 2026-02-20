@@ -12,10 +12,17 @@ from typing import Any
 
 import fire
 import pandas as pd
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+from scripts.trajectory_formatting import (
+    normalize_tool_calls,
+    normalize_value,
+    parse_content_blocks,
+)
 from synthetic_data.utils import (
     Conversation,
     Message,
@@ -23,11 +30,6 @@ from synthetic_data.utils import (
     ToolUseBlock,
     clean_message,
     recursive_json_parse,
-)
-from scripts.trajectory_formatting import (
-    parse_content_blocks,
-    normalize_tool_calls,
-    normalize_value,
 )
 
 CONVERSATION_COLUMNS = ("conversation", "messages", "conversations", "trajectory")
@@ -56,7 +58,9 @@ def indent_block(text: str, spaces: int = 2) -> str:
 def render_fields(obj: Any) -> list[str]:
     obj = normalize_value(obj)
     if isinstance(obj, dict):
-        return [f"{key}: {preview_value(value, max_len=200)}" for key, value in obj.items()]
+        return [
+            f"{key}: {preview_value(value, max_len=200)}" for key, value in obj.items()
+        ]
     if isinstance(obj, list):
         return [preview_value(item, max_len=200) for item in obj]
     return [str(obj)]
@@ -72,7 +76,11 @@ def render_arg_fields(args: Any) -> list[str]:
     if isinstance(args, dict):
         lines: list[str] = []
         for key, value in args.items():
-            rendered = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True)
+            rendered = (
+                value
+                if isinstance(value, str)
+                else json.dumps(value, ensure_ascii=True)
+            )
             lines.append(f"{key}: {rendered}")
         return lines
     return render_fields(args)
@@ -255,8 +263,7 @@ def render_row(
     idx: int,
     total: int,
     scroll_offset: int = 0,
-) -> int:
-    console.clear()
+) -> tuple[Group, int, int]:
     row_type = detect_row_type(row)
     header = Table.grid(expand=True)
     header.add_column(justify="left")
@@ -265,7 +272,7 @@ def render_row(
         f"[bold]Trajectory Viewer[/bold] - {path.name}",
         f"row {idx + 1}/{total} | type: {row_type}",
     )
-    console.print(Panel(header))
+    top_panel = Panel(header)
 
     if row_type == "roleplay":
         panels = render_roleplay(row)
@@ -274,23 +281,32 @@ def render_row(
     else:
         panels = render_generic(row)
 
-    body_console = Console(width=console.size.width, record=True)
+    body_width = max(20, console.size.width - 6)
+    body_console = Console(width=body_width, record=True)
     for panel in panels:
         body_console.print(panel)
     body_lines = body_console.export_text().splitlines()
 
     viewport_height = max(console.size.height - 8, 8)
+    page_step = max(1, viewport_height - 2)
     max_scroll = max(0, len(body_lines) - viewport_height)
     scroll_offset = min(max(scroll_offset, 0), max_scroll)
     visible_lines = body_lines[scroll_offset : scroll_offset + viewport_height]
-    console.print("\n".join(visible_lines) if visible_lines else "")
-    console.print(
-        f"[dim]Scroll:[/dim] {scroll_offset + 1}-{min(scroll_offset + viewport_height, len(body_lines))}/{len(body_lines)}"
+    viewport_text = Text(
+        "\n".join(visible_lines) if visible_lines else "",
+        no_wrap=True,
+        overflow="crop",
     )
-    console.print(
-        "[dim]Keys:[/dim] [bold]j[/bold]/[bold]Down[/bold] scroll down, [bold]k[/bold]/[bold]Up[/bold] scroll up, [bold]n[/bold]/[bold]Right[/bold]/[bold]Enter[/bold] next trajectory, [bold]N[/bold]/[bold]Left[/bold] previous trajectory, [bold]g[/bold] first, [bold]G[/bold] last, [bold]o[/bold] open file, [bold]q[/bold] quit"
+    scroll_panel = Panel(viewport_text, title="Trajectory", padding=(0, 0))
+    current_end = min(scroll_offset + viewport_height, len(body_lines))
+    current_start = min(scroll_offset + 1, current_end) if body_lines else 0
+    scroll_status = Text.from_markup(
+        f"[dim]Scroll:[/dim] {current_start}-{current_end}/{len(body_lines)}"
     )
-    return max_scroll
+    key_help = Text.from_markup(
+        "[dim]Keys:[/dim] [bold]j[/bold]/[bold]Down[/bold] page down, [bold]k[/bold]/[bold]Up[/bold] page up, [bold]n[/bold]/[bold]Right[/bold]/[bold]Enter[/bold] next trajectory, [bold]N[/bold]/[bold]Left[/bold] previous trajectory, [bold]g[/bold] first, [bold]G[/bold] last, [bold]o[/bold] open file, [bold]q[/bold] quit"
+    )
+    return Group(top_panel, scroll_panel, scroll_status, key_help), max_scroll, page_step
 
 
 def read_key() -> str:
@@ -418,45 +434,54 @@ def run(
 
     idx = 0
     scroll_offset = 0
-    while True:
-        row = {k: normalize_value(v) for k, v in rows[idx].items()}
-        max_scroll = render_row(
-            console, resolved_path, row, idx, len(rows), scroll_offset=scroll_offset
-        )
-
-        key = read_key()
-        if key == "":
-            break
-        if key in ("j", "\x1b[B"):
-            scroll_offset = min(scroll_offset + 1, max_scroll)
-        elif key in ("k", "\x1b[A"):
-            scroll_offset = max(scroll_offset - 1, 0)
-        elif key in ("\r", "\n", " ", "n", "l", "\x1b[C"):
-            idx = min(idx + 1, len(rows) - 1)
-            scroll_offset = 0
-        elif key in ("N", "p", "h", "\x1b[D"):
-            idx = max(idx - 1, 0)
-            scroll_offset = 0
-        elif key == "g":
-            idx = 0
-            scroll_offset = 0
-        elif key == "G":
-            idx = len(rows) - 1
-            scroll_offset = 0
-        elif key == "o":
-            selected = select_parquet_file(
-                console, dataset_dir_path, prefer_latest=latest
+    with Live(console=console, screen=True, auto_refresh=False) as live:
+        while True:
+            row = {k: normalize_value(v) for k, v in rows[idx].items()}
+            view, max_scroll, page_step = render_row(
+                console,
+                resolved_path,
+                row,
+                idx,
+                len(rows),
+                scroll_offset=scroll_offset,
             )
-            if selected is None:
-                continue
-            resolved_path = selected
-            rows = load_rows(resolved_path)
-            if not rows:
-                raise ValueError(f"No rows found in {resolved_path}")
-            idx = 0
-            scroll_offset = 0
-        elif key in ("q", "\x03"):
-            break
+            live.update(view, refresh=True)
+
+            key = read_key()
+            if key == "":
+                break
+            if key in ("j", "\x1b[B"):
+                scroll_offset = min(scroll_offset + page_step, max_scroll)
+            elif key in ("k", "\x1b[A"):
+                scroll_offset = max(scroll_offset - page_step, 0)
+            elif key in ("\r", "\n", " ", "n", "l", "\x1b[C"):
+                idx = min(idx + 1, len(rows) - 1)
+                scroll_offset = 0
+            elif key in ("N", "p", "h", "\x1b[D"):
+                idx = max(idx - 1, 0)
+                scroll_offset = 0
+            elif key == "g":
+                idx = 0
+                scroll_offset = 0
+            elif key == "G":
+                idx = len(rows) - 1
+                scroll_offset = 0
+            elif key == "o":
+                live.stop()
+                selected = select_parquet_file(
+                    console, dataset_dir_path, prefer_latest=latest
+                )
+                live.start(refresh=True)
+                if selected is None:
+                    continue
+                resolved_path = selected
+                rows = load_rows(resolved_path)
+                if not rows:
+                    raise ValueError(f"No rows found in {resolved_path}")
+                idx = 0
+                scroll_offset = 0
+            elif key in ("q", "\x03"):
+                break
 
 
 if __name__ == "__main__":

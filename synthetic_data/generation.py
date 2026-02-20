@@ -713,18 +713,26 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             )
 
                         if response.usage:
-                            if response.usage.total_tokens:
+                            usage_tokens = 0
+                            for key in [
+                                "input_tokens",
+                                "output_tokens",
+                                "cache_creation_input_tokens",
+                                "cache_read_input_tokens",
+                            ]:
+                                usage_tokens += int(getattr(response.usage, key, 0) or 0)
+                            if usage_tokens:
                                 # Reconcile estimate with actual token usage.
-                                total_usage += response.usage.output_tokens
-                                if total_usage > est_tokens:
+                                total_usage += usage_tokens
+                                if usage_tokens > est_tokens:
                                     await self._rate_limiter.debit(
-                                        total_usage - est_tokens
+                                        usage_tokens - est_tokens
                                     )
-                                elif est_tokens > total_usage:
+                                elif est_tokens > usage_tokens:
                                     await self._rate_limiter.refund(
-                                        est_tokens - total_usage
+                                        est_tokens - usage_tokens
                                     )
-                                self._rate_limiter.update(total_usage)
+                                self._rate_limiter.update(usage_tokens)
 
                         assistant_blocks: list[ContentBlock] = []
                         for block in response.content:

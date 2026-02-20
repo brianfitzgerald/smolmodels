@@ -26,10 +26,11 @@ from synthetic_data.utils import (
     Message,
     TextBlock,
     ToolParam,
-    parse_xml_tags,
 )
 
 MAX_PARSE_RETRIES = 3
+MAX_SETTING_WORDS = 42
+MAX_CHARACTER_WORDS = 28
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
     "dungeon_master": 512,
     "player": 192,
@@ -62,7 +63,7 @@ DICE_OR_ROLL_TEXT_RE = re.compile(
 @dataclass
 class Action:
     role: Literal["player", "dungeon_master"]
-    message: Message
+    messages: list[Message]
 
 
 @dataclass
@@ -94,7 +95,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
         max_user_responses: int = 10,
         num_episodes: int = 1000,
         dungeon_master_model: RemoteModel = "claude-4-5-sonnet",
-        player_model: RemoteModel = "claude-4-5-sonnet",
+        player_model: RemoteModel = "claude-4-5-haiku",
         adventure_parameters_model: RemoteModel = "claude-4-5-haiku",
     ):
         super().__init__(run_mode)
@@ -150,7 +151,6 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             "generation_metrics": [],
         }
         game_setting, player_character = await self._generate_setting_and_characters(
-            ep,
             theme_input=game_theme,
         )
 
@@ -189,7 +189,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
             "actions": [
-                {"role": action.role, "message": action.message}
+                {"role": action.role, "messages": action.messages}
                 for action in episode.actions
             ],
             "metrics": episode.metrics,
@@ -252,7 +252,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                         "type": "tool_use",
                         "id": "fewshot_roll_athletics",
                         "name": "roll_dice",
-                        "input": {"notation": "1d20", "reason": "athletics check"},
+                        "input": {"notation": "1d20", "reason": "jump check"},
                     }
                 ],
             },
@@ -262,7 +262,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                     {
                         "type": "tool_result",
                         "tool_use_id": "fewshot_roll_athletics",
-                        "content": '{"notation":"1d20","reason":"athletics check","rolls":[18],"modifier":0,"total":18}',
+                        "content": '{"notation":"1d20","reason":"jump check","rolls":[18],"modifier":0,"total":18}',
                         "is_error": False,
                     }
                 ],
@@ -279,10 +279,9 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
         ]
 
     async def _generate_setting_and_characters(
-        self, episode: RPGEpisode, theme_input: str
+        self, theme_input: str
     ) -> tuple[str, str]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = self._truncate_words(theme_input, 8) or "mysterious ruins"
         param_tool: ToolParam = {
             "name": "set_game_parameters",
             "description": "Set the game setting and player character for the roleplaying scenario.",
@@ -361,21 +360,8 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                                 tool_input = {}
                         game_setting = tool_input.get("game_setting")
                         player_character = tool_input.get("player_character")
-                        return game_setting, player_character
-
-                # Fallback to parsing the content blocks if the tool call is not found
-                content_text = ""
-                if content_blocks:
-                    content_text = content_blocks[0].get("text", "")
-                parsed_tags = parse_xml_tags(
-                    content_text, required_tags=["game_setting", "player_character"]
-                )
-                game_setting = parsed_tags["game_setting"]
-                player_character = parsed_tags["player_character"]
-                game_setting, player_character = self._normalize_game_parameters(
-                    game_setting, player_character
-                )
-                return game_setting, player_character
+                        if game_setting and player_character:
+                            return game_setting, player_character
             except ValueError as e:
                 if attempt < MAX_PARSE_RETRIES - 1:
                     logger.warning(
@@ -385,7 +371,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                     logger.warning(
                         f"Using fallback game parameters after {MAX_PARSE_RETRIES} attempts"
                     )
-        return self._fallback_game_parameters(theme_input, episode.metadata["seed"])
+        raise ValueError("Failed to generate game parameters")
 
     @staticmethod
     def _convert_tool_calls_to_text_blocks(
@@ -457,7 +443,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             tool_choice=tool_choice,
         )
         result = await self.generation_wrappers[role].generate(conversation, args=args)
-        episode.actions.append(Action(role=role, message=result.conversation[-1]))
+        episode.actions.append(Action(role=role, messages=result.added_messages))
 
     def _format_conversation(
         self, episode: RPGEpisode, generating_role: RolePlayingRole

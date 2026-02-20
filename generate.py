@@ -228,6 +228,8 @@ def main(
     restart: bool = False,
     n_epochs: int = 1,
     run_mode: RunMode = "cli",
+    roleplaying_max_user_responses: int = 13,
+    roleplaying_num_episodes: int = 100,
     **kwargs,
 ):
     """
@@ -253,8 +255,8 @@ def main(
         if task_name == "roleplaying_game":
             task = RoleplayingGameMultiStepTask(
                 run_mode,
-                max_user_responses=10,
-                num_episodes=100,
+                max_user_responses=roleplaying_max_user_responses,
+                num_episodes=roleplaying_num_episodes,
             )
         else:
             task = ALL_TASKS[task_name](run_mode)
