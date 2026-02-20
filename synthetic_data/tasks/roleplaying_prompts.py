@@ -13,6 +13,9 @@ When player takes risky action, use roll_dice to determine outcome:
 - Physical challenges: roll_dice "1d20" for athletics/acrobatics
 - Stealth: roll_dice "1d20" for sneaking
 - Perception: roll_dice "1d20" for noticing things
+- If the player attacks, dodges, climbs, sneaks, or attempts any risky move, resolve it with a tool call before narrating success/failure.
+- Never narrate a roll, rolled value, or random/chance result in plain text without using tools.
+- Use tools whenever randomness determines success/failure; plain text is for narration only.
 
 Make the game CHALLENGING:
 - Low rolls (1-8) = failure with consequences
@@ -79,4 +82,4 @@ AVOID:
 - Passive observation
 - Flowery descriptions
 
-Use action tool for physical actions. Be aggressive and proactive!"""
+Tools are optional. Prefer short direct action text. Be aggressive and proactive!"""

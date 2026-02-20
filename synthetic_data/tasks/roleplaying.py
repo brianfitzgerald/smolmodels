@@ -1,5 +1,6 @@
 import json
 import random
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -16,7 +17,6 @@ from synthetic_data.tasks.roleplaying_prompts import (
 )
 from synthetic_data.tasks.roleplaying_tools import (
     DM_TOOLS,
-    PLAYER_TOOLS,
     execute_tool_use_block,
 )
 from synthetic_data.utils import (
@@ -32,7 +32,7 @@ from synthetic_data.utils import (
 MAX_PARSE_RETRIES = 3
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
     "dungeon_master": 512,
-    "player": 384,
+    "player": 192,
 }
 GAME_SETTINGS = [
     "forest",
@@ -44,11 +44,19 @@ GAME_SETTINGS = [
     "temple",
     "library",
     "museum",
-    "library",
-    "museum",
+]
+CHARACTER_ARCHETYPES = [
+    "resourceful scout with a shortbow and rope kit",
+    "battle-worn sellsword with a shield and torch",
+    "quick-fingered infiltrator with lockpicks and smoke bombs",
+    "field medic with a mace, bandages, and grit",
+    "arcane skirmisher with a wand and emergency charms",
 ]
 
 RolePlayingRole = Literal["player", "dungeon_master"]
+DICE_OR_ROLL_TEXT_RE = re.compile(
+    r"\b(\d*d\d+|roll(?:ed|ing)?|dice|d20|d12|d10|d8|d6|d4)\b", re.IGNORECASE
+)
 
 
 @dataclass
@@ -67,7 +75,7 @@ class RPGEpisode:
     metadata: dict = field(default_factory=dict)
 
 
-class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
+class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
     """
     Multi-step roleplaying game task using native tool calling:
     Step 1: Generate game parameters (setting and characters)
@@ -101,6 +109,12 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "adventure_parameters",
             adventure_parameters_model,  # type: ignore[arg-type]
         )
+        for role, wrapper in self.generation_wrappers.items():
+            wrapper.set_max_concurrent(1)
+            # Keep latency bounded so one slow provider call does not stall a full run.
+            wrapper.gen_wrapper_args.request_timeout_s = (
+                30.0 if role == "player" else 60.0
+            )
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -110,19 +124,19 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         logger.info("Loading custom dataset for roleplaying game")
         seed = random.randint(0, 2**32)
         rng = random.Random(seed)
-        game_setting = rng.choice(GAME_SETTINGS)
         episode_data = [
             {
-                "game_setting": game_setting,
-                "seed": random.randint(0, 2**32),
+                "game_setting": rng.choice(GAME_SETTINGS),
+                "seed": rng.randint(0, 2**32 - 1),
             }
             for _ in range(self.num_episodes)
         ]
         logger.info(f"Created {len(episode_data)} episodes")
         return Dataset.from_list(episode_data)
 
-    async def initial_step(self, sample: None) -> RPGEpisode:
-        seed = hash(str(sample)) % (2**32)
+    async def initial_step(self, sample: dict) -> RPGEpisode:
+        seed = int(sample.get("seed", random.randint(0, 2**32 - 1)))
+        game_theme = str(sample.get("game_setting", "mysterious ruins")).strip()
         ep = RPGEpisode()
         ep.metadata = {
             "dungeon_master_model": self.generation_model_names["dungeon_master"],
@@ -132,9 +146,13 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             ],
             "max_user_responses": self.max_user_responses,
             "seed": seed,
+            "seed_theme": game_theme,
             "generation_metrics": [],
         }
-        game_setting, player_character = await self._generate_setting_and_characters(ep)
+        game_setting, player_character = await self._generate_setting_and_characters(
+            ep,
+            theme_input=game_theme,
+        )
 
         assert game_setting is not None and player_character is not None
         ep.game_setting = game_setting
@@ -154,7 +172,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         await self._run_turn(
             episode,
             role="player",
-            tools=PLAYER_TOOLS,
+            tools=[],
         )
         await self._run_turn(
             episode,
@@ -178,11 +196,93 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             "metadata": episode.metadata,
         }
 
+    @staticmethod
+    def _dm_tool_use_fewshot() -> Conversation:
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "I rush the goblin and swing my sword."}
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "fewshot_roll_attack",
+                        "name": "roll_dice",
+                        "input": {"notation": "1d20", "reason": "attack roll"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "fewshot_roll_attack",
+                        "content": '{"notation":"1d20","reason":"attack roll","rolls":[7],"modifier":0,"total":7}',
+                        "is_error": False,
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Your blade whistles past the goblin, and it snaps back with a vicious counterstrike.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "I sprint for the collapsing bridge and leap the gap.",
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "fewshot_roll_athletics",
+                        "name": "roll_dice",
+                        "input": {"notation": "1d20", "reason": "athletics check"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "fewshot_roll_athletics",
+                        "content": '{"notation":"1d20","reason":"athletics check","rolls":[18],"modifier":0,"total":18}',
+                        "is_error": False,
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "You clear the gap and crash onto the far ledge as stone crumbles into the abyss behind you.",
+                    }
+                ],
+            },
+        ]
+
     async def _generate_setting_and_characters(
-        self, episode: RPGEpisode
-    ) -> tuple[str, str] | tuple[None, None]:
+        self, episode: RPGEpisode, theme_input: str
+    ) -> tuple[str, str]:
         """Generate game parameters (setting and characters) using XML parsing."""
-        theme_input = "A mysterious adventure"
+        theme_input = self._truncate_words(theme_input, 8) or "mysterious ruins"
         param_tool: ToolParam = {
             "name": "set_game_parameters",
             "description": "Set the game setting and player character for the roleplaying scenario.",
@@ -236,6 +336,7 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                     {"role": "user", "content": [strict_user_block]}
                 )
             args = GenerationArgs(
+                n_retries=2,
                 tools=[param_tool],
                 tool_choice={"type": "tool", "name": "set_game_parameters"},
             )
@@ -281,15 +382,16 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                         f"Parse failed (attempt {attempt + 1}), retrying: {e}"
                     )
                 else:
-                    raise ValueError(
-                        f"Failed to generate game parameters after {MAX_PARSE_RETRIES} attempts"
+                    logger.warning(
+                        f"Using fallback game parameters after {MAX_PARSE_RETRIES} attempts"
                     )
-        return None, None
+        return self._fallback_game_parameters(theme_input, episode.metadata["seed"])
 
     @staticmethod
     def _convert_tool_calls_to_text_blocks(
         content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
+        """Since user messages can't contain tool calls, convert them to text."""
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             block_type = block.get("type")
@@ -305,10 +407,36 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 )
                 continue
             if block_type == "tool_result":
-                out_blocks.append({"type": "text", "text": block.get("content", "")})
+                out_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"<tool_result>{block.get('content', '')}</tool_result>",
+                    }
+                )
                 continue
             out_blocks.append(block)
         return out_blocks
+
+    @staticmethod
+    def _has_tool_use_block(message: Message) -> bool:
+        content = message.get("content", [])
+        if not isinstance(content, list):
+            return False
+        return any(block.get("type") == "tool_use" for block in content)
+
+    @staticmethod
+    def _contains_textual_roll(message: Message) -> bool:
+        content = message.get("content", [])
+        if not isinstance(content, list):
+            return False
+        text_parts = [
+            str(block.get("text", ""))
+            for block in content
+            if block.get("type") == "text" and block.get("text")
+        ]
+        if not text_parts:
+            return False
+        return DICE_OR_ROLL_TEXT_RE.search("\n".join(text_parts)) is not None
 
     async def _run_turn(
         self,
@@ -321,10 +449,11 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
         # Keep tool-calling bounded to avoid runaway latency in multi-turn episodes.
         max_tool_iterations = 1 if role == "player" else 2
         args = GenerationArgs(
+            n_retries=1,
             max_tokens=TURN_MAX_TOKENS_BY_ROLE[role],
             max_tool_iterations=max_tool_iterations,
-            tools=tools,
-            tool_use_executor=execute_tool_use_block,
+            tools=tools or None,
+            tool_use_executor=execute_tool_use_block if tools else None,
             tool_choice=tool_choice,
         )
         result = await self.generation_wrappers[role].generate(conversation, args=args)
@@ -359,6 +488,8 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
                 "content": [system_text_block],
             },
         ]
+        if generating_role == "dungeon_master":
+            conversation.extend(self._dm_tool_use_fewshot())
 
         # If generating for DM and no actions yet, add a user message to start the game
         if generating_role == "dungeon_master" and not episode.actions:
@@ -383,11 +514,9 @@ class RoleplayingGameMultiStepTask(BaseTask[None, RPGEpisode]):
             if role == "user":
                 content = self._convert_tool_calls_to_text_blocks(content)
             else:
-                # For assistant messages, filter out tool_result blocks
-                # (they can only be in user messages per Anthropic API)
-                content = [
-                    block for block in content if block.get("type") != "tool_result"
-                ]
+                # Preserve trajectory details safely by serializing tool blocks as text
+                # rather than replaying provider-native tool payloads.
+                content = self._convert_tool_calls_to_text_blocks(content)
 
             # Skip messages with empty content (except final assistant message)
             if not content:

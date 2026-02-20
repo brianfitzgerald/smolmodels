@@ -11,7 +11,7 @@ import asyncio
 import json
 import os
 import time
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from anthropic import AsyncAnthropic
@@ -916,17 +916,13 @@ def get_generation_wrapper(
 ) -> GenerationWrapper:
     """Build a wrapper from `MODEL_CONFIGS`, applying optional arg overrides."""
     config = MODEL_CONFIGS[model_name]
-    if args_override:
-        for field in fields(args_override):
-            if (
-                field.default != getattr(args_override, field.name)
-                and field.name != "dotenv"
-            ):
-                setattr(config.args, field.name, getattr(args_override, field.name))
-                logger.info(
-                    f"Overriding {field.name} in gen wrapper args with {getattr(args_override, field.name)}"
-                )
-    elif config.args is None:
-        config.args = GenWrapperArgs()
-    assert config.args is not None
-    return config.model(config.args)
+    base_args = (
+        config.args.model_copy(deep=True)
+        if config.args is not None
+        else GenWrapperArgs()
+    )
+    if args_override is not None:
+        for key, value in args_override.model_dump(exclude_none=True).items():
+            setattr(base_args, key, value)
+            logger.info(f"Overriding {key} in gen wrapper args with {value}")
+    return config.model(base_args)

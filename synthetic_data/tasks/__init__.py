@@ -149,6 +149,10 @@ class BaseTask(ABC, Generic[SampleT, EpisodeT]):
 
     def __init__(self, run_mode: RunMode) -> None:
         self.run_mode = run_mode
+        # Keep wrappers instance-local; class-level mutable dicts can leak state
+        # across tasks/runs.
+        self.generation_wrappers = {}
+        self.generation_model_names = {}
         self.dataset_root_path = (
             "../dataset_files"
             if run_mode == "notebook"

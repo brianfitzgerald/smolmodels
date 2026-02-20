@@ -132,7 +132,17 @@ def clean_message(message: JSONSchemaKey, truncate_length: int | None = None):
     """
 
     if isinstance(message, list):
-        message = ", ".join(message)
+        serialized_items = []
+        for item in message:
+            if isinstance(item, str):
+                serialized_items.append(item)
+            elif isinstance(item, (dict, list)):
+                serialized_items.append(json.dumps(item, ensure_ascii=False))
+            elif item is None:
+                serialized_items.append("")
+            else:
+                serialized_items.append(str(item))
+        message = ", ".join(serialized_items)
     elif isinstance(message, bool):
         message = str(message)
     elif isinstance(message, (int, float)):

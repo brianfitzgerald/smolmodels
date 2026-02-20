@@ -6,6 +6,7 @@ and persists the resulting dataset in the task's configured output format.
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass
 from typing import Dict, Literal, Optional, cast
 
@@ -54,10 +55,71 @@ async def run_task(
     episode loop (`initial_step` -> repeated `step`) per row.
     """
 
+    generation_stats = {
+        "rows_appended": 0,
+        "metric_calls": 0,
+        "metric_error_calls": 0,
+        "metric_tokens": 0,
+        "metric_duration_s": 0.0,
+    }
+    run_started_at = time.time()
+    target_rows = max(1, len(input_dataset) * max(1, n_epochs))
+
+    def _log_progress(stage: str, batches_written: int) -> None:
+        if generation_stats["metric_calls"] == 0:
+            return
+        elapsed = max(0.001, time.time() - run_started_at)
+        error_rate = (
+            generation_stats["metric_error_calls"] / generation_stats["metric_calls"]
+        )
+        rows = generation_stats["rows_appended"]
+        rows_per_min = rows / elapsed * 60.0
+        pct = min(100.0, (rows / target_rows) * 100.0)
+        logger.info(
+            "{}: batches={}, rows={}/{}, progress={:.1f}%, calls={}, errors={}, error_rate={:.3f}, tokens={}, model_duration_s={:.2f}, rows_per_min={:.2f}".format(
+                stage,
+                batches_written,
+                rows,
+                target_rows,
+                pct,
+                generation_stats["metric_calls"],
+                generation_stats["metric_error_calls"],
+                error_rate,
+                generation_stats["metric_tokens"],
+                generation_stats["metric_duration_s"],
+                rows_per_min,
+            )
+        )
+
+    def _accumulate_generation_stats(rows: list[dict]) -> None:
+        for row in rows:
+            generation_stats["rows_appended"] += 1
+            metadata = row.get("metadata", {}) if isinstance(row, dict) else {}
+            metrics = (
+                metadata.get("generation_metrics", [])
+                if isinstance(metadata, dict)
+                else []
+            )
+            if not isinstance(metrics, list):
+                continue
+            for metric in metrics:
+                if not isinstance(metric, dict):
+                    continue
+                generation_stats["metric_calls"] += 1
+                if metric.get("finish_reason") == "error":
+                    generation_stats["metric_error_calls"] += 1
+                generation_stats["metric_tokens"] += int(
+                    metric.get("usage_tokens", 0) or 0
+                )
+                generation_stats["metric_duration_s"] += float(
+                    metric.get("duration_s", 0.0) or 0.0
+                )
+
     async def _append_rows(rows: list[dict]) -> None:
         nonlocal output_dataset
         if not rows:
             return
+        _accumulate_generation_stats(rows)
         new_ds = Dataset.from_list(rows)
         if len(output_dataset) == 0:
             output_dataset = new_ds
@@ -110,6 +172,7 @@ async def run_task(
                     continue
                 await _append_rows(results)
                 batches_written += 1
+                _log_progress("Generation progress", batches_written)
                 if (
                     save_every_n_batches > 0
                     and batches_written % save_every_n_batches == 0
@@ -117,7 +180,11 @@ async def run_task(
                     if task.output_dataset_format == DatasetFormat.HF_DATASET:
                         output_dataset.push_to_hub(task.output_dataset_name)
                     elif task.output_dataset_format == DatasetFormat.PARQUET:
-                        output_dataset.to_parquet(f"{task.output_dataset_name}.parquet")
+                        output_dataset.to_parquet(
+                            f"{task.dataset_root_path}/{task.output_dataset_name}.parquet"
+                        )
+                    if generation_stats["metric_calls"] > 0:
+                        _log_progress("Generation stats checkpoint", batches_written)
                 results_queue.task_done()
 
         producer_task = asyncio.create_task(producer())
@@ -132,6 +199,9 @@ async def run_task(
 
     assert isinstance(task, BaseTask)
     await _run_base_task()
+
+    if generation_stats["metric_calls"] > 0:
+        _log_progress("Generation stats final", generation_stats["rows_appended"])
 
     return output_dataset
 
@@ -266,6 +336,7 @@ def main(
         if run_mode == "cli"
         else "/model-weights/dataset_files"
     )
+    os.makedirs(out_dir, exist_ok=True)
 
     output_dataset: Dataset = asyncio.run(
         run_task(
@@ -281,6 +352,7 @@ def main(
     if task.output_dataset_format == DatasetFormat.HF_DATASET:
         output_dataset.push_to_hub(task.output_dataset_name)
     elif task.output_dataset_format == DatasetFormat.PARQUET:
+        os.makedirs(out_dir, exist_ok=True)
         filename = f"{out_dir}/{task.output_dataset_name}.parquet"
         output_dataset.to_parquet(filename)
     else:
