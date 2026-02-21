@@ -97,14 +97,13 @@ ACTION_TOOL: ToolParam = {
 }
 
 # Tool collections by role
-DM_TOOLS: list[ToolParam] = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL, SPEAK_TOOL]
-PLAYER_TOOLS: list[ToolParam] = [SPEAK_TOOL, ACTION_TOOL]
+DM_TOOLS: list[ToolParam] = [ROLL_DICE_TOOL, RANDOM_CHOICE_TOOL]
+PLAYER_TOOLS: list[ToolParam] = [ACTION_TOOL]
 
 # All tools combined
 ALL_TOOLS: list[ToolParam] = [
     ROLL_DICE_TOOL,
     RANDOM_CHOICE_TOOL,
-    SPEAK_TOOL,
     ACTION_TOOL,
 ]
 

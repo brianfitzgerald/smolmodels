@@ -21,7 +21,12 @@ def normalize_value(value: Any) -> Any:
             try:
                 return ast.literal_eval(stripped)
             except (ValueError, SyntaxError):
-                return value
+                pass
+            try:
+                return json.loads(stripped)
+            except (json.JSONDecodeError, ValueError):
+                pass
+            return value
         return value
     return value
 

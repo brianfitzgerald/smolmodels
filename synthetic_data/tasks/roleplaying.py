@@ -1,7 +1,6 @@
 import asyncio
 import json
 import random
-import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,10 +32,13 @@ from synthetic_data.utils import (
 MAX_PARSE_RETRIES = 3
 MAX_SETTING_WORDS = 42
 MAX_CHARACTER_WORDS = 28
-TIMEOUT_BUFFER_S = 5.0
+TIMEOUT_BUFFER_S = 10.0
+# Number of recent actions to include in conversation context.
+# Each step produces 2 actions (player + DM), so 8 actions = last 4 turns.
+MAX_CONTEXT_ACTIONS = 8
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
-    "dungeon_master": 512,
-    "player": 192,
+    "dungeon_master": 200,
+    "player": 50,
 }
 GAME_SETTINGS = [
     "forest",
@@ -58,14 +60,6 @@ CHARACTER_ARCHETYPES = [
 ]
 
 RolePlayingRole = Literal["player", "dungeon_master"]
-DICE_OR_ROLL_TEXT_RE = re.compile(
-    r"\b(\d*d\d+|roll(?:ed|ing)?|dice|d20|d12|d10|d8|d6|d4)\b", re.IGNORECASE
-)
-RISKY_ACTION_TEXT_RE = re.compile(
-    r"\b(attack|strike|swing|shoot|fight|dodge|parry|block|jump|climb|sneak|stealth|hide|pick|lock|search|perception|listen|rush|charge|run)\b",
-    re.IGNORECASE,
-)
-
 
 @dataclass
 class Action:
@@ -125,11 +119,30 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             adventure_parameters_model,  # type: ignore[arg-type]
         )
         for role, wrapper in self.generation_wrappers.items():
-            wrapper.set_max_concurrent(1)
             # Keep latency bounded so one slow provider call does not stall a full run.
-            wrapper.gen_wrapper_args.request_timeout_s = (
-                30.0 if role == "player" else 60.0
+            # With low max_tokens, each API round-trip should be 5-15s.
+            # DM may have 2 tool iterations (2-3 round-trips), so 90s is generous.
+            if role == "player":
+                wrapper.gen_wrapper_args.request_timeout_s = 30.0
+            else:
+                wrapper.gen_wrapper_args.request_timeout_s = 90.0
+            # Raise the token-rate ceiling so the ThroughputConcurrencyLimiter
+            # allows enough in-flight requests for concurrent episodes.
+            # max_in_flight = max_rps / tokens_per_request; with max_tokens=200
+            # and default max_rps=100 that gives only 1. We set it high enough
+            # for 16 concurrent episodes (200 * 16 = 3200).
+            target_rps = 4000.0
+            wrapper.gen_wrapper_args.max_rps = max(
+                wrapper.gen_wrapper_args.max_rps, target_rps
             )
+            if hasattr(wrapper, "_rate_limiter"):
+                wrapper._rate_limiter.max_tps = max(
+                    wrapper._rate_limiter.max_tps, target_rps
+                )
+                wrapper._rate_limiter.capacity = max(
+                    wrapper._rate_limiter.max_tps,
+                    wrapper._rate_limiter.tokens_per_request,
+                )
 
     def load_custom(self, dataset_root_path: str) -> Dataset:
         """
@@ -179,6 +192,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 episode,
                 role="dungeon_master",
                 tools=DM_TOOLS,
+                tool_choice={"type": "any"},
             )
             episode.step_count += 1
             return episode, episode.step_count >= self.max_user_responses
@@ -192,6 +206,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             episode,
             role="dungeon_master",
             tools=DM_TOOLS,
+            tool_choice={"type": "any"},
         )
         episode.step_count += 1
         return episode, episode.step_count >= self.max_user_responses
@@ -199,25 +214,33 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
     def format_episode(self, episode: RPGEpisode) -> dict:
         """Convert a finished RPGEpisode to a dictionary for storage."""
         conversation_lines = self._flatten_action_messages(episode.actions)
+        # Serialize actions/metrics/metadata as JSON strings to avoid HF datasets
+        # schema conflicts when different episodes use different tool types
+        # (e.g., roll_dice vs speak vs random_choice have different input shapes).
         return {
             "step_count": episode.step_count,
             "game_setting": episode.game_setting,
             "player_character": episode.player_character,
-            "actions": [
-                {"role": action.role, "messages": action.messages}
-                for action in episode.actions
-            ],
+            "actions": json.dumps(
+                [
+                    {"role": action.role, "messages": action.messages}
+                    for action in episode.actions
+                ],
+                ensure_ascii=False,
+            ),
             "conversation_lines": conversation_lines,
             "transcript": "\n".join(conversation_lines),
-            "metrics": episode.metrics
-            if episode.metrics
-            else {
-                "turn_count": 0,
-                "total_tool_use_blocks": 0,
-                "dm_tool_use_blocks": 0,
-                "player_tool_use_blocks": 0,
-            },
-            "metadata": episode.metadata,
+            "metrics": json.dumps(
+                episode.metrics
+                if episode.metrics
+                else {
+                    "turn_count": 0,
+                    "total_tool_use_blocks": 0,
+                    "dm_tool_use_blocks": 0,
+                    "player_tool_use_blocks": 0,
+                }
+            ),
+            "metadata": json.dumps(episode.metadata, ensure_ascii=False),
         }
 
     @staticmethod
@@ -352,7 +375,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
     def _convert_tool_calls_to_text_blocks(
         content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
-        """Since user messages can't contain tool calls, convert them to text."""
+        """Convert tool_use/tool_result blocks to text for user-role messages."""
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             block_type = block.get("type")
@@ -363,7 +386,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 out_blocks.append(
                     {
                         "type": "text",
-                        "text": f"<user_tool_call>{tool_call_json_str}</user_tool_call>",
+                        "text": f"<tool_call>{tool_call_json_str}</tool_call>",
                     }
                 )
                 continue
@@ -385,34 +408,6 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             return False
         return any(block.get("type") == "tool_use" for block in content)
 
-    @staticmethod
-    def _contains_textual_roll(message: Message) -> bool:
-        content = message.get("content", [])
-        if not isinstance(content, list):
-            return False
-        text_parts = [
-            str(block.get("text", ""))
-            for block in content
-            if block.get("type") == "text" and block.get("text")
-        ]
-        if not text_parts:
-            return False
-        return DICE_OR_ROLL_TEXT_RE.search("\n".join(text_parts)) is not None
-
-    @staticmethod
-    def _contains_risky_action_request(message: Message) -> bool:
-        content = message.get("content", [])
-        if not isinstance(content, list):
-            return False
-        text_parts = [
-            str(block.get("text", ""))
-            for block in content
-            if block.get("type") == "text" and block.get("text")
-        ]
-        if not text_parts:
-            return False
-        return RISKY_ACTION_TEXT_RE.search("\n".join(text_parts)) is not None
-
     async def _run_turn(
         self,
         episode: RPGEpisode,
@@ -421,8 +416,10 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
         tool_choice: dict | None = None,
     ) -> None:
         conversation = self._format_conversation(episode, role)
-        # Keep tool-calling bounded to avoid runaway latency in multi-turn episodes.
-        max_tool_iterations = 1 if role == "player" else 2
+        # Two tool iterations for DM: forced tool_use → tool_result → narration.
+        # With max_tool_iterations=2 the model gets a second chance to produce text
+        # even if its first continuation after the tool result is another tool_use.
+        max_tool_iterations = 2
         args = GenerationArgs(
             n_retries=1,
             max_tokens=TURN_MAX_TOKENS_BY_ROLE[role],
@@ -437,76 +434,17 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             args,
             stage=f"{role}_turn_{episode.step_count}",
         )
+        # Log whether any assistant message in this turn used tools.
         if role == "dungeon_master" and tools:
-            latest_user = next(
-                (m for m in reversed(conversation) if m.get("role") == "user"),
-                None,
+            any_tool_use = any(
+                self._has_tool_use_block(m)
+                for m in result.added_messages
+                if m.get("role") == "assistant"
             )
-            latest_assistant = next(
-                (
-                    m
-                    for m in reversed(result.added_messages)
-                    if m.get("role") == "assistant"
-                ),
-                None,
-            )
-            if (
-                latest_user is not None
-                and self._contains_risky_action_request(latest_user)
-                and latest_assistant is not None
-                and not self._has_tool_use_block(latest_assistant)
-            ):
+            if not any_tool_use:
                 logger.warning(
-                    "DM resolved risky action without a tool call; retrying with forced tool usage"
+                    f"DM turn {episode.step_count} produced no tool calls"
                 )
-                retry_args = args.model_copy(deep=True)
-                retry_args.tool_choice = {"type": "any"}
-                retry_result = await self._generate_with_latency_guard(
-                    role,
-                    conversation,
-                    retry_args,
-                    stage=f"{role}_turn_{episode.step_count}_forced_risky_tool_retry",
-                )
-                retry_latest_assistant = next(
-                    (
-                        m
-                        for m in reversed(retry_result.added_messages)
-                        if m.get("role") == "assistant"
-                    ),
-                    None,
-                )
-                if retry_latest_assistant is not None and self._has_tool_use_block(
-                    retry_latest_assistant
-                ):
-                    result = retry_result
-            elif (
-                latest_assistant is not None
-                and self._contains_textual_roll(latest_assistant)
-                and not self._has_tool_use_block(latest_assistant)
-            ):
-                logger.warning(
-                    "DM narrated dice/randomness without a tool call; retrying with forced tool usage"
-                )
-                retry_args = args.model_copy(deep=True)
-                retry_args.tool_choice = {"type": "any"}
-                retry_result = await self._generate_with_latency_guard(
-                    role,
-                    conversation,
-                    retry_args,
-                    stage=f"{role}_turn_{episode.step_count}_forced_tool_retry",
-                )
-                retry_latest_assistant = next(
-                    (
-                        m
-                        for m in reversed(retry_result.added_messages)
-                        if m.get("role") == "assistant"
-                    ),
-                    None,
-                )
-                if retry_latest_assistant is not None and self._has_tool_use_block(
-                    retry_latest_assistant
-                ):
-                    result = retry_result
         tool_use_blocks = self._count_tool_use_blocks(result.added_messages)
         episode.metrics["turn_count"] = int(episode.metrics.get("turn_count", 0)) + 1
         episode.metrics["total_tool_use_blocks"] = (
@@ -563,6 +501,10 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
         """
         For the DM, generate with player actions as user actions, and DM actions as assistant actions.
         For the player, generate with DM actions as user actions, and player actions as assistant actions.
+
+        All actions are flattened to text with tool_use/tool_result blocks
+        converted to text representations.  This avoids dangling tool_use errors
+        when replaying conversations where max_tool_iterations was exceeded.
         """
 
         assert episode.game_setting is not None
@@ -587,39 +529,36 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             },
         ]
 
-        # If generating for DM and no actions yet, add a user message to start the game
-        if generating_role == "dungeon_master" and not episode.actions:
+        # DM always gets the initial user prompt so that the first assistant
+        # message (its own replayed step-0 turn) has a preceding user message.
+        if generating_role == "dungeon_master":
             content_block: TextBlock = {
                 "type": "text",
                 "text": "Begin the adventure. Set the opening scene.",
             }
             conversation.append({"role": "user", "content": [content_block]})
 
-        for action in episode.actions:
-            if generating_role == "dungeon_master":
-                # DM perspective: player -> user, dm -> assistant
-                role = "user" if action.role == "player" else "assistant"
-            else:  # generating_role == "player"
-                # Player perspective: dungeon_master -> user, player -> assistant
-                role = "user" if action.role == "dungeon_master" else "assistant"
+        # Window the context to keep API calls fast with growing episodes.
+        actions = episode.actions[-MAX_CONTEXT_ACTIONS:]
 
-            # Flatten all content blocks from this turn so we keep trajectory detail,
-            # then normalize tool blocks to text tags for safe replay.
+        for action in actions:
+            # Flatten ALL actions to text, regardless of role.
+            # We avoid replaying raw tool_use/tool_result blocks because the
+            # Anthropic API requires every tool_use to have a matching
+            # tool_result immediately after; if max_tool_iterations is exceeded
+            # the wrapper can return a dangling tool_use, which causes a 400.
+            if generating_role == "dungeon_master":
+                role = "user" if action.role == "player" else "assistant"
+            else:
+                role = "user" if action.role == "dungeon_master" else "assistant"
             merged_blocks: list[ContentBlock] = []
             for turn_message in action.messages:
                 msg_content = turn_message.get("content", [])
                 if isinstance(msg_content, list):
                     merged_blocks.extend(msg_content)
             content = self._convert_tool_calls_to_text_blocks(merged_blocks)
-
             if not content:
                 continue
-
-            message: Message = {
-                "role": role,
-                "content": content,
-            }
-
-            conversation.append(message)
+            conversation.append({"role": role, "content": content})
 
         return conversation

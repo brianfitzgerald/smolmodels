@@ -104,6 +104,9 @@ def format_content_blocks(content: Any) -> str:
         if block_type == "text":
             rendered.append("[Text]")
             rendered.append(str(block.get("text", "")))
+        elif block_type == "thinking":
+            rendered.append("[Thinking]")
+            rendered.append(str(block.get("thinking", "")))
         elif block_type == "tool_use":
             tool_block: ToolUseBlock = block  # type: ignore[assignment]
             name = str(block.get("name", "unknown"))
@@ -192,15 +195,23 @@ def preview_value(value: Any, max_len: int = 100) -> str:
     return text
 
 
+ROLE_STYLES: dict[str, str] = {
+    "dungeon_master": "bold yellow",
+    "player": "bold green",
+}
+
+
 def render_roleplay(row: dict[str, Any]) -> list[Any]:
-    rows: list[Any] = []
+    panels: list[Any] = []
+
+    # Episode info
     info = Table.grid(padding=(0, 2))
     info.add_column(style="cyan")
     info.add_column()
     info.add_row("game_setting", str(row.get("game_setting", "")))
     info.add_row("player_character", str(row.get("player_character", "")))
     info.add_row("step_count", str(row.get("step_count", "")))
-    rows.append(Panel(info, title="Episode"))
+    panels.append(Panel(info, title="Episode"))
 
     metadata = normalize_value(row.get("metadata"))
     if isinstance(metadata, dict) and metadata:
@@ -209,31 +220,50 @@ def render_roleplay(row: dict[str, Any]) -> list[Any]:
         md.add_column("value")
         for key, value in metadata.items():
             md.add_row(str(key), preview_value(value, max_len=120))
-        rows.append(md)
+        panels.append(md)
 
+    # Metrics
+    metrics = normalize_value(row.get("metrics"))
+    if isinstance(metrics, dict) and metrics:
+        mt = Table.grid(padding=(0, 2))
+        mt.add_column(style="cyan")
+        mt.add_column()
+        for key, value in metrics.items():
+            mt.add_row(str(key), str(value))
+        panels.append(Panel(mt, title="Metrics"))
+
+    # Actions — each action has a game role and a list of API messages
     actions = normalize_value(row.get("actions")) or []
     if not isinstance(actions, list):
         actions = [actions]
+
     conv = Text()
     for i, action in enumerate(actions, start=1):
-        role = "unknown"
-        message = action
-        if isinstance(action, dict) and isinstance(action.get("message"), dict):
-            role = str(action.get("role", role))
-            message = action["message"]
-        elif isinstance(action, dict):
-            role = str(action.get("role", role))
-        label = role.upper()
-        conv.append(f"{i}. [{label}]\n", style="bold yellow")
-        if isinstance(message, dict):
-            body = format_message_body(message)
-            if body:
-                conv.append(indent_block(body))
+        if not isinstance(action, dict):
+            conv.append(f"{i}. {action}\n\n")
+            continue
+
+        role = str(action.get("role", "unknown"))
+        style = ROLE_STYLES.get(role, "bold")
+        conv.append(f"{i}. [{role.upper()}]\n", style=style)
+
+        action_messages = normalize_value(action.get("messages")) or []
+        if not isinstance(action_messages, list):
+            action_messages = [action_messages]
+
+        if action_messages:
+            for j, message in enumerate(action_messages, start=1):
+                if isinstance(message, dict):
+                    conv.append(indent_block(format_message(message, j)))
+                else:
+                    conv.append(indent_block(f"{j}. {message}"))
+                conv.append("\n")
         else:
-            conv.append(str(message))
+            conv.append(indent_block("No messages"))
         conv.append("\n\n")
-    rows.append(Panel(conv, title="Actions"))
-    return rows
+
+    panels.append(Panel(conv, title="Actions"))
+    return panels
 
 
 def render_conversation(row: dict[str, Any]) -> list[Any]:
