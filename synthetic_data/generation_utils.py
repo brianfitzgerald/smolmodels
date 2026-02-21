@@ -55,6 +55,9 @@ class GenerationArgs(BaseModel):
     tool_use_executor: Callable[[ToolUseBlock], ToolResultBlock] | None = None
     # Provider-specific tool choice formats (e.g., Anthropic {"type": "any"})
     tool_choice: Any | None = None
+    # Anthropic extended thinking: token budget for internal reasoning.
+    # Must be >= 1024 and < max_tokens. When set, temperature is forced to 1.
+    thinking_budget_tokens: int | None = None
 
 
 FinishReason = Literal[

@@ -7,6 +7,7 @@ import json
 import sys
 import termios
 import tty
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -35,24 +36,115 @@ from synthetic_data.utils import (
 CONVERSATION_COLUMNS = ("conversation", "messages", "conversations", "trajectory")
 
 
-def format_message(message: Message | Any, index: int) -> str:
+# -- Styled rendering (appends directly to rich.text.Text objects) -----------
+
+
+BLOCK_STYLES: dict[str, tuple[str, str]] = {
+    "text": ("bold cyan", ""),
+    "thinking": ("bold magenta", "dim italic"),
+    "tool_use": ("bold yellow", "yellow"),
+    "tool_result": ("bold green", "green"),
+    "tool_result_error": ("bold red", "red"),
+}
+
+
+def _append_lines(target: Text, content: str, indent: int, style: str = "") -> None:
+    pad = " " * indent
+    for line in content.splitlines():
+        target.append(f"{pad}{line}\n", style=style)
+
+
+def append_content_blocks_to_text(
+    target: Text, content: Any, indent: int = 0
+) -> None:
+    """Append formatted content blocks with rich styling to a Text object."""
+    blocks = parse_content_blocks(content)
+    pad = " " * indent
+    for block in blocks:
+        block = normalize_value(block)
+        if isinstance(block, str):
+            target.append(f"{pad}[Text]\n", style="bold cyan")
+            _append_lines(target, block, indent)
+            continue
+        if not isinstance(block, dict):
+            target.append(f"{pad}[Content]\n", style="bold cyan")
+            target.append(f"{pad}{preview_value(block, max_len=300)}\n")
+            continue
+
+        block_type = block.get("type", "")
+        if block_type == "text":
+            target.append(f"{pad}[Text]\n", style="bold cyan")
+            _append_lines(target, str(block.get("text", "")), indent)
+        elif block_type == "thinking":
+            target.append(f"{pad}[Thinking]\n", style="bold magenta")
+            _append_lines(
+                target, str(block.get("thinking", "")), indent, style="dim italic"
+            )
+        elif block_type == "tool_use":
+            tool_block: ToolUseBlock = block  # type: ignore[assignment]
+            name = str(block.get("name", "unknown"))
+            target.append(f"{pad}[Tool Call: {name}]\n", style="bold yellow")
+            for line in render_arg_fields(tool_block.get("input", {})):
+                target.append(f"{pad}{line}\n", style="yellow")
+        elif block_type == "tool_result":
+            result_block: ToolResultBlock = block  # type: ignore[assignment]
+            is_error = result_block.get("is_error", False)
+            hdr_style, body_style = (
+                BLOCK_STYLES["tool_result_error"]
+                if is_error
+                else BLOCK_STYLES["tool_result"]
+            )
+            target.append(f"{pad}[Tool Result]\n", style=hdr_style)
+            for line in render_fields(result_block.get("content", "")):
+                target.append(f"{pad}{line}\n", style=body_style)
+        else:
+            target.append(f"{pad}[{block_type or 'Content'}]\n", style="bold cyan")
+            for line in render_fields(block):
+                target.append(f"{pad}{line}\n")
+
+
+def append_tool_calls_to_text(
+    target: Text, tool_calls: Any, indent: int = 0
+) -> None:
+    normalized = normalize_tool_calls(tool_calls)
+    if not normalized:
+        return
+    pad = " " * indent
+    for call in normalized:
+        if isinstance(call, dict):
+            fn = call.get("function", {})
+            if isinstance(fn, dict):
+                name = fn.get("name", "unknown")
+                args = fn.get("arguments", {})
+            else:
+                name = "unknown"
+                args = {}
+            target.append(f"{pad}[Tool Call: {name}]\n", style="bold yellow")
+            for line in render_arg_fields(args):
+                target.append(f"{pad}{line}\n", style="yellow")
+        else:
+            target.append(f"{pad}[Tool Call]\n", style="bold yellow")
+            target.append(f"{pad}{preview_value(call, max_len=300)}\n")
+
+
+def append_message_to_text(
+    target: Text, message: Message | Any, index: int, indent: int = 0
+) -> None:
     message = normalize_value(message)
+    pad = " " * indent
     if not isinstance(message, dict):
-        return f"{index}. {message}"
+        target.append(f"{pad}{index}. {message}\n")
+        return
 
     role = str(message.get("role", "unknown")).upper()
-    parts = [f"{index}. [{role}]"]
-    body = format_message_body(message)
-    if body:
-        parts.append(indent_block(body))
-    return "\n".join(parts)
-
-
-def indent_block(text: str, spaces: int = 2) -> str:
-    if not text:
-        return ""
-    pad = " " * spaces
-    return "\n".join(f"{pad}{line}" if line else "" for line in text.splitlines())
+    target.append(f"{pad}{index}. [{role}]\n", style="bold")
+    body_indent = indent + 2
+    content = message.get("content", "")
+    if content:
+        append_content_blocks_to_text(target, content, indent=body_indent)
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        append_tool_calls_to_text(target, tool_calls, indent=body_indent)
 
 
 def render_fields(obj: Any) -> list[str]:
@@ -85,80 +177,6 @@ def render_arg_fields(args: Any) -> list[str]:
         return lines
     return render_fields(args)
 
-
-def format_content_blocks(content: Any) -> str:
-    blocks = parse_content_blocks(content)
-    rendered: list[str] = []
-    for block in blocks:
-        block = normalize_value(block)
-        if isinstance(block, str):
-            rendered.append("[Text]")
-            rendered.append(block)
-            continue
-        if not isinstance(block, dict):
-            rendered.append("[Content]")
-            rendered.append(preview_value(block, max_len=300))
-            continue
-
-        block_type = block.get("type", "")
-        if block_type == "text":
-            rendered.append("[Text]")
-            rendered.append(str(block.get("text", "")))
-        elif block_type == "thinking":
-            rendered.append("[Thinking]")
-            rendered.append(str(block.get("thinking", "")))
-        elif block_type == "tool_use":
-            tool_block: ToolUseBlock = block  # type: ignore[assignment]
-            name = str(block.get("name", "unknown"))
-            rendered.append(f"[Tool Call: {name}]")
-            for line in render_arg_fields(tool_block.get("input", {})):
-                rendered.append(line)
-        elif block_type == "tool_result":
-            result_block: ToolResultBlock = block  # type: ignore[assignment]
-            rendered.append("[Tool Result]")
-            for line in render_fields(result_block.get("content", "")):
-                rendered.append(line)
-        else:
-            rendered.append(f"[{block_type or 'Content'}]")
-            for line in render_fields(block):
-                rendered.append(line)
-    return "\n".join(rendered)
-
-
-def format_message_body(message: Message | dict[str, Any]) -> str:
-    parts: list[str] = []
-    content = format_content_blocks(message.get("content", ""))
-    if content:
-        parts.append(content)
-
-    tool_calls = format_tool_calls(message.get("tool_calls"))
-    if tool_calls:
-        parts.append(tool_calls)
-    return "\n".join(parts)
-
-
-def format_tool_calls(tool_calls: Any) -> str:
-    normalized = normalize_tool_calls(tool_calls)
-    if not normalized:
-        return ""
-
-    formatted: list[str] = []
-    for call in normalized:
-        if isinstance(call, dict):
-            fn = call.get("function", {})
-            if isinstance(fn, dict):
-                name = fn.get("name", "unknown")
-                args = fn.get("arguments", {})
-            else:
-                name = "unknown"
-                args = {}
-            formatted.append(f"[Tool Call: {name}]")
-            for line in render_arg_fields(args):
-                formatted.append(line)
-        else:
-            formatted.append("[Tool Call]")
-            formatted.append(preview_value(call, max_len=300))
-    return "\n".join(formatted)
 
 
 def get_messages_from_row(row: dict[str, Any]) -> Conversation:
@@ -254,13 +272,12 @@ def render_roleplay(row: dict[str, Any]) -> list[Any]:
         if action_messages:
             for j, message in enumerate(action_messages, start=1):
                 if isinstance(message, dict):
-                    conv.append(indent_block(format_message(message, j)))
+                    append_message_to_text(conv, message, j, indent=2)
                 else:
-                    conv.append(indent_block(f"{j}. {message}"))
-                conv.append("\n")
+                    conv.append(f"  {j}. {message}\n")
         else:
-            conv.append(indent_block("No messages"))
-        conv.append("\n\n")
+            conv.append("  No messages\n")
+        conv.append("\n")
 
     panels.append(Panel(conv, title="Actions"))
     return panels
@@ -270,8 +287,8 @@ def render_conversation(row: dict[str, Any]) -> list[Any]:
     messages: Conversation = get_messages_from_row(row)
     text = Text()
     for i, message in enumerate(messages, start=1):
-        text.append(format_message(message, i))
-        text.append("\n\n")
+        append_message_to_text(text, message, i)
+        text.append("\n")
     if not messages:
         text.append("No conversation messages detected.")
     return [Panel(text, title="Conversation")]
@@ -312,21 +329,22 @@ def render_row(
         panels = render_generic(row)
 
     body_width = max(20, console.size.width - 6)
-    body_console = Console(width=body_width, record=True)
+    string_io = StringIO()
+    body_console = Console(file=string_io, width=body_width, force_terminal=True)
     for panel in panels:
         body_console.print(panel)
-    body_lines = body_console.export_text().splitlines()
+    body_lines = string_io.getvalue().splitlines()
 
     viewport_height = max(console.size.height - 8, 8)
     page_step = max(1, viewport_height - 2)
     max_scroll = max(0, len(body_lines) - viewport_height)
     scroll_offset = min(max(scroll_offset, 0), max_scroll)
     visible_lines = body_lines[scroll_offset : scroll_offset + viewport_height]
-    viewport_text = Text(
-        "\n".join(visible_lines) if visible_lines else "",
-        no_wrap=True,
-        overflow="crop",
+    viewport_text = Text.from_ansi(
+        "\n".join(visible_lines) if visible_lines else ""
     )
+    viewport_text.no_wrap = True
+    viewport_text.overflow = "crop"
     scroll_panel = Panel(viewport_text, title="Trajectory", padding=(0, 0))
     current_end = min(scroll_offset + viewport_height, len(body_lines))
     current_start = min(scroll_offset + 1, current_end) if body_lines else 0

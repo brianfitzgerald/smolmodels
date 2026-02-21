@@ -700,7 +700,25 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             "system": system_blocks if system_blocks else None,
                             "messages": messages,
                         }
-                        if effective_args.temperature is not None:
+                        # Thinking is incompatible with forced tool choice
+                        # (tool_choice "any" or {"type": "tool", ...}).
+                        forced_tool = False
+                        if tool_choice_param is not None:
+                            if isinstance(tool_choice_param, dict):
+                                tc_type = tool_choice_param.get("type")
+                                forced_tool = tc_type in ("any", "tool")
+                            elif isinstance(tool_choice_param, str):
+                                forced_tool = tool_choice_param in ("any", "tool")
+                        if (
+                            effective_args.thinking_budget_tokens is not None
+                            and not forced_tool
+                        ):
+                            request_kwargs["thinking"] = {
+                                "type": "enabled",
+                                "budget_tokens": effective_args.thinking_budget_tokens,
+                            }
+                            # Temperature must be 1 (default) when thinking is enabled.
+                        elif effective_args.temperature is not None:
                             request_kwargs["temperature"] = effective_args.temperature
                         if tools_param:
                             request_kwargs["tools"] = tools_param
@@ -736,7 +754,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
 
                         assistant_blocks: list[ContentBlock] = []
                         for block in response.content:
-                            if block.type == "text":
+                            if block.type == "thinking":
+                                assistant_blocks.append(
+                                    {"type": "thinking", "thinking": block.thinking}
+                                )
+                            elif block.type == "text":
                                 assistant_blocks.append(
                                     {"type": "text", "text": block.text}
                                 )

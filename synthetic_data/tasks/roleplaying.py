@@ -37,8 +37,12 @@ TIMEOUT_BUFFER_S = 10.0
 # Each step produces 2 actions (player + DM), so 8 actions = last 4 turns.
 MAX_CONTEXT_ACTIONS = 8
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
-    "dungeon_master": 200,
-    "player": 50,
+    "dungeon_master": 16000,
+    "player": 8000,
+}
+THINKING_BUDGET_BY_ROLE: dict[str, int] = {
+    "dungeon_master": 10000,
+    "player": 4000,
 }
 GAME_SETTINGS = [
     "forest",
@@ -119,13 +123,12 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             adventure_parameters_model,  # type: ignore[arg-type]
         )
         for role, wrapper in self.generation_wrappers.items():
-            # Keep latency bounded so one slow provider call does not stall a full run.
-            # With low max_tokens, each API round-trip should be 5-15s.
-            # DM may have 2 tool iterations (2-3 round-trips), so 90s is generous.
+            # Extended thinking increases latency significantly.
+            # DM may have 2 tool iterations (2-3 round-trips) with thinking on each.
             if role == "player":
-                wrapper.gen_wrapper_args.request_timeout_s = 30.0
+                wrapper.gen_wrapper_args.request_timeout_s = 120.0
             else:
-                wrapper.gen_wrapper_args.request_timeout_s = 90.0
+                wrapper.gen_wrapper_args.request_timeout_s = 300.0
             # Raise the token-rate ceiling so the ThroughputConcurrencyLimiter
             # allows enough in-flight requests for concurrent episodes.
             # max_in_flight = max_rps / tokens_per_request; with max_tokens=200
@@ -375,10 +378,13 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
     def _convert_tool_calls_to_text_blocks(
         content_blocks: list[ContentBlock],
     ) -> list[ContentBlock]:
-        """Convert tool_use/tool_result blocks to text for user-role messages."""
+        """Convert tool_use/tool_result blocks to text for user-role messages.
+        Thinking blocks are stripped since they cannot be sent back in input."""
         out_blocks: list[ContentBlock] = []
         for block in content_blocks:
             block_type = block.get("type")
+            if block_type == "thinking":
+                continue
             if block_type == "tool_use":
                 tool_call_json_str = json.dumps(
                     {"name": block.get("name"), "input": block.get("input")}
@@ -423,6 +429,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
         args = GenerationArgs(
             n_retries=1,
             max_tokens=TURN_MAX_TOKENS_BY_ROLE[role],
+            thinking_budget_tokens=THINKING_BUDGET_BY_ROLE.get(role),
             max_tool_iterations=max_tool_iterations,
             tools=tools or None,
             tool_use_executor=execute_tool_use_block if tools else None,
