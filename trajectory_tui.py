@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Minimal TUI for reviewing roleplaying trajectory parquet files."""
+"""Basic TUI for reviewing generated trajectory parquet files."""
 
 from __future__ import annotations
 
+import json
 import sys
 import termios
 import tty
@@ -17,6 +18,35 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from scripts.trajectory_formatting import (
+    normalize_tool_calls,
+    normalize_value,
+    parse_content_blocks,
+)
+from synthetic_data.utils import (
+    Conversation,
+    Message,
+    ToolResultBlock,
+    ToolUseBlock,
+    clean_message,
+    recursive_json_parse,
+)
+
+CONVERSATION_COLUMNS = ("conversation", "messages", "conversations", "trajectory")
+
+
+def format_message(message: Message | Any, index: int) -> str:
+    message = normalize_value(message)
+    if not isinstance(message, dict):
+        return f"{index}. {message}"
+
+    role = str(message.get("role", "unknown")).upper()
+    parts = [f"{index}. [{role}]"]
+    body = format_message_body(message)
+    if body:
+        parts.append(indent_block(body))
+    return "\n".join(parts)
+
 
 def indent_block(text: str, spaces: int = 2) -> str:
     if not text:
@@ -25,15 +55,145 @@ def indent_block(text: str, spaces: int = 2) -> str:
     return "\n".join(f"{pad}{line}" if line else "" for line in text.splitlines())
 
 
+def render_fields(obj: Any) -> list[str]:
+    obj = normalize_value(obj)
+    if isinstance(obj, dict):
+        return [
+            f"{key}: {preview_value(value, max_len=200)}" for key, value in obj.items()
+        ]
+    if isinstance(obj, list):
+        return [preview_value(item, max_len=200) for item in obj]
+    return [str(obj)]
+
+
+def parse_json_if_string(value: Any) -> Any:
+    parsed = recursive_json_parse(value)
+    return normalize_value(parsed)
+
+
+def render_arg_fields(args: Any) -> list[str]:
+    args = parse_json_if_string(normalize_value(args))
+    if isinstance(args, dict):
+        lines: list[str] = []
+        for key, value in args.items():
+            rendered = (
+                value
+                if isinstance(value, str)
+                else json.dumps(value, ensure_ascii=True)
+            )
+            lines.append(f"{key}: {rendered}")
+        return lines
+    return render_fields(args)
+
+
+def format_content_blocks(content: Any) -> str:
+    blocks = parse_content_blocks(content)
+    rendered: list[str] = []
+    for block in blocks:
+        block = normalize_value(block)
+        if isinstance(block, str):
+            rendered.append("[Text]")
+            rendered.append(block)
+            continue
+        if not isinstance(block, dict):
+            rendered.append("[Content]")
+            rendered.append(preview_value(block, max_len=300))
+            continue
+
+        block_type = block.get("type", "")
+        if block_type == "text":
+            rendered.append("[Text]")
+            rendered.append(str(block.get("text", "")))
+        elif block_type == "tool_use":
+            tool_block: ToolUseBlock = block  # type: ignore[assignment]
+            name = str(block.get("name", "unknown"))
+            rendered.append(f"[Tool Call: {name}]")
+            for line in render_arg_fields(tool_block.get("input", {})):
+                rendered.append(line)
+        elif block_type == "tool_result":
+            result_block: ToolResultBlock = block  # type: ignore[assignment]
+            rendered.append("[Tool Result]")
+            for line in render_fields(result_block.get("content", "")):
+                rendered.append(line)
+        else:
+            rendered.append(f"[{block_type or 'Content'}]")
+            for line in render_fields(block):
+                rendered.append(line)
+    return "\n".join(rendered)
+
+
+def format_message_body(message: Message | dict[str, Any]) -> str:
+    parts: list[str] = []
+    content = format_content_blocks(message.get("content", ""))
+    if content:
+        parts.append(content)
+
+    tool_calls = format_tool_calls(message.get("tool_calls"))
+    if tool_calls:
+        parts.append(tool_calls)
+    return "\n".join(parts)
+
+
+def format_tool_calls(tool_calls: Any) -> str:
+    normalized = normalize_tool_calls(tool_calls)
+    if not normalized:
+        return ""
+
+    formatted: list[str] = []
+    for call in normalized:
+        if isinstance(call, dict):
+            fn = call.get("function", {})
+            if isinstance(fn, dict):
+                name = fn.get("name", "unknown")
+                args = fn.get("arguments", {})
+            else:
+                name = "unknown"
+                args = {}
+            formatted.append(f"[Tool Call: {name}]")
+            for line in render_arg_fields(args):
+                formatted.append(line)
+        else:
+            formatted.append("[Tool Call]")
+            formatted.append(preview_value(call, max_len=300))
+    return "\n".join(formatted)
+
+
+def get_messages_from_row(row: dict[str, Any]) -> Conversation:
+    for key in CONVERSATION_COLUMNS:
+        if key in row:
+            raw = normalize_value(row[key])
+            if isinstance(raw, list):
+                if raw and isinstance(raw[0], list):
+                    nested = normalize_value(raw[0])
+                    if isinstance(nested, list):
+                        return [m for m in nested if isinstance(m, dict)]
+                return [m for m in raw if isinstance(m, dict)]
+    return []
+
+
+def detect_row_type(row: dict[str, Any]) -> str:
+    if "actions" in row:
+        return "roleplay"
+    if get_messages_from_row(row):
+        return "conversation"
+    return "generic"
+
+
+def preview_value(value: Any, max_len: int = 100) -> str:
+    value = normalize_value(value)
+    if isinstance(value, str):
+        return clean_message(value, truncate_length=max_len)
+    if isinstance(value, (dict, list, bool, int, float)):
+        return clean_message(value, truncate_length=max_len)
+
+    text = str(value)
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
 def render_roleplay(row: dict[str, Any]) -> list[Any]:
     rows: list[Any] = []
-
-    transcript = row.get("transcript")
-    if not isinstance(transcript, str) or not transcript.strip():
-        raise ValueError(
-            "This TUI requires the new roleplaying format with a non-empty `transcript` field."
-        )
-
     info = Table.grid(padding=(0, 2))
     info.add_column(style="cyan")
     info.add_column()
@@ -42,17 +202,58 @@ def render_roleplay(row: dict[str, Any]) -> list[Any]:
     info.add_row("step_count", str(row.get("step_count", "")))
     rows.append(Panel(info, title="Episode"))
 
-    metrics = row.get("metrics")
-    if isinstance(metrics, dict) and metrics:
-        metrics_table = Table(title="Metrics", show_header=True, header_style="bold magenta")
-        metrics_table.add_column("key")
-        metrics_table.add_column("value")
-        for key, value in metrics.items():
-            metrics_table.add_row(str(key), str(value))
-        rows.append(metrics_table)
+    metadata = normalize_value(row.get("metadata"))
+    if isinstance(metadata, dict) and metadata:
+        md = Table(title="Metadata", show_header=True, header_style="bold magenta")
+        md.add_column("key")
+        md.add_column("value")
+        for key, value in metadata.items():
+            md.add_row(str(key), preview_value(value, max_len=120))
+        rows.append(md)
 
-    rows.append(Panel(Text(transcript), title="Transcript"))
+    actions = normalize_value(row.get("actions")) or []
+    if not isinstance(actions, list):
+        actions = [actions]
+    conv = Text()
+    for i, action in enumerate(actions, start=1):
+        role = "unknown"
+        message = action
+        if isinstance(action, dict) and isinstance(action.get("message"), dict):
+            role = str(action.get("role", role))
+            message = action["message"]
+        elif isinstance(action, dict):
+            role = str(action.get("role", role))
+        label = role.upper()
+        conv.append(f"{i}. [{label}]\n", style="bold yellow")
+        if isinstance(message, dict):
+            body = format_message_body(message)
+            if body:
+                conv.append(indent_block(body))
+        else:
+            conv.append(str(message))
+        conv.append("\n\n")
+    rows.append(Panel(conv, title="Actions"))
     return rows
+
+
+def render_conversation(row: dict[str, Any]) -> list[Any]:
+    messages: Conversation = get_messages_from_row(row)
+    text = Text()
+    for i, message in enumerate(messages, start=1):
+        text.append(format_message(message, i))
+        text.append("\n\n")
+    if not messages:
+        text.append("No conversation messages detected.")
+    return [Panel(text, title="Conversation")]
+
+
+def render_generic(row: dict[str, Any]) -> list[Any]:
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("field", style="cyan", no_wrap=True)
+    table.add_column("value")
+    for key, value in row.items():
+        table.add_row(str(key), preview_value(value, max_len=180))
+    return [Panel(table, title="Row Fields")]
 
 
 def render_row(
@@ -63,16 +264,22 @@ def render_row(
     total: int,
     scroll_offset: int = 0,
 ) -> tuple[Group, int, int]:
+    row_type = detect_row_type(row)
     header = Table.grid(expand=True)
     header.add_column(justify="left")
     header.add_column(justify="right")
     header.add_row(
         f"[bold]Trajectory Viewer[/bold] - {path.name}",
-        f"row {idx + 1}/{total}",
+        f"row {idx + 1}/{total} | type: {row_type}",
     )
     top_panel = Panel(header)
 
-    panels = render_roleplay(row)
+    if row_type == "roleplay":
+        panels = render_roleplay(row)
+    elif row_type == "conversation":
+        panels = render_conversation(row)
+    else:
+        panels = render_generic(row)
 
     body_width = max(20, console.size.width - 6)
     body_console = Console(width=body_width, record=True)
@@ -228,8 +435,12 @@ def run(
     idx = 0
     scroll_offset = 0
     with Live(console=console, screen=True, auto_refresh=False) as live:
-        while True:
-            row = rows[idx]
+        max_scroll = 0
+        page_step = 1
+
+        def refresh_view() -> None:
+            nonlocal max_scroll, page_step
+            row = {k: normalize_value(v) for k, v in rows[idx].items()}
             view, max_scroll, page_step = render_row(
                 console,
                 resolved_path,
@@ -240,24 +451,38 @@ def run(
             )
             live.update(view, refresh=True)
 
+        refresh_view()
+        while True:
             key = read_key()
             if key == "":
                 break
+            changed = False
             if key in ("j", "\x1b[B"):
-                scroll_offset = min(scroll_offset + page_step, max_scroll)
+                next_scroll = min(scroll_offset + page_step, max_scroll)
+                changed = next_scroll != scroll_offset
+                scroll_offset = next_scroll
             elif key in ("k", "\x1b[A"):
-                scroll_offset = max(scroll_offset - page_step, 0)
+                next_scroll = max(scroll_offset - page_step, 0)
+                changed = next_scroll != scroll_offset
+                scroll_offset = next_scroll
             elif key in ("\r", "\n", " ", "n", "l", "\x1b[C"):
-                idx = min(idx + 1, len(rows) - 1)
+                next_idx = min(idx + 1, len(rows) - 1)
+                changed = next_idx != idx or scroll_offset != 0
+                idx = next_idx
                 scroll_offset = 0
             elif key in ("N", "p", "h", "\x1b[D"):
-                idx = max(idx - 1, 0)
+                next_idx = max(idx - 1, 0)
+                changed = next_idx != idx or scroll_offset != 0
+                idx = next_idx
                 scroll_offset = 0
             elif key == "g":
+                changed = idx != 0 or scroll_offset != 0
                 idx = 0
                 scroll_offset = 0
             elif key == "G":
-                idx = len(rows) - 1
+                last_idx = len(rows) - 1
+                changed = idx != last_idx or scroll_offset != 0
+                idx = last_idx
                 scroll_offset = 0
             elif key == "o":
                 live.stop()
@@ -266,6 +491,7 @@ def run(
                 )
                 live.start(refresh=True)
                 if selected is None:
+                    refresh_view()
                     continue
                 resolved_path = selected
                 rows = load_rows(resolved_path)
@@ -273,8 +499,12 @@ def run(
                     raise ValueError(f"No rows found in {resolved_path}")
                 idx = 0
                 scroll_offset = 0
+                changed = True
             elif key in ("q", "\x03"):
                 break
+
+            if changed:
+                refresh_view()
 
 
 if __name__ == "__main__":
