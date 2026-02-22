@@ -195,7 +195,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
                 episode,
                 role="dungeon_master",
                 tools=DM_TOOLS,
-                tool_choice={"type": "any"},
+                tool_choice={"type": "auto"},
             )
             episode.step_count += 1
             return episode, episode.step_count >= self.max_user_responses
@@ -209,7 +209,7 @@ class RoleplayingGameMultiStepTask(BaseTask[dict, RPGEpisode]):
             episode,
             role="dungeon_master",
             tools=DM_TOOLS,
-            tool_choice={"type": "any"},
+            tool_choice={"type": "auto"},
         )
         episode.step_count += 1
         return episode, episode.step_count >= self.max_user_responses
