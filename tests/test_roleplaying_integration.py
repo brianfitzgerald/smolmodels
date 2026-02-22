@@ -637,7 +637,7 @@ def test_tui_renders_full_trajectory():
     assert "cave spider swarm" in text
 
     # -- Tool result blocks: 5 total (including 1 error) -----------------------
-    assert text.count("[Tool Result]") == 5
+    assert text.count("[Tool Result") == 5
     assert "total" in text and "17" in text  # first roll
     assert "chosen" in text  # random_choice result
     assert "Invalid dice notation" in text  # error result
@@ -689,7 +689,7 @@ async def test_tui_generation_to_render_roundtrip():
     assert text.count("DUNGEON_MASTER") == 5
     assert text.count("PLAYER") == 4
     assert text.count("Tool Call: roll_dice") == 5
-    assert text.count("[Tool Result]") == 5
+    assert text.count("[Tool Result") == 5
     assert text.count("[Thinking]") == 14
     assert text.count("[Text]") == 9
 

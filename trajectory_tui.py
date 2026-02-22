@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import fire
 import pandas as pd
-from rich.text import Text
+from rich.markup import escape
 from textual.app import App, ComposeResult
 from textual.events import Key, Resize
 from textual.widgets import Static
@@ -28,6 +28,11 @@ from synthetic_data.utils import (
 )
 
 CONVERSATION_COLUMNS = ("conversation", "messages", "conversations", "trajectory")
+
+
+# ---------------------------------------------------------------------------
+# Plain-text rendering (test-facing interface — do not change output format)
+# ---------------------------------------------------------------------------
 
 
 def _append_lines(lines: list[str], content: str, indent: int) -> None:
@@ -48,7 +53,7 @@ def append_content_blocks(lines: list[str], content: Any, indent: int = 0) -> No
             continue
         if not isinstance(block, dict):
             lines.append(f"{pad}[Content]")
-            lines.append(f"{pad}{preview_value(block, max_len=300)}")
+            lines.append(f"{pad}{preview_value(block)}")
             continue
 
         block_type = block.get("type", "")
@@ -62,15 +67,23 @@ def append_content_blocks(lines: list[str], content: Any, indent: int = 0) -> No
             name = str(block.get("name", "unknown"))
             lines.append(f"{pad}[Tool Call: {name}]")
             for line in render_arg_fields(block.get("input", {})):
-                lines.append(f"{pad}{line}")
+                lines.append(f"{pad}  {line}")
         elif block_type == "tool_result":
-            lines.append(f"{pad}[Tool Result]")
+            tool_use_id = block.get("tool_use_id")
+            is_error = bool(block.get("is_error"))
+            if tool_use_id:
+                label = f"[Tool Result: {tool_use_id}]"
+            else:
+                label = "[Tool Result]"
+            if is_error:
+                label = label[:-1] + " ERROR]"
+            lines.append(f"{pad}{label}")
             for line in render_fields(block.get("content", "")):
-                lines.append(f"{pad}{line}")
+                lines.append(f"{pad}  {line}")
         else:
             lines.append(f"{pad}[{block_type or 'Content'}]")
             for line in render_fields(block):
-                lines.append(f"{pad}{line}")
+                lines.append(f"{pad}  {line}")
 
 
 def append_tool_calls(lines: list[str], tool_calls: Any, indent: int = 0) -> None:
@@ -89,10 +102,10 @@ def append_tool_calls(lines: list[str], tool_calls: Any, indent: int = 0) -> Non
                 args = {}
             lines.append(f"{pad}[Tool Call: {name}]")
             for line in render_arg_fields(args):
-                lines.append(f"{pad}{line}")
+                lines.append(f"{pad}  {line}")
         else:
             lines.append(f"{pad}[Tool Call]")
-            lines.append(f"{pad}{preview_value(call, max_len=300)}")
+            lines.append(f"{pad}  {preview_value(call)}")
 
 
 def append_message(lines: list[str], message: Message | Any, index: int, indent: int = 0) -> None:
@@ -116,11 +129,9 @@ def append_message(lines: list[str], message: Message | Any, index: int, indent:
 def render_fields(obj: Any) -> list[str]:
     obj = normalize_value(obj)
     if isinstance(obj, dict):
-        return [
-            f"{key}: {preview_value(value, max_len=200)}" for key, value in obj.items()
-        ]
+        return [f"{key}: {preview_value(value)}" for key, value in obj.items()]
     if isinstance(obj, list):
-        return [preview_value(item, max_len=200) for item in obj]
+        return [preview_value(item) for item in obj]
     return [str(obj)]
 
 
@@ -165,17 +176,13 @@ def detect_row_type(row: dict[str, Any]) -> str:
     return "generic"
 
 
-def preview_value(value: Any, max_len: int = 100) -> str:
+def preview_value(value: Any) -> str:
     value = normalize_value(value)
     if isinstance(value, str):
-        return clean_message(value, truncate_length=max_len)
+        return clean_message(value, truncate_length=None)
     if isinstance(value, (dict, list, bool, int, float)):
-        return clean_message(value, truncate_length=max_len)
-
-    text = str(value)
-    if len(text) > max_len:
-        return text[: max_len - 3] + "..."
-    return text
+        return clean_message(value, truncate_length=None)
+    return str(value)
 
 
 def render_roleplay_lines(row: dict[str, Any]) -> list[str]:
@@ -190,7 +197,7 @@ def render_roleplay_lines(row: dict[str, Any]) -> list[str]:
     if isinstance(metadata, dict) and metadata:
         lines.append("== Metadata ==")
         for key, value in metadata.items():
-            lines.append(f"{key}: {preview_value(value, max_len=120)}")
+            lines.append(f"{key}: {preview_value(value)}")
         lines.append("")
 
     metrics = normalize_value(row.get("metrics"))
@@ -241,19 +248,12 @@ def render_conversation_lines(row: dict[str, Any]) -> list[str]:
 def render_generic_lines(row: dict[str, Any]) -> list[str]:
     lines: list[str] = ["== Row Fields =="]
     for key, value in row.items():
-        lines.append(f"{key}: {preview_value(value, max_len=180)}")
+        lines.append(f"{key}: {preview_value(value)}")
     return lines
 
 
-def render_row_text(
-    path: Path,
-    row: dict[str, Any],
-    idx: int,
-    total: int,
-) -> tuple[str, str]:
+def render_row_text(row: dict[str, Any]) -> str:
     row_type = detect_row_type(row)
-    header = f"Trajectory Viewer - {path.name} | row {idx + 1}/{total} | type: {row_type}"
-
     if row_type == "roleplay":
         body_lines = render_roleplay_lines(row)
     elif row_type == "conversation":
@@ -261,60 +261,154 @@ def render_row_text(
     else:
         body_lines = render_generic_lines(row)
 
-    body_text = "\n".join(body_lines) if body_lines else ""
-    return header, body_text
+    return "\n".join(body_lines) if body_lines else ""
 
 
-ROLE_LINE_STYLES: dict[str, str] = {
-    "DUNGEON_MASTER": "bold yellow",
-    "PLAYER": "bold green",
-    "ASSISTANT": "bold cyan",
-    "USER": "bold blue",
+# ---------------------------------------------------------------------------
+# Visual styling layer (Rich markup for Textual display)
+# ---------------------------------------------------------------------------
+
+ROLE_COLORS: dict[str, str] = {
+    "DUNGEON_MASTER": "#e3b341",
+    "PLAYER": "#7ee787",
+    "ASSISTANT": "#79c0ff",
+    "USER": "#d2a8ff",
+    "SYSTEM": "#f0883e",
 }
 
-BLOCK_LINE_STYLES: dict[str, str] = {
-    "[Text]": "bold cyan",
-    "[Thinking]": "bold magenta",
-    "[Tool Call": "bold yellow",
-    "[Tool Result]": "bold green",
+BLOCK_COLORS: dict[str, str] = {
+    "Text": "#79c0ff",
+    "Thinking": "#bc8cff",
+    "Content": "#8b949e",
+    "Tool Call": "#ffa657",
+    "Tool Result": "#3fb950",
+    "Tool Result Error": "#f85149",
 }
 
 ROLE_LINE_RE = re.compile(r"^(\d+\.\s+)\[([A-Z_]+)\](.*)$")
+SECTION_LINE_RE = re.compile(r"^==\s*(.+?)\s*==$")
+TOOL_CALL_LINE_RE = re.compile(r"^\[Tool Call:\s*(.+?)\]$")
+TOOL_RESULT_LINE_RE = re.compile(r"^\[Tool Result(?::\s*(.+?))?(?:\s+ERROR)?\]$")
+KEY_VALUE_LINE_RE = re.compile(r"^([A-Za-z0-9_.-]+):(.*)$")
+
+SECTION_RULE = "\u2500" * 44  # ────────────
 
 
-def style_viewer_line(line: str) -> Text:
+def style_viewer_line(line: str) -> str:
+    """Apply Rich markup to a single plain-text viewer line."""
     indent_len = len(line) - len(line.lstrip(" "))
     indent = line[:indent_len]
     stripped = line[indent_len:]
-    styled = Text(indent)
+    pad = escape(indent)
 
-    if stripped.startswith("== ") and stripped.endswith(" =="):
-        styled.append(stripped, style="bold magenta")
-        return styled
+    if not stripped:
+        return ""
 
-    for prefix, style in BLOCK_LINE_STYLES.items():
-        if stripped.startswith(prefix):
-            styled.append(prefix, style=style)
-            styled.append(stripped[len(prefix) :])
-            return styled
+    # ── SECTION ────────────────────────────────
+    m = SECTION_LINE_RE.match(stripped)
+    if m:
+        title = m.group(1).upper()
+        return (
+            f"{pad}[#58a6ff]\u2500\u2500[/] "
+            f"[bold #e6edf3]{escape(title)}[/] "
+            f"[#58a6ff]{SECTION_RULE}[/]"
+        )
 
-    role_match = ROLE_LINE_RE.match(stripped)
-    if role_match:
-        item_prefix, role, suffix = role_match.groups()
-        styled.append(item_prefix)
-        styled.append(f"[{role}]", style=ROLE_LINE_STYLES.get(role, "bold"))
-        styled.append(suffix)
-        return styled
+    # ▸ Tool Call: name
+    m = TOOL_CALL_LINE_RE.match(stripped)
+    if m:
+        name = m.group(1)
+        return (
+            f"{pad}[{BLOCK_COLORS['Tool Call']}]\u25b8 Tool Call[/]"
+            f"  [{BLOCK_COLORS['Tool Call']}]{escape(name)}[/]"
+        )
 
-    if ":" in stripped:
-        key, rest = stripped.split(":", 1)
-        if key and " " not in key and not key.startswith("{"):
-            styled.append(key, style="cyan")
-            styled.append(f":{rest}")
-            return styled
+    # ▸ Tool Result / Tool Result ERROR
+    m = TOOL_RESULT_LINE_RE.match(stripped)
+    if m:
+        ref = m.group(1)
+        is_err = stripped.endswith(" ERROR]")
+        color = BLOCK_COLORS["Tool Result Error"] if is_err else BLOCK_COLORS["Tool Result"]
+        label = "Tool Result ERROR" if is_err else "Tool Result"
+        suffix = f"  [#c9d1d9]{escape(ref)}[/]" if ref else ""
+        return f"{pad}[{color}]\u25b8 {label}[/]{suffix}"
 
-    styled.append(stripped)
+    # ▸ Text / Thinking / Content
+    for name in ("Text", "Thinking", "Content"):
+        if stripped == f"[{name}]":
+            return f"{pad}[{BLOCK_COLORS[name]}]\u25b8 {name}[/]"
+
+    # 1. [ROLE] — action or message role badge
+    m = ROLE_LINE_RE.match(stripped)
+    if m:
+        num, role, suffix = m.groups()
+        color = ROLE_COLORS.get(role, "#c9d1d9")
+        return (
+            f"{pad}[#484f58]{escape(num)}[/]"
+            f"[bold #0d1117 on {color}] {escape(role)} [/]"
+            f"[#c9d1d9]{escape(suffix)}[/]"
+        )
+
+    # key: value
+    m = KEY_VALUE_LINE_RE.match(stripped)
+    if m:
+        key, val = m.groups()
+        val = val.lstrip()
+        if indent_len >= 4:
+            return (
+                f"{pad}[#484f58]\u00b7[/] "
+                f"[#8b949e]{escape(key)}[/]"
+                f"[#6e7681]:[/] "
+                f"[#c9d1d9]{escape(val)}[/]"
+            )
+        return (
+            f"{pad}[#8b949e]{escape(key)}[/]"
+            f"[#6e7681]:[/] "
+            f"[#e6edf3]{escape(val)}[/]"
+        )
+
+    # JSON-ish or plain text
+    if stripped.startswith("{") or stripped.startswith("["):
+        return f"{pad}[#6e7681]{escape(stripped)}[/]"
+    return f"{pad}[#c9d1d9]{escape(stripped)}[/]"
+
+
+def style_viewer_lines(lines: list[str]) -> list[str]:
+    """Style all lines, rendering thinking-block body text in italic dim."""
+    styled: list[str] = []
+    in_thinking = False
+    thinking_indent = 0
+
+    for line in lines:
+        indent_len = len(line) - len(line.lstrip(" "))
+        stripped = line[indent_len:]
+
+        if not stripped:
+            styled.append("")
+            continue
+
+        if stripped == "[Thinking]":
+            in_thinking = True
+            thinking_indent = indent_len
+            styled.append(style_viewer_line(line))
+            continue
+
+        if stripped.startswith("[") and stripped.endswith("]") and indent_len <= thinking_indent:
+            in_thinking = False
+
+        if in_thinking and indent_len >= thinking_indent:
+            pad = escape(line[:indent_len])
+            styled.append(f"{pad}[italic #6e7681]{escape(stripped)}[/]")
+            continue
+
+        styled.append(style_viewer_line(line))
+
     return styled
+
+
+# ---------------------------------------------------------------------------
+# File helpers
+# ---------------------------------------------------------------------------
 
 
 def list_parquet_files(dataset_dir: Path) -> list[Path]:
@@ -333,37 +427,54 @@ def load_rows(path: Path) -> list[dict[str, Any]]:
     return df.to_dict(orient="records")
 
 
+# ---------------------------------------------------------------------------
+# Textual app
+# ---------------------------------------------------------------------------
+
+# Separator used in header/status bars
+_SEP = "  [#30363d]\u2502[/]  "
+
+
+def _key_hint(key: str, desc: str) -> str:
+    return f"[bold #c9d1d9]{key}[/] [#6e7681]{desc}[/]"
+
+
 class TrajectoryTuiApp(App):
     CSS = """
     Screen {
         layout: vertical;
+        background: #0d1117;
     }
 
     #header {
         height: 1;
         padding: 0 1;
-        background: $surface;
-        color: $text;
+        background: #161b22;
+        color: #e6edf3;
+        text-style: bold;
     }
 
     #body {
         height: 1fr;
         width: 100%;
-        border: round $accent;
+        border: round #30363d;
+        background: #0d1117;
         padding: 0 1;
+        color: #c9d1d9;
     }
 
     #status {
         height: 1;
         padding: 0 1;
-        background: $boost;
+        background: #161b22;
+        color: #8b949e;
     }
 
     #help {
-        height: 2;
+        height: auto;
         padding: 0 1;
-        color: $text-muted;
-        background: $surface-darken-1;
+        color: #6e7681;
+        background: #0d1117;
     }
     """
 
@@ -384,7 +495,7 @@ class TrajectoryTuiApp(App):
         self.rows: list[dict[str, Any]] = []
         self.idx = 0
         self.viewer_lines: list[str] = []
-        self.viewer_styled_lines: list[Text] = []
+        self.viewer_styled_lines: list[str] = []
         self.viewer_scroll_offset = 0
         self.mode = "picker" if start_with_picker else "viewer"
         self.picker_files: list[Path] = []
@@ -393,11 +504,13 @@ class TrajectoryTuiApp(App):
         self.picker_scroll_offset = 0
         self._last_body_cache_key: str | None = None
 
+    # -- compose / lifecycle ------------------------------------------------
+
     def compose(self) -> ComposeResult:
-        yield Static("", id="header")
-        yield Static("", id="body")
-        yield Static("", id="status")
-        yield Static("", id="help")
+        yield Static("", id="header", markup=True)
+        yield Static("", id="body", markup=True)
+        yield Static("", id="status", markup=True)
+        yield Static("", id="help", markup=True)
 
     def on_mount(self) -> None:
         if self.mode == "picker":
@@ -410,9 +523,11 @@ class TrajectoryTuiApp(App):
 
     def on_resize(self, _event: Resize) -> None:
         if self.mode == "viewer":
-            self.call_after_refresh(self.render_viewer_viewport)
+            self.call_after_refresh(self._render_viewer_viewport)
         else:
-            self.call_after_refresh(self.render_picker_viewport)
+            self.call_after_refresh(self._render_picker_viewport)
+
+    # -- key handling -------------------------------------------------------
 
     def on_key(self, event: Key) -> None:
         if event.key == "ctrl+c":
@@ -421,11 +536,11 @@ class TrajectoryTuiApp(App):
             return
 
         if self.mode == "picker":
-            self.handle_picker_key(event)
+            self._handle_picker_key(event)
             return
-        self.handle_viewer_key(event)
+        self._handle_viewer_key(event)
 
-    def handle_picker_key(self, event: Key) -> None:
+    def _handle_picker_key(self, event: Key) -> None:
         key = event.key
         ch = event.character or ""
 
@@ -465,17 +580,17 @@ class TrajectoryTuiApp(App):
             self.mode = "viewer"
             self.refresh_viewer()
 
-    def handle_viewer_key(self, event: Key) -> None:
+    def _handle_viewer_key(self, event: Key) -> None:
         key = event.key
         ch = event.character or ""
 
         if ch == "j" or key == "down":
             event.stop()
-            self.scroll_half_page(1)
+            self._scroll(1)
             return
         if ch == "k" or key == "up":
             event.stop()
-            self.scroll_half_page(-1)
+            self._scroll(-1)
             return
         if key in ("enter", "right", "space") or ch in ("n", "l"):
             event.stop()
@@ -500,6 +615,8 @@ class TrajectoryTuiApp(App):
         if ch == "q":
             event.stop()
             self.exit()
+
+    # -- navigation ---------------------------------------------------------
 
     def open_path(self, path: Path) -> None:
         self.path = path
@@ -527,67 +644,108 @@ class TrajectoryTuiApp(App):
         self.idx = bounded
         self.refresh_viewer(reset_scroll=True)
 
-    def scroll_half_page(self, direction: int) -> None:
-        visible = self.body_height()
-        half_page = max(1, visible // 2)
-        max_scroll = max(0, len(self.viewer_lines) - visible)
-        target = min(
-            max(self.viewer_scroll_offset + direction * half_page, 0),
-            max_scroll,
-        )
+    def _scroll(self, direction: int) -> None:
+        visible = self._body_height()
+        step = max(1, visible // 4)
+        limit = max(0, len(self.viewer_lines) - visible)
+        target = min(max(self.viewer_scroll_offset + direction * step, 0), limit)
         if target == self.viewer_scroll_offset:
             return
         self.viewer_scroll_offset = target
-        self.render_viewer_viewport()
+        self._render_viewer_viewport()
+
+    # -- viewer -------------------------------------------------------------
 
     def refresh_viewer(self, reset_scroll: bool = False) -> None:
         if self.path is None or not self.rows:
             return
 
         row = {k: normalize_value(v) for k, v in self.rows[self.idx].items()}
-        _, body = render_row_text(
-            self.path,
-            row,
-            self.idx,
-            len(self.rows),
-        )
+        body = render_row_text(row)
         self.viewer_lines = body.splitlines() if body else []
-        self.viewer_styled_lines = [style_viewer_line(line) for line in self.viewer_lines]
+        self.viewer_styled_lines = style_viewer_lines(self.viewer_lines)
 
         row_type = detect_row_type(row)
-        header_text = Text()
-        header_text.append("Trajectory Viewer", style="bold")
-        header_text.append(" - ")
-        header_text.append(self.path.name, style="cyan")
-        header_text.append(" | ")
-        header_text.append(f"row {self.idx + 1}/{len(self.rows)}", style="green")
-        header_text.append(" | ")
-        header_text.append(f"type: {row_type}", style="magenta")
-        self.query_one("#header", Static).update(header_text)
-
-        help_text = Text()
-        help_text.append("Keys: ", style="dim")
-        help_text.append("j", style="bold")
-        help_text.append("/Down half-page down, ")
-        help_text.append("k", style="bold")
-        help_text.append("/Up half-page up, ")
-        help_text.append("n", style="bold")
-        help_text.append("/Right/Enter next trajectory, ")
-        help_text.append("N", style="bold")
-        help_text.append("/Left previous trajectory, ")
-        help_text.append("g", style="bold")
-        help_text.append(" first, ")
-        help_text.append("G", style="bold")
-        help_text.append(" last, ")
-        help_text.append("o", style="bold")
-        help_text.append(" open file, ")
-        help_text.append("q", style="bold")
-        help_text.append(" quit")
-        self.query_one("#help", Static).update(help_text)
+        self.query_one("#header", Static).update(self._viewer_header(row_type))
+        self.query_one("#help", Static).update(self._viewer_help())
 
         if reset_scroll:
             self.viewer_scroll_offset = 0
-        self.render_viewer_viewport()
+        self._render_viewer_viewport()
+
+    def _body_height(self) -> int:
+        return max(1, self.query_one("#body", Static).size.height)
+
+    def _set_body(self, markup: str, cache_key: str) -> None:
+        if cache_key == self._last_body_cache_key:
+            return
+        self.query_one("#body", Static).update(markup)
+        self._last_body_cache_key = cache_key
+
+    def _render_viewer_viewport(self) -> None:
+        visible = self._body_height()
+        total = len(self.viewer_lines)
+        max_off = max(0, total - visible)
+        self.viewer_scroll_offset = min(max(self.viewer_scroll_offset, 0), max_off)
+        start = self.viewer_scroll_offset
+        end = min(start + visible, total)
+
+        self._set_body(
+            "\n".join(self.viewer_styled_lines[start:end]),
+            cache_key=f"v:{self.idx}:{start}:{end}:{total}",
+        )
+
+        if total == 0:
+            d_start, d_end = 0, 0
+        else:
+            d_start, d_end = start + 1, end
+
+        self.query_one("#status", Static).update(
+            f"[#6e7681]Lines[/] "
+            f"[bold #c9d1d9]{d_start}\u2013{d_end}[/]"
+            f"[#484f58]/[/]"
+            f"[#8b949e]{total}[/]"
+            f"{_SEP}"
+            f"[#6e7681]Row[/] "
+            f"[bold #c9d1d9]{self.idx + 1}[/]"
+            f"[#484f58]/[/]"
+            f"[#8b949e]{len(self.rows)}[/]"
+        )
+
+    def _viewer_header(self, row_type: str) -> str:
+        name = self.path.name if self.path is not None else ""
+        return (
+            "[bold #e6edf3]Trajectory Viewer[/]"
+            f"{_SEP}"
+            f"[#58a6ff]{escape(name)}[/]"
+            f"{_SEP}"
+            f"[bold #3fb950]{self.idx + 1}/{len(self.rows)}[/]"
+            f"{_SEP}"
+            f"[#bc8cff]{escape(row_type)}[/]"
+        )
+
+    def _viewer_help(self) -> str:
+        w = max(40, self.size.width)
+        if w < 110:
+            return (
+                _key_hint("j/k", "scroll") + "  "
+                + _key_hint("n/N", "next/prev") + "  "
+                + _key_hint("g/G", "first/last") + "  "
+                + _key_hint("o", "file") + "  "
+                + _key_hint("q", "quit")
+            )
+        return (
+            _key_hint("j/\u2193", "scroll down") + "   "
+            + _key_hint("k/\u2191", "scroll up") + "   "
+            + _key_hint("n/\u2192/Enter", "next") + "   "
+            + _key_hint("N/\u2190", "prev") + "   "
+            + _key_hint("g", "first") + "   "
+            + _key_hint("G", "last") + "   "
+            + _key_hint("o", "open file") + "   "
+            + _key_hint("q", "quit")
+        )
+
+    # -- picker -------------------------------------------------------------
 
     def enter_picker(self, prefer_latest: bool) -> None:
         self.mode = "picker"
@@ -597,95 +755,31 @@ class TrajectoryTuiApp(App):
         self.picker_idx = len(self.picker_files) - 1 if prefer_latest else 0
         self.picker_scroll_offset = 0
         self.picker_line_payloads = []
-        for file_path in self.picker_files:
-            stat = file_path.stat()
+        for fp in self.picker_files:
+            stat = fp.stat()
             modified = str(pd.Timestamp.fromtimestamp(stat.st_mtime))
             self.picker_line_payloads.append(
-                f"{file_path.name} | modified: {modified} | size: {stat.st_size:,} B"
+                f"{fp.name}  \u2502  {modified}  \u2502  {stat.st_size:,} B"
             )
         self.refresh_picker_view()
 
     def refresh_picker_view(self) -> None:
-        self.query_one("#header", Static).update(
-            Text.assemble(
-                ("Trajectory Viewer", "bold"),
-                (" - Select parquet file ", ""),
-                (f"({self.picker_idx + 1}/{len(self.picker_files)})", "green"),
-            )
-        )
-        picker_help = Text()
-        picker_help.append("Keys: ", style="dim")
-        picker_help.append("j", style="bold")
-        picker_help.append("/Down next, ")
-        picker_help.append("k", style="bold")
-        picker_help.append("/Up previous, ")
-        picker_help.append("g", style="bold")
-        picker_help.append(" first, ")
-        picker_help.append("G", style="bold")
-        picker_help.append(" last, ")
-        picker_help.append("Enter", style="bold")
-        picker_help.append(" select, ")
-        picker_help.append("q", style="bold")
-        picker_help.append(" cancel")
-        self.query_one("#help", Static).update(
-            picker_help
-        )
-        self.render_picker_viewport()
+        self.query_one("#header", Static).update(self._picker_header())
+        self.query_one("#help", Static).update(self._picker_help())
+        self._render_picker_viewport()
 
-    def body_height(self) -> int:
-        return max(1, self.query_one("#body", Static).size.height)
-
-    def set_body_renderable(self, renderable: str | Text, cache_key: str) -> None:
-        if cache_key == self._last_body_cache_key:
-            return
-        self.query_one("#body", Static).update(renderable)
-        self._last_body_cache_key = cache_key
-
-    def render_viewer_viewport(self) -> None:
-        visible = self.body_height()
-        total = len(self.viewer_lines)
-        max_scroll = max(0, total - visible)
-        self.viewer_scroll_offset = min(max(self.viewer_scroll_offset, 0), max_scroll)
-        start = self.viewer_scroll_offset
-        end = min(start + visible, total)
-        viewport_text = Text()
-        for i in range(start, end):
-            viewport_text.append_text(self.viewer_styled_lines[i])
-            if i < end - 1:
-                viewport_text.append("\n")
-        self.set_body_renderable(
-            viewport_text,
-            cache_key=f"viewer:{self.idx}:{start}:{end}:{total}",
-        )
-
-        if total == 0:
-            display_start = 0
-            display_end = 0
-        else:
-            display_start = start + 1
-            display_end = end
-        self.query_one("#status", Static).update(
-            Text.assemble(
-                ("Scroll: ", "dim"),
-                (f"{display_start}-{display_end}/{total}", "bold"),
-            )
-        )
-
-    def render_picker_viewport(self) -> None:
-        visible = self.body_height()
+    def _render_picker_viewport(self) -> None:
+        visible = self._body_height()
         total = len(self.picker_line_payloads)
         if total == 0:
-            self.set_body_renderable("", cache_key="picker:empty")
+            self._set_body("", cache_key="picker:empty")
             self.query_one("#status", Static).update(
-                Text.assemble(("dataset_dir: ", "dim"), (str(self.dataset_dir), "cyan"))
+                f"[#6e7681]Dir[/] [#58a6ff]{escape(str(self.dataset_dir))}[/]"
             )
             return
 
-        max_scroll = max(0, total - visible)
-        self.picker_scroll_offset = min(
-            max(self.picker_scroll_offset, 0),
-            max_scroll,
-        )
+        max_off = max(0, total - visible)
+        self.picker_scroll_offset = min(max(self.picker_scroll_offset, 0), max_off)
         if self.picker_idx < self.picker_scroll_offset:
             self.picker_scroll_offset = self.picker_idx
         elif self.picker_idx >= self.picker_scroll_offset + visible:
@@ -693,22 +787,56 @@ class TrajectoryTuiApp(App):
 
         start = self.picker_scroll_offset
         end = min(start + visible, total)
-        viewport: list[str] = []
+        rows: list[str] = []
         for i in range(start, end):
-            marker = ">" if i == self.picker_idx else " "
-            viewport.append(f"{marker} {self.picker_line_payloads[i]}")
-        self.set_body_renderable(
-            "\n".join(viewport),
-            cache_key=f"picker:{start}:{end}:{self.picker_idx}:{total}",
+            text = escape(self.picker_line_payloads[i])
+            if i == self.picker_idx:
+                rows.append(f"[bold #0d1117 on #58a6ff] \u25b8 {text} [/]")
+            else:
+                rows.append(f"  [#8b949e]{text}[/]")
+        self._set_body(
+            "\n".join(rows),
+            cache_key=f"p:{start}:{end}:{self.picker_idx}:{total}",
         )
         self.query_one("#status", Static).update(
-            Text.assemble(
-                ("dataset_dir: ", "dim"),
-                (str(self.dataset_dir), "cyan"),
-                (" | showing ", "dim"),
-                (f"{start + 1}-{end}/{total}", "bold"),
-            )
+            f"[#6e7681]Dir[/] [#58a6ff]{escape(str(self.dataset_dir))}[/]"
+            f"{_SEP}"
+            f"[bold #c9d1d9]{start + 1}\u2013{end}[/]"
+            f"[#484f58]/[/]"
+            f"[#8b949e]{total}[/]"
         )
+
+    def _picker_header(self) -> str:
+        return (
+            "[bold #e6edf3]Trajectory Viewer[/]"
+            f"{_SEP}"
+            "[#58a6ff]Select File[/]"
+            f"{_SEP}"
+            f"[bold #3fb950]{self.picker_idx + 1}/{len(self.picker_files)}[/]"
+        )
+
+    def _picker_help(self) -> str:
+        w = max(40, self.size.width)
+        if w < 100:
+            return (
+                _key_hint("j/k", "move") + "  "
+                + _key_hint("g/G", "ends") + "  "
+                + _key_hint("Enter", "open") + "  "
+                + _key_hint("q", "cancel")
+            )
+        return (
+            _key_hint("j/\u2193", "next") + "   "
+            + _key_hint("k/\u2191", "prev") + "   "
+            + _key_hint("g", "first") + "   "
+            + _key_hint("G", "last") + "   "
+            + _key_hint("Enter", "select") + "   "
+            + _key_hint("q", "cancel")
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
 
 
 def run(
