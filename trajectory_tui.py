@@ -59,104 +59,12 @@ BLOCK_COLORS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Plain-text rendering (test-facing interface — do not change output format)
+# Shared utilities
 # ---------------------------------------------------------------------------
 
 
-def _append_lines(lines: list[str], content: str, indent: int) -> None:
-    pad = " " * indent
-    for line in content.splitlines():
-        lines.append(f"{pad}{line}")
-
-
-def append_content_blocks(lines: list[str], content: Any, indent: int = 0) -> None:
-    """Append formatted content blocks."""
-    blocks = parse_content_blocks(content)
-    pad = " " * indent
-    for block in blocks:
-        block = normalize_value(block)
-        if isinstance(block, str):
-            lines.append(f"{pad}[Text]")
-            _append_lines(lines, block, indent)
-            continue
-        if not isinstance(block, dict):
-            lines.append(f"{pad}[Content]")
-            lines.append(f"{pad}{preview_value(block)}")
-            continue
-
-        block_type = block.get("type", "")
-        if block_type == "text":
-            lines.append(f"{pad}[Text]")
-            _append_lines(lines, str(block.get("text", "")), indent)
-        elif block_type == "thinking":
-            lines.append(f"{pad}[Thinking]")
-            _append_lines(lines, str(block.get("thinking", "")), indent)
-        elif block_type == "tool_use":
-            name = str(block.get("name", "unknown"))
-            lines.append(f"{pad}[Tool Call: {name}]")
-            for line in render_arg_fields(block.get("input", {})):
-                lines.append(f"{pad}  {line}")
-        elif block_type == "tool_result":
-            tool_use_id = block.get("tool_use_id")
-            is_error = bool(block.get("is_error"))
-            if tool_use_id:
-                label = f"[Tool Result: {tool_use_id}]"
-            else:
-                label = "[Tool Result]"
-            if is_error:
-                label = label[:-1] + " ERROR]"
-            lines.append(f"{pad}{label}")
-            for line in render_fields(block.get("content", "")):
-                lines.append(f"{pad}  {line}")
-        else:
-            lines.append(f"{pad}[{block_type or 'Content'}]")
-            for line in render_fields(block):
-                lines.append(f"{pad}  {line}")
-
-
-def append_tool_calls(lines: list[str], tool_calls: Any, indent: int = 0) -> None:
-    normalized = normalize_tool_calls(tool_calls)
-    if not normalized:
-        return
-    pad = " " * indent
-    for call in normalized:
-        if isinstance(call, dict):
-            fn = call.get("function", {})
-            if isinstance(fn, dict):
-                name = fn.get("name", "unknown")
-                args = fn.get("arguments", {})
-            else:
-                name = "unknown"
-                args = {}
-            lines.append(f"{pad}[Tool Call: {name}]")
-            for line in render_arg_fields(args):
-                lines.append(f"{pad}  {line}")
-        else:
-            lines.append(f"{pad}[Tool Call]")
-            lines.append(f"{pad}  {preview_value(call)}")
-
-
-def append_message(
-    lines: list[str], message: Message | Any, index: int, indent: int = 0
-) -> None:
-    message = normalize_value(message)
-    pad = " " * indent
-    if not isinstance(message, dict):
-        lines.append(f"{pad}{index}. {message}")
-        return
-
-    role = str(message.get("role", "unknown")).upper()
-    lines.append(f"{pad}{index}. [{role}]")
-    body_indent = indent + 2
-    content = message.get("content", "")
-    if content:
-        append_content_blocks(lines, content, indent=body_indent)
-    tool_calls = message.get("tool_calls")
-    if tool_calls:
-        append_tool_calls(lines, tool_calls, indent=body_indent)
-
-
 def render_fields(obj: Any) -> list[str]:
+    """Render an object as key-value lines (used by Rich pipeline fallback)."""
     obj = normalize_value(obj)
     if isinstance(obj, dict):
         return [f"{key}: {preview_value(value)}" for key, value in obj.items()]
@@ -168,21 +76,6 @@ def render_fields(obj: Any) -> list[str]:
 def parse_json_if_string(value: Any) -> Any:
     parsed = recursive_json_parse(value)
     return normalize_value(parsed)
-
-
-def render_arg_fields(args: Any) -> list[str]:
-    args = parse_json_if_string(normalize_value(args))
-    if isinstance(args, dict):
-        lines: list[str] = []
-        for key, value in args.items():
-            rendered = (
-                value
-                if isinstance(value, str)
-                else json.dumps(value, ensure_ascii=True)
-            )
-            lines.append(f"{key}: {rendered}")
-        return lines
-    return render_fields(args)
 
 
 def get_messages_from_row(row: dict[str, Any]) -> Conversation:
@@ -213,85 +106,6 @@ def preview_value(value: Any) -> str:
     if isinstance(value, (dict, list, bool, int, float)):
         return clean_message(value, truncate_length=None)
     return str(value)
-
-
-def render_roleplay_lines(row: dict[str, Any]) -> list[str]:
-    lines: list[str] = []
-    lines.append("== Episode ==")
-    lines.append(f"game_setting: {row.get('game_setting', '')}")
-    lines.append(f"player_character: {row.get('player_character', '')}")
-    lines.append(f"step_count: {row.get('step_count', '')}")
-    lines.append("")
-
-    metadata = normalize_value(row.get("metadata"))
-    if isinstance(metadata, dict) and metadata:
-        lines.append("== Metadata ==")
-        for key, value in metadata.items():
-            lines.append(f"{key}: {preview_value(value)}")
-        lines.append("")
-
-    metrics = normalize_value(row.get("metrics"))
-    if isinstance(metrics, dict) and metrics:
-        lines.append("== Metrics ==")
-        for key, value in metrics.items():
-            lines.append(f"{key}: {value}")
-        lines.append("")
-
-    actions = normalize_value(row.get("actions")) or []
-    if not isinstance(actions, list):
-        actions = [actions]
-    lines.append("== Actions ==")
-    for i, action in enumerate(actions, start=1):
-        if not isinstance(action, dict):
-            lines.append(f"{i}. {action}")
-            lines.append("")
-            continue
-
-        role = str(action.get("role", "unknown")).upper()
-        lines.append(f"{i}. [{role}]")
-
-        action_messages = normalize_value(action.get("messages")) or []
-        if not isinstance(action_messages, list):
-            action_messages = [action_messages]
-
-        if action_messages:
-            for j, message in enumerate(action_messages, start=1):
-                append_message(lines, message, j, indent=2)
-        else:
-            lines.append("  No messages")
-        lines.append("")
-
-    return lines
-
-
-def render_conversation_lines(row: dict[str, Any]) -> list[str]:
-    messages: Conversation = get_messages_from_row(row)
-    lines: list[str] = ["== Conversation =="]
-    for i, message in enumerate(messages, start=1):
-        append_message(lines, message, i)
-        lines.append("")
-    if not messages:
-        lines.append("No conversation messages detected.")
-    return lines
-
-
-def render_generic_lines(row: dict[str, Any]) -> list[str]:
-    lines: list[str] = ["== Row Fields =="]
-    for key, value in row.items():
-        lines.append(f"{key}: {preview_value(value)}")
-    return lines
-
-
-def render_row_text(row: dict[str, Any]) -> str:
-    row_type = detect_row_type(row)
-    if row_type == "roleplay":
-        body_lines = render_roleplay_lines(row)
-    elif row_type == "conversation":
-        body_lines = render_conversation_lines(row)
-    else:
-        body_lines = render_generic_lines(row)
-
-    return "\n".join(body_lines) if body_lines else ""
 
 
 # ---------------------------------------------------------------------------

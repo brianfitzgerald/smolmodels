@@ -7,10 +7,14 @@ Also tests that the trajectory TUI renders the resulting data correctly.
 
 import json
 from collections import deque
+from io import StringIO
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from rich.console import Console
 
+from scripts.trajectory_formatting import normalize_value
 from synthetic_data.generation_utils import (
     GenerationArgs,
     GenerationResult,
@@ -28,9 +32,26 @@ from synthetic_data.utils import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from trajectory_tui import render_roleplay_lines
+from trajectory_tui import render_row_rich
 
 NUM_STEPS = 5
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _render_to_text(row: dict[str, Any]) -> str:
+    """Render a trajectory row through the Rich pipeline and extract plain text."""
+    normalized = {k: normalize_value(v) for k, v in row.items()}
+    renderables = render_row_rich(normalized)
+    console = Console(file=StringIO(), width=200, no_color=True)
+    for r in renderables:
+        console.print(r)
+    output = console.file.getvalue()
+    assert isinstance(output, str)
+    return output
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +311,7 @@ async def test_five_turn_conversation_with_tool_calls_and_thinking():
                 if block.get("type") == "thinking":
                     all_thinking.append(block["thinking"])
 
-    # 5 DM actions × 2 thinking blocks + 4 player actions × 1 = 14
+    # 5 DM actions * 2 thinking blocks + 4 player actions * 1 = 14
     assert len(all_thinking) == 14
 
     # -- metrics ---------------------------------------------------------------
@@ -329,7 +350,7 @@ async def test_format_conversation_flattens_tool_blocks_to_text():
 
 
 # ---------------------------------------------------------------------------
-# TUI rendering tests
+# TUI rendering tests (Rich pipeline)
 # ---------------------------------------------------------------------------
 
 # Full 9-action trajectory (5 DM + 4 player) exercising all DM tools
@@ -345,24 +366,40 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Time to set the opening scene with a perception roll."},
-                    {"type": "tool_use", "id": "tu_0", "name": "roll_dice",
-                     "input": {"notation": "1d20", "reason": "perception check"}},
+                    {
+                        "type": "thinking",
+                        "thinking": "Time to set the opening scene with a perception roll.",
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tu_0",
+                        "name": "roll_dice",
+                        "input": {"notation": "1d20", "reason": "perception check"},
+                    },
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu_0",
-                     "content": '{"notation":"1d20","reason":"perception check","rolls":[17],"modifier":0,"total":17}',
-                     "is_error": False}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_0",
+                        "content": '{"notation":"1d20","reason":"perception check","rolls":[17],"modifier":0,"total":17}',
+                        "is_error": False,
+                    }
                 ],
             },
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "A 17 — the warrior notices the faint glow."},
-                    {"type": "text", "text": "Your eyes adjust to the gloom. Ancient runes pulse with a faint blue light along the catacomb walls, casting long shadows that dance with each flicker."},
+                    {
+                        "type": "thinking",
+                        "thinking": "A 17 — the warrior notices the faint glow.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "Your eyes adjust to the gloom. Ancient runes pulse with a faint blue light along the catacomb walls, casting long shadows that dance with each flicker.",
+                    },
                 ],
             },
         ],
@@ -374,8 +411,14 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Those runes could be warding magic. I should be cautious."},
-                    {"type": "text", "text": "I raise my shield and approach the nearest cluster of runes, scanning for trip wires."},
+                    {
+                        "type": "thinking",
+                        "thinking": "Those runes could be warding magic. I should be cautious.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "I raise my shield and approach the nearest cluster of runes, scanning for trip wires.",
+                    },
                 ],
             }
         ],
@@ -387,24 +430,47 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Let's determine what lurks around the corner."},
-                    {"type": "tool_use", "id": "tu_1", "name": "random_choice",
-                     "input": {"options": ["skeletal archer", "spectral hound", "cave spider swarm"], "reason": "wandering encounter"}},
+                    {
+                        "type": "thinking",
+                        "thinking": "Let's determine what lurks around the corner.",
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tu_1",
+                        "name": "random_choice",
+                        "input": {
+                            "options": [
+                                "skeletal archer",
+                                "spectral hound",
+                                "cave spider swarm",
+                            ],
+                            "reason": "wandering encounter",
+                        },
+                    },
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu_1",
-                     "content": '{"reason":"wandering encounter","options":["skeletal archer","spectral hound","cave spider swarm"],"chosen":"spectral hound","index":1}',
-                     "is_error": False}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_1",
+                        "content": '{"reason":"wandering encounter","options":["skeletal archer","spectral hound","cave spider swarm"],"chosen":"spectral hound","index":1}',
+                        "is_error": False,
+                    }
                 ],
             },
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "A spectral hound — eerie and fast."},
-                    {"type": "text", "text": "A translucent hound materialises from the mist ahead, its hollow eyes locking onto you with predatory intent. A low, resonant growl reverberates off the stone."},
+                    {
+                        "type": "thinking",
+                        "thinking": "A spectral hound — eerie and fast.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "A translucent hound materialises from the mist ahead, its hollow eyes locking onto you with predatory intent. A low, resonant growl reverberates off the stone.",
+                    },
                 ],
             },
         ],
@@ -416,8 +482,14 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Spectral — my sword might pass right through it. I need a plan."},
-                    {"type": "text", "text": "I grab a handful of grave dust from the floor and hurl it at the hound while shouting a challenge."},
+                    {
+                        "type": "thinking",
+                        "thinking": "Spectral — my sword might pass right through it. I need a plan.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "I grab a handful of grave dust from the floor and hurl it at the hound while shouting a challenge.",
+                    },
                 ],
             }
         ],
@@ -429,24 +501,40 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "The spirit reacts to the grave dust — let's see if it intimidates."},
-                    {"type": "tool_use", "id": "tu_2", "name": "roll_dice",
-                     "input": {"notation": "1d20", "reason": "intimidation check"}},
+                    {
+                        "type": "thinking",
+                        "thinking": "The spirit reacts to the grave dust — let's see if it intimidates.",
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tu_2",
+                        "name": "roll_dice",
+                        "input": {"notation": "1d20", "reason": "intimidation check"},
+                    },
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu_2",
-                     "content": '{"notation":"1d20","reason":"intimidation check","rolls":[8],"modifier":0,"total":8}',
-                     "is_error": False}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_2",
+                        "content": '{"notation":"1d20","reason":"intimidation check","rolls":[8],"modifier":0,"total":8}',
+                        "is_error": False,
+                    }
                 ],
             },
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "An 8 — not enough. The hound barely flinches."},
-                    {"type": "text", "text": "The grave dust swirls around the hound but it barely flinches, jaw dropping open to growl: 'You carry the scent of the living… leave, or join the dead.'"},
+                    {
+                        "type": "thinking",
+                        "thinking": "An 8 — not enough. The hound barely flinches.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "The grave dust swirls around the hound but it barely flinches, jaw dropping open to growl: 'You carry the scent of the living… leave, or join the dead.'",
+                    },
                 ],
             },
         ],
@@ -458,8 +546,14 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "It can speak! Maybe I can negotiate instead of fight."},
-                    {"type": "text", "text": "I lower my shield slightly and reply: 'I seek the Ember Crown. I mean no trespass.'"},
+                    {
+                        "type": "thinking",
+                        "thinking": "It can speak! Maybe I can negotiate instead of fight.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "I lower my shield slightly and reply: 'I seek the Ember Crown. I mean no trespass.'",
+                    },
                 ],
             }
         ],
@@ -471,24 +565,40 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Diplomacy check — but let's use bad notation to exercise the error path."},
-                    {"type": "tool_use", "id": "tu_3", "name": "roll_dice",
-                     "input": {"notation": "xd??", "reason": "diplomacy check"}},
+                    {
+                        "type": "thinking",
+                        "thinking": "Diplomacy check — but let's use bad notation to exercise the error path.",
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tu_3",
+                        "name": "roll_dice",
+                        "input": {"notation": "xd??", "reason": "diplomacy check"},
+                    },
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu_3",
-                     "content": "Invalid dice notation: xd??",
-                     "is_error": True}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_3",
+                        "content": "Invalid dice notation: xd??",
+                        "is_error": True,
+                    }
                 ],
             },
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Tool errored — narrate without a concrete roll."},
-                    {"type": "text", "text": "The hound tilts its head, considering. The air crackles with indecision — your words hang between you like a fragile thread."},
+                    {
+                        "type": "thinking",
+                        "thinking": "Tool errored — narrate without a concrete roll.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "The hound tilts its head, considering. The air crackles with indecision — your words hang between you like a fragile thread.",
+                    },
                 ],
             },
         ],
@@ -500,8 +610,14 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "It hasn't attacked yet — I'll press the advantage."},
-                    {"type": "text", "text": "I kneel slowly and place my torch on the ground as a sign of respect."},
+                    {
+                        "type": "thinking",
+                        "thinking": "It hasn't attacked yet — I'll press the advantage.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "I kneel slowly and place my torch on the ground as a sign of respect.",
+                    },
                 ],
             }
         ],
@@ -513,24 +629,40 @@ _TRAJECTORY_ACTIONS: list[dict] = [
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Final check — 2d6+3 for the hound's reaction."},
-                    {"type": "tool_use", "id": "tu_4", "name": "roll_dice",
-                     "input": {"notation": "2d6+3", "reason": "hound reaction"}},
+                    {
+                        "type": "thinking",
+                        "thinking": "Final check — 2d6+3 for the hound's reaction.",
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tu_4",
+                        "name": "roll_dice",
+                        "input": {"notation": "2d6+3", "reason": "hound reaction"},
+                    },
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "tool_result", "tool_use_id": "tu_4",
-                     "content": '{"notation":"2d6+3","reason":"hound reaction","rolls":[6,5],"modifier":3,"total":14}',
-                     "is_error": False}
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_4",
+                        "content": '{"notation":"2d6+3","reason":"hound reaction","rolls":[6,5],"modifier":3,"total":14}',
+                        "is_error": False,
+                    }
                 ],
             },
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "14 is well above the threshold — the hound lets the warrior pass."},
-                    {"type": "text", "text": "The spectral hound dips its great head and steps aside, revealing a hidden passage behind the waterfall of mist. The Ember Crown awaits beyond."},
+                    {
+                        "type": "thinking",
+                        "thinking": "14 is well above the threshold — the hound lets the warrior pass.",
+                    },
+                    {
+                        "type": "text",
+                        "text": "The spectral hound dips its great head and steps aside, revealing a hidden passage behind the waterfall of mist. The Ember Crown awaits beyond.",
+                    },
                 ],
             },
         ],
@@ -568,16 +700,13 @@ def _build_full_trajectory_row() -> dict:
     }
 
 
-def _render_roleplay_to_text(row: dict) -> str:
-    return "\n".join(render_roleplay_lines(row))
-
-
 def test_tui_renders_full_trajectory():
-    """Render the full 9-action trajectory and verify every piece of content
-    appears: episode info, metadata, metrics, all action roles, every
-    thinking/text/tool_use/tool_result block, and no raw JSON leakage."""
+    """Render the full 9-action trajectory through the Rich pipeline and verify
+    every piece of content appears: episode info, metadata, metrics, all action
+    roles, every thinking/text/tool_use/tool_result block, and no raw JSON
+    leakage."""
     row = _build_full_trajectory_row()
-    text = _render_roleplay_to_text(row)
+    text = _render_to_text(row)
 
     # -- Episode panel ---------------------------------------------------------
     assert "Moonlit Catacombs beneath the Ashen Keep" in text
@@ -593,7 +722,7 @@ def test_tui_renders_full_trajectory():
     assert "turn_count" in text
     assert "dm_tool_use_blocks" in text
 
-    # -- Action role headers (5 DM + 4 player) --------------------------------
+    # -- Action role badges (5 DM + 4 player) ---------------------------------
     assert text.count("DUNGEON_MASTER") == 5
     assert text.count("PLAYER") == 4
 
@@ -601,17 +730,17 @@ def test_tui_renders_full_trajectory():
     assert "ASSISTANT" in text
     assert "USER" in text
 
-    # -- Thinking blocks: 5 DM × 2 + 4 player × 1 = 14 -----------------------
-    assert text.count("[Thinking]") == 14
+    # -- Thinking blocks: 5 DM * 2 + 4 player * 1 = 14 -----------------------
+    assert text.count("\u25b8 THINKING") == 14
     # Spot-check a few thinking contents
     assert "Time to set the opening scene" in text
     assert "A 17" in text
-    assert "Spectral — my sword might pass" in text
+    assert "Spectral \u2014 my sword might pass" in text
     assert "Tool errored" in text
     assert "14 is well above the threshold" in text
 
     # -- Text blocks: 5 DM narrations + 4 player actions = 9 ------------------
-    assert text.count("[Text]") == 9
+    assert text.count("\u25b8 TEXT") == 9
     assert "Ancient runes pulse with a faint blue light" in text
     assert "translucent hound materialises from the mist" in text
     assert "grave dust swirls around the hound but it barely flinches" in text
@@ -622,10 +751,10 @@ def test_tui_renders_full_trajectory():
     assert "I seek the Ember Crown" in text
     assert "place my torch on the ground" in text
 
-    # -- Tool use blocks: roll_dice ×4, random_choice ×1 = 5 -------------------
-    assert text.count("[Tool Call:") == 5
-    assert "Tool Call: roll_dice" in text
-    assert "Tool Call: random_choice" in text
+    # -- Tool use blocks: roll_dice *4, random_choice *1 = 5 -------------------
+    assert text.count("\u25b8 TOOL CALL") == 5
+    assert "roll_dice" in text
+    assert "random_choice" in text
     # Tool arguments rendered
     assert "1d20" in text
     assert "2d6+3" in text
@@ -637,7 +766,7 @@ def test_tui_renders_full_trajectory():
     assert "cave spider swarm" in text
 
     # -- Tool result blocks: 5 total (including 1 error) -----------------------
-    assert text.count("[Tool Result") == 5
+    assert text.count("\u25b8 TOOL RESULT") == 5
     assert "total" in text and "17" in text  # first roll
     assert "chosen" in text  # random_choice result
     assert "Invalid dice notation" in text  # error result
@@ -653,7 +782,7 @@ def test_tui_renders_full_trajectory():
 @pytest.mark.asyncio
 async def test_tui_generation_to_render_roundtrip():
     """Run the mock generation pipeline, format the episode, then render it
-    through the TUI — verifying the full producer-to-viewer chain."""
+    through the Rich pipeline — verifying the full producer-to-viewer chain."""
     task, _, _, _ = _build_task_and_mocks()
 
     sample = {"game_setting": "dungeon", "seed": 42}
@@ -662,7 +791,7 @@ async def test_tui_generation_to_render_roundtrip():
         episode, _ = await task.step(episode)
 
     row = task.format_episode(episode)
-    text = _render_roleplay_to_text(row)
+    text = _render_to_text(row)
 
     # Episode info from initial_step
     assert "Dark Dungeon" in text
@@ -676,7 +805,7 @@ async def test_tui_generation_to_render_roundtrip():
     for action in PLAYER_ACTIONS:
         assert action in text
 
-    # All DM thinking blocks rendered (pre-roll + post-roll × 5 = 10)
+    # All DM thinking blocks rendered (pre-roll + post-roll * 5 = 10)
     for turn in range(NUM_STEPS):
         assert f"DM thinking before roll for turn {turn}" in text
         assert f"DM thinking after roll for turn {turn}" in text
@@ -688,10 +817,10 @@ async def test_tui_generation_to_render_roundtrip():
     # Structure counts: 5 DM + 4 player actions, 5 roll_dice calls
     assert text.count("DUNGEON_MASTER") == 5
     assert text.count("PLAYER") == 4
-    assert text.count("Tool Call: roll_dice") == 5
-    assert text.count("[Tool Result") == 5
-    assert text.count("[Thinking]") == 14
-    assert text.count("[Text]") == 9
+    assert text.count("roll_dice") == 5
+    assert text.count("\u25b8 TOOL RESULT") == 5
+    assert text.count("\u25b8 THINKING") == 14
+    assert text.count("\u25b8 TEXT") == 9
 
     # No raw JSON
     assert '"type":' not in text
