@@ -123,7 +123,9 @@ def _kv_table(pairs: list[tuple[str, str]]) -> Table:
     return t
 
 
-def render_content_block_rich(block: Any) -> list[Any]:
+def render_content_block_rich(
+    block: Any, *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a single content block to a list of Rich renderables."""
     block = normalize_value(block)
     parts: list[Any] = []
@@ -145,10 +147,21 @@ def render_content_block_rich(block: Any) -> list[Any]:
         parts.append(Text(str(block.get("text", "")), style="#c9d1d9"))
 
     elif block_type == "thinking":
-        parts.append(
-            Text("\u25b8 THINKING", style=f"bold italic {BLOCK_COLORS['Thinking']}")
-        )
-        parts.append(Text(str(block.get("thinking", "")), style="italic #6e7681"))
+        if collapse_thinking:
+            parts.append(
+                Text(
+                    "\u25b8 THINKING \u2026",
+                    style=f"bold italic {BLOCK_COLORS['Thinking']}",
+                )
+            )
+        else:
+            parts.append(
+                Text(
+                    "\u25b8 THINKING",
+                    style=f"bold italic {BLOCK_COLORS['Thinking']}",
+                )
+            )
+            parts.append(Text(str(block.get("thinking", "")), style="italic #6e7681"))
 
     elif block_type == "tool_use":
         name = str(block.get("name", "unknown"))
@@ -248,7 +261,9 @@ def render_tool_calls_rich(tool_calls: Any) -> list[Any]:
     return parts
 
 
-def render_message_rich(message: Message | Any, index: int) -> list[Any]:
+def render_message_rich(
+    message: Message | Any, index: int, *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a single message to a list of Rich renderables."""
     message = normalize_value(message)
     parts: list[Any] = []
@@ -269,7 +284,9 @@ def render_message_rich(message: Message | Any, index: int) -> list[Any]:
     if content:
         blocks = parse_content_blocks(content)
         for block in blocks:
-            for r in render_content_block_rich(block):
+            for r in render_content_block_rich(
+                block, collapse_thinking=collapse_thinking
+            ):
                 parts.append(Padding(r, (0, 0, 0, 4)))
 
     tool_calls = message.get("tool_calls")
@@ -280,7 +297,9 @@ def render_message_rich(message: Message | Any, index: int) -> list[Any]:
     return parts
 
 
-def render_action_rich(action: Any, index: int) -> list[Any]:
+def render_action_rich(
+    action: Any, index: int, *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a single action (with role badge and messages) to Rich renderables."""
     parts: list[Any] = []
 
@@ -303,7 +322,7 @@ def render_action_rich(action: Any, index: int) -> list[Any]:
 
     if action_messages:
         for j, msg in enumerate(action_messages, start=1):
-            for r in render_message_rich(msg, j):
+            for r in render_message_rich(msg, j, collapse_thinking=collapse_thinking):
                 parts.append(Padding(r, (0, 0, 0, 2)))
     else:
         parts.append(Padding(Text("No messages", style="#6e7681"), (0, 0, 0, 2)))
@@ -355,7 +374,9 @@ def render_metrics_section(row: dict[str, Any]) -> Panel | None:
     )
 
 
-def render_roleplay_rich(row: dict[str, Any]) -> list[Any]:
+def render_roleplay_rich(
+    row: dict[str, Any], *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a roleplay row to a list of Rich renderables."""
     parts: list[Any] = []
 
@@ -379,12 +400,14 @@ def render_roleplay_rich(row: dict[str, Any]) -> list[Any]:
     if not isinstance(actions, list):
         actions = [actions]
     for i, action in enumerate(actions, start=1):
-        parts.extend(render_action_rich(action, i))
+        parts.extend(render_action_rich(action, i, collapse_thinking=collapse_thinking))
 
     return parts
 
 
-def render_conversation_rich(row: dict[str, Any]) -> list[Any]:
+def render_conversation_rich(
+    row: dict[str, Any], *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a conversation row to Rich renderables."""
     messages: Conversation = get_messages_from_row(row)
     parts: list[Any] = []
@@ -394,7 +417,9 @@ def render_conversation_rich(row: dict[str, Any]) -> list[Any]:
         parts.append(Text("No conversation messages detected.", style="#6e7681"))
         return parts
     for i, message in enumerate(messages, start=1):
-        parts.extend(render_message_rich(message, i))
+        parts.extend(
+            render_message_rich(message, i, collapse_thinking=collapse_thinking)
+        )
         parts.append(Text(""))
     return parts
 
@@ -412,13 +437,15 @@ def render_generic_rich(row: dict[str, Any]) -> list[Any]:
     ]
 
 
-def render_row_rich(row: dict[str, Any]) -> list[Any]:
+def render_row_rich(
+    row: dict[str, Any], *, collapse_thinking: bool = False
+) -> list[Any]:
     """Render a row to a list of Rich renderables based on its type."""
     row_type = detect_row_type(row)
     if row_type == "roleplay":
-        return render_roleplay_rich(row)
+        return render_roleplay_rich(row, collapse_thinking=collapse_thinking)
     elif row_type == "conversation":
-        return render_conversation_rich(row)
+        return render_conversation_rich(row, collapse_thinking=collapse_thinking)
     else:
         return render_generic_rich(row)
 
@@ -539,7 +566,7 @@ class PickerScreen(Screen):
         Binding("j", "cursor_down", "Next", show=False),
         Binding("k", "cursor_up", "Prev", show=False),
         Binding("g", "first", "First", show=True),
-        Binding("shift+g", "last", "Last", show=True),
+        Binding("G", "last", "Last", show=True),
         Binding("enter", "select_file", "Select", show=True),
         Binding("q", "cancel", "Cancel", show=True),
         Binding("escape", "cancel", "Cancel", show=False),
@@ -641,20 +668,18 @@ class ViewerScreen(Screen):
     """Trajectory viewer screen using RichLog."""
 
     BINDINGS = [
-        Binding("j", "scroll_down", "Scroll Down", show=False),
-        Binding("k", "scroll_up", "Scroll Up", show=False),
-        Binding("down", "scroll_down", "Scroll Down", show=False),
-        Binding("up", "scroll_up", "Scroll Up", show=False),
+        Binding("j", "scroll_line_down", "Scroll Down", show=False),
+        Binding("k", "scroll_line_up", "Scroll Up", show=False),
+        Binding("down", "scroll_quarter_down", "Page Down", show=False),
+        Binding("up", "scroll_quarter_up", "Page Up", show=False),
         Binding("n", "next_row", "Next Row", show=True),
-        Binding("shift+n", "prev_row", "Prev Row", show=True),
+        Binding("N", "prev_row", "Prev Row", show=True),
         Binding("g", "first_row", "First Row", show=True),
-        Binding("shift+g", "last_row", "Last Row", show=True),
+        Binding("G", "last_row", "Last Row", show=True),
+        Binding("t", "toggle_thinking", "Toggle Thinking", show=True),
         Binding("o", "open_picker", "Open File", show=True),
         Binding("q", "quit_app", "Quit", show=True),
     ]
-
-    def __init__(self) -> None:
-        super().__init__()
 
     def compose(self) -> ComposeResult:
         yield Static("", id="viewer-header", markup=True)
@@ -675,12 +700,13 @@ class ViewerScreen(Screen):
             return
         row = {k: normalize_value(v) for k, v in app.rows[app.idx].items()}
         row_type = detect_row_type(row)
-        renderables = render_row_rich(row)
+        renderables = render_row_rich(row, collapse_thinking=app.collapse_thinking)
 
         body = self.query_one("#viewer-body", RichLog)
         body.clear()
         for r in renderables:
             body.write(r)
+        body.scroll_home(animate=False)
 
         self._update_header(row_type)
         self._update_status()
@@ -708,13 +734,28 @@ class ViewerScreen(Screen):
             f"[#8b949e]{len(app.rows)}[/]"
         )
 
-    def action_scroll_down(self) -> None:
+    def action_scroll_line_down(self) -> None:
         body = self.query_one("#viewer-body", RichLog)
         body.scroll_down(animate=False)
 
-    def action_scroll_up(self) -> None:
+    def action_scroll_line_up(self) -> None:
         body = self.query_one("#viewer-body", RichLog)
         body.scroll_up(animate=False)
+
+    def action_scroll_quarter_down(self) -> None:
+        body = self.query_one("#viewer-body", RichLog)
+        step = max(1, body.size.height // 4)
+        body.scroll_relative(y=step, animate=False)
+
+    def action_scroll_quarter_up(self) -> None:
+        body = self.query_one("#viewer-body", RichLog)
+        step = max(1, body.size.height // 4)
+        body.scroll_relative(y=-step, animate=False)
+
+    def action_toggle_thinking(self) -> None:
+        app = self.app_state
+        app.collapse_thinking = not app.collapse_thinking
+        self.render_current_row()
 
     def action_next_row(self) -> None:
         app = self.app_state
@@ -784,6 +825,7 @@ class TrajectoryTuiApp(App):
         self.path = initial_path
         self.rows: list[dict[str, Any]] = []
         self.idx = 0
+        self.collapse_thinking = False
         self.start_with_picker = start_with_picker
 
     def on_mount(self) -> None:
