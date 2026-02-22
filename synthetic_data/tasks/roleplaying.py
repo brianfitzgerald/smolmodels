@@ -37,12 +37,12 @@ TIMEOUT_BUFFER_S = 10.0
 # Each step produces 2 actions (player + DM), so 8 actions = last 4 turns.
 MAX_CONTEXT_ACTIONS = 8
 TURN_MAX_TOKENS_BY_ROLE: dict[str, int] = {
-    "dungeon_master": 16000,
-    "player": 8000,
+    "dungeon_master": 4000,
+    "player": 2000,
 }
 THINKING_BUDGET_BY_ROLE: dict[str, int] = {
-    "dungeon_master": 10000,
-    "player": 4000,
+    "dungeon_master": 2048,
+    "player": 1024,
 }
 GAME_SETTINGS = [
     "forest",

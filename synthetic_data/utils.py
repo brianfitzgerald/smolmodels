@@ -19,9 +19,11 @@ class TextBlock(TypedDict):
     text: str
 
 
-class ThinkingBlock(TypedDict):
+class ThinkingBlock(TypedDict, total=False):
     type: Literal["thinking"]
     thinking: str
+    # Signature returned by the API; required when replaying thinking blocks.
+    signature: str
 
 
 class ToolUseBlock(TypedDict):

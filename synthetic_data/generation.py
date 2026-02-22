@@ -724,6 +724,11 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                             request_kwargs["tools"] = tools_param
                         if tool_choice_param is not None:
                             request_kwargs["tool_choice"] = tool_choice_param
+                        logger.debug(
+                            f"Anthropic request: thinking={'thinking' in request_kwargs}, "
+                            f"forced_tool={forced_tool}, tool_choice={tool_choice_param}, "
+                            f"tool_iter={tool_iterations}"
+                        )
                         async with self._concurrency_limiter:
                             response: AnthropicMessage = await asyncio.wait_for(
                                 self.client.messages.create(**request_kwargs),
@@ -753,11 +758,20 @@ class AnthropicGenerationWrapper(GenerationWrapper):
                                 self._rate_limiter.update(usage_tokens)
 
                         assistant_blocks: list[ContentBlock] = []
+                        response_block_types = [b.type for b in response.content]
+                        logger.debug(
+                            f"Response block types: {response_block_types}, "
+                            f"stop_reason={response.stop_reason}"
+                        )
                         for block in response.content:
                             if block.type == "thinking":
-                                assistant_blocks.append(
-                                    {"type": "thinking", "thinking": block.thinking}
-                                )
+                                thinking_block: dict = {
+                                    "type": "thinking",
+                                    "thinking": block.thinking,
+                                }
+                                if hasattr(block, "signature") and block.signature:
+                                    thinking_block["signature"] = block.signature
+                                assistant_blocks.append(thinking_block)
                             elif block.type == "text":
                                 assistant_blocks.append(
                                     {"type": "text", "text": block.text}
