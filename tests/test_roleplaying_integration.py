@@ -10,7 +10,6 @@ from collections import deque
 from unittest.mock import patch
 
 import pytest
-from rich.console import Console
 
 from synthetic_data.generation_utils import (
     GenerationArgs,
@@ -29,7 +28,7 @@ from synthetic_data.utils import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from trajectory_tui import render_roleplay
+from trajectory_tui import render_roleplay_lines
 
 NUM_STEPS = 5
 
@@ -569,11 +568,8 @@ def _build_full_trajectory_row() -> dict:
     }
 
 
-def _render_panels_to_text(panels: list, width: int = 140) -> str:
-    console = Console(width=width, record=True, force_terminal=True)
-    for panel in panels:
-        console.print(panel)
-    return console.export_text()
+def _render_roleplay_to_text(row: dict) -> str:
+    return "\n".join(render_roleplay_lines(row))
 
 
 def test_tui_renders_full_trajectory():
@@ -581,7 +577,7 @@ def test_tui_renders_full_trajectory():
     appears: episode info, metadata, metrics, all action roles, every
     thinking/text/tool_use/tool_result block, and no raw JSON leakage."""
     row = _build_full_trajectory_row()
-    text = _render_panels_to_text(render_roleplay(row))
+    text = _render_roleplay_to_text(row)
 
     # -- Episode panel ---------------------------------------------------------
     assert "Moonlit Catacombs beneath the Ashen Keep" in text
@@ -666,7 +662,7 @@ async def test_tui_generation_to_render_roundtrip():
         episode, _ = await task.step(episode)
 
     row = task.format_episode(episode)
-    text = _render_panels_to_text(render_roleplay(row))
+    text = _render_roleplay_to_text(row)
 
     # Episode info from initial_step
     assert "Dark Dungeon" in text
